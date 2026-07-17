@@ -1,0 +1,21 @@
+node_modules/
+dist/
+build/
+*.log
+.env
+.env.*
+!.env.example
+
+# data files are test fixtures the trader drops in locally, not committed
+data/*
+!data/README.md
+
+coverage/
+.DS_Store
+Thumbs.db
+
+.agents
+.claude
+skills-lock.json
+README.md
+docs

@@ -1,0 +1,2 @@
+# Placeholder — Python training pipeline chưa setup ở sprint này.
+# Không chạy trong bot live (Node.js/TypeScript). Sẽ điền dependency khi bắt đầu Tầng XGBoost.

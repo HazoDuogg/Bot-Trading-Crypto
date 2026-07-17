@@ -1,0 +1,16 @@
+{
+  "name": "vicion-bot",
+  "private": true,
+  "version": "0.0.1",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "workspaces": [
+    "apps/bot"
+  ],
+  "scripts": {
+    "test": "npm test --workspace apps/bot",
+    "build": "npm run build --workspace apps/bot",
+    "typecheck": "npm run typecheck --workspace apps/bot"
+  }
+}
