@@ -119,6 +119,30 @@ export function wilderADXSeries(candles: CandleData[], period: number): number[]
   return adx;
 }
 
+/**
+ * TICKET-023 Phần A: Exponential Moving Average on candle closes, seeded by the SMA of the first
+ * `period` closes (same seeding convention as wilderATRSeries/wilderADXSeries above — consistent
+ * style within this file). k = 2/(period+1). Added as a shared helper so a later ticket wiring a
+ * momentum model into live doesn't have to re-derive the EMA formula a second time.
+ */
+export function emaSeries(candles: CandleData[], period: number): number[] {
+  const n = candles.length;
+  const ema = new Array<number>(n).fill(NaN);
+  if (n < period) return ema;
+
+  const closes = candles.map((c) => c.close);
+  let seed = 0;
+  for (let i = 0; i < period; i++) seed += closes[i];
+  seed /= period;
+  ema[period - 1] = seed;
+
+  const k = 2 / (period + 1);
+  for (let i = period; i < n; i++) {
+    ema[i] = closes[i] * k + ema[i - 1] * (1 - k);
+  }
+  return ema;
+}
+
 export function smaSeries(values: number[], period: number): number[] {
   const n = values.length;
   const out = new Array<number>(n).fill(NaN);
