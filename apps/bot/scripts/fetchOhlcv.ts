@@ -1,8 +1,10 @@
 /**
  * TICKET-005 — fetch real OHLCV from Binance Futures public klines endpoint (no API key needed).
- * Run from repo root: `npm run fetch-ohlcv` (loads .env via dotenv, cwd = repo root).
+ * Run from repo root: `npm run fetch-ohlcv -- --days=180` (loads .env via dotenv, cwd = repo root).
+ * TICKET-022: `--out-dir=data/ohlcv-365d` to fetch into a separate directory (defaults to
+ * `data/ohlcv`) — lets a training-only pull run without ever touching the dataset backtest.ts reads.
  *
- * Output: data/ohlcv/{SYMBOL}_{interval}.csv, columns: timestampUtc,datetimeUtcIso,open,high,low,close,volume
+ * Output: {outDir}/{SYMBOL}_{interval}.csv, columns: timestampUtc,datetimeUtcIso,open,high,low,close,volume
  */
 import 'dotenv/config';
 import { existsSync, readFileSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
@@ -17,13 +19,18 @@ const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
 // TICKET-010 Phần A: '1m' added — MSS_TIMEFRAME defaults to 1m, needed for the backtest runner.
 // TICKET-017 Phần A.1: '1d' added — macro trend filter needs daily-candle direction.
 const INTERVALS: Record<string, number> = { '5m': 5 * 60_000, '15m': 15 * 60_000, '1h': 60 * 60_000, '1m': 60_000, '1d': 24 * 60 * 60_000 };
-const OUT_DIR = path.resolve(process.cwd(), 'data/ohlcv');
 const LIMIT_PER_REQUEST = 1500;
 const MAX_RETRIES = 5; // 1s,2s,4s,8s,16s backoff on 429
 
-function parseArgs(): { days: number } {
+function parseArgs(): { days: number; outDir: string } {
   const daysArg = process.argv.find((a) => a.startsWith('--days='));
-  return { days: daysArg ? Number(daysArg.split('=')[1]) : 30 };
+  const outDirArg = process.argv.find((a) => a.startsWith('--out-dir='));
+  return {
+    days: daysArg ? Number(daysArg.split('=')[1]) : 30,
+    // TICKET-022: separate output dir so a 365-day training-only pull never touches data/ohlcv/
+    // (the 180-day dataset the chosen backtest baseline reads).
+    outDir: path.resolve(process.cwd(), outDirArg ? outDirArg.split('=')[1] : 'data/ohlcv'),
+  };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -84,8 +91,8 @@ function lastSavedTimestamp(filePath: string): number | null {
   return Number.isFinite(ts) ? ts : null;
 }
 
-async function fetchSymbolInterval(symbol: string, interval: string, intervalMs: number, days: number): Promise<void> {
-  const filePath = path.join(OUT_DIR, `${symbol}_${interval}.csv`);
+async function fetchSymbolInterval(symbol: string, interval: string, intervalMs: number, days: number, outDir: string): Promise<void> {
+  const filePath = path.join(outDir, `${symbol}_${interval}.csv`);
   const endTime = Date.now();
   const rangeStart = endTime - days * 24 * 60 * 60 * 1000;
 
@@ -93,7 +100,7 @@ async function fetchSymbolInterval(symbol: string, interval: string, intervalMs:
   let startTime = resumeFrom !== null ? resumeFrom + intervalMs : rangeStart;
 
   if (!existsSync(filePath)) {
-    mkdirSync(OUT_DIR, { recursive: true });
+    mkdirSync(outDir, { recursive: true });
     writeFileSync(filePath, 'timestampUtc,datetimeUtcIso,open,high,low,close,volume\n');
   }
 
@@ -133,13 +140,13 @@ async function fetchSymbolInterval(symbol: string, interval: string, intervalMs:
 }
 
 async function main(): Promise<void> {
-  const { days } = parseArgs();
-  console.log(`Fetch OHLCV ${days} ngày gần nhất cho ${SYMBOLS.join(', ')}...`);
+  const { days, outDir } = parseArgs();
+  console.log(`Fetch OHLCV ${days} ngày gần nhất cho ${SYMBOLS.join(', ')} → ${outDir}...`);
 
   for (const symbol of SYMBOLS) {
     console.log(`=== ${symbol} ===`);
     for (const [interval, intervalMs] of Object.entries(INTERVALS)) {
-      await fetchSymbolInterval(symbol, interval, intervalMs, days);
+      await fetchSymbolInterval(symbol, interval, intervalMs, days, outDir);
     }
   }
 }

@@ -36,6 +36,13 @@
  * (requires `npm run build` + data/ohlcv/*_{5m,15m,1h,1m,1d}.csv + data/backtest-trades-both.csv
  * already present — the latter from `npm run backtest -- --tp-plan=PLAN_A --macro-trend-filter=true
  * --ob-disabled-symbols=XRPUSDT --macro-trend-box-breakout=false`).
+ *
+ * TICKET-022: `--ohlcv-dir=data/ohlcv-365d --out=data/training/draft-setups-labeled-365d.csv` reads
+ * a different OHLCV pull and writes to a different output file (both default to the TICKET-019/020
+ * paths above when omitted) — lets a training-only 365-day pull run without ever touching
+ * data/ohlcv/ or overwriting draft-setups-labeled.csv. wasActuallyTraded is still looked up against
+ * data/backtest-trades-both.csv (the 180-day baseline) regardless — rows outside that 180-day window
+ * will naturally show wasActuallyTraded=false since no real trade record exists for them there.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -50,10 +57,22 @@ import type { RegimeHysteresisState, ExitReason } from '../dist/orchestrator/typ
 import { openPosition, computeRealizedPnl, type ManagedPositionState, type SlTpManagerInput, type TpPlan } from '../dist/risk/slTpManager.js';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
-const OHLCV_DIR = path.resolve(process.cwd(), 'data/ohlcv');
 const TRADES_PATH = path.resolve(process.cwd(), 'data/backtest-trades-both.csv');
-const OUT_DIR = path.resolve(process.cwd(), 'data/training');
-const OUT_PATH = path.join(OUT_DIR, 'draft-setups-labeled.csv');
+
+// TICKET-022: CLI-overridable, so a 365-day training-only pull can read from its own OHLCV dir
+// (data/ohlcv-365d/, never data/ohlcv/) and write to its own output file, without touching the
+// TICKET-019/020 defaults used for the 180-day run.
+function parseArgs(): { ohlcvDir: string; outPath: string } {
+  const args = process.argv.slice(2);
+  const ohlcvDirArg = args.find((a) => a.startsWith('--ohlcv-dir='));
+  const outArg = args.find((a) => a.startsWith('--out='));
+  return {
+    ohlcvDir: path.resolve(process.cwd(), ohlcvDirArg ? ohlcvDirArg.split('=')[1] : 'data/ohlcv'),
+    outPath: path.resolve(process.cwd(), outArg ? outArg.split('=')[1] : 'data/training/draft-setups-labeled.csv'),
+  };
+}
+
+const { ohlcvDir: OHLCV_DIR, outPath: OUT_PATH } = parseArgs();
 
 // Same bounded-window sizes as backtest.ts — kept in sync manually (each script is self-contained,
 // same convention as calibrateThresholds.ts).
@@ -358,7 +377,8 @@ function main(): void {
     console.log(`  → ${rows.length} Draft Setup có nhãn, ${unresolvedCount} setup bị bỏ qua (hết dữ liệu tương lai để đóng lệnh).`);
   }
 
-  if (!existsSync(OUT_DIR)) mkdirSync(OUT_DIR, { recursive: true });
+  const outDir = path.dirname(OUT_PATH);
+  if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
   writeFileSync(OUT_PATH, rowsCsv(allRows));
 
   const totalRows = allRows.length;

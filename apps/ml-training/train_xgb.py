@@ -6,6 +6,12 @@ correct, working train->calibrate->export chain, not chasing AUC (see B.6 overfi
 Run from repo root: apps/ml-training/.venv/Scripts/python.exe apps/ml-training/train_xgb.py
 (after `pip install -r apps/ml-training/requirements.txt` in that venv).
 
+TICKET-022: --csv=<path> --model-name=<name> re-trains on a different labeled dataset (e.g. the
+365-day pull) and writes models/<name>.onnx + models/<name>_feature_schema.json instead of the
+TICKET-021 defaults — e.g. --csv=data/training/draft-setups-labeled-365d.csv
+--model-name=xgb_confidence_v1_365d. Logic below (encoding, 70/30 time split, hyperparameters,
+calibration, ONNX export + validation) is untouched either way.
+
 === ONNX export note (read before touching the export section) ===
 onnxmltools.convert_xgboost() only accepts a raw XGBoost model (XGBClassifier/Booster) — it cannot
 convert a fitted sklearn CalibratedClassifierCV, which is what B.7 requires exporting ("model ĐÃ
@@ -62,10 +68,21 @@ from sklearn.metrics import accuracy_score, roc_auc_score
 from xgboost import XGBClassifier
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-CSV_PATH = os.path.join(REPO_ROOT, "data", "training", "draft-setups-labeled.csv")
 MODELS_DIR = os.path.join(REPO_ROOT, "models")
-ONNX_PATH = os.path.join(MODELS_DIR, "xgb_confidence_v1.onnx")
-SCHEMA_PATH = os.path.join(MODELS_DIR, "xgb_confidence_v1_feature_schema.json")
+
+# TICKET-022: --csv/--model-name let a re-train on a different dataset (e.g. the 365-day pull) write
+# to differently-named outputs, without overwriting the TICKET-021 159-row model/schema. Defaults
+# reproduce TICKET-021 exactly when run with no args.
+import argparse  # noqa: E402
+
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--csv", default=os.path.join(REPO_ROOT, "data", "training", "draft-setups-labeled.csv"))
+_parser.add_argument("--model-name", default="xgb_confidence_v1")
+_args = _parser.parse_args()
+
+CSV_PATH = os.path.abspath(_args.csv)
+ONNX_PATH = os.path.join(MODELS_DIR, f"{_args.model_name}.onnx")
+SCHEMA_PATH = os.path.join(MODELS_DIR, f"{_args.model_name}_feature_schema.json")
 
 # B.2 — order here IS the order fed into the model. Do not reorder without re-generating the schema
 # AND updating whatever TS code consumes it later.
@@ -216,7 +233,7 @@ def main() -> None:
     gap = auc_train - auc_test
     if gap > OVERFIT_AUC_GAP_THRESHOLD:
         print(f"⚠ CẢNH BÁO: AUC(train) - AUC(test) = {gap:.4f} > {OVERFIT_AUC_GAP_THRESHOLD} — dấu hiệu overfit,")
-        print("  cỡ mẫu (159 dòng) có thể chưa đủ, diễn giải kết quả thận trọng. Không tự kết luận model tốt/xấu.")
+        print(f"  cỡ mẫu ({len(df)} dòng) có thể chưa đủ, diễn giải kết quả thận trọng. Không tự kết luận model tốt/xấu.")
 
     # B.7
     print("")
