@@ -45,15 +45,15 @@ export const RegimeConfig = {
   N_CANDLE_CONFIRM: 3,
 
   // ---- Decision-tree thresholds (priority order enforced in regimeDetector.ts) ----
-  /** TODO_CONFIRM, PM suggested ~95. */
+  /** TODO_CONFIRM, PM suggested ~95. Still achievable in real data (percentile reaches 100) — not the broken one. */
   DANGER_ATR_PCT_THRESHOLD: symmetric(95),
-  /** TODO_CONFIRM, PM suggested ~4. */
-  DANGER_VOLUME_ZSCORE_THRESHOLD: symmetric(4),
+  /** PM-confirmed từ data thật 60 ngày (xem calibration-report.md 2026-07-17). */
+  DANGER_VOLUME_ZSCORE_THRESHOLD: symmetric(2.5),
 
-  /** TODO_CONFIRM: not suggested by PM, 25 is the conventional Wilder ADX trend-strength cutoff. */
-  TREND_ENTER_ADX: symmetric(25),
-  /** TODO_CONFIRM: not suggested by PM, placeholder midpoint. */
-  TREND_ENTER_ATR_PCT: symmetric(50),
+  /** PM-confirmed từ data thật 60 ngày (xem calibration-report.md 2026-07-17). */
+  TREND_ENTER_ADX: { enter: 32, exit: 25 },
+  /** PM-confirmed từ data thật 60 ngày (xem calibration-report.md 2026-07-17). */
+  TREND_ENTER_ATR_PCT: { enter: 65, exit: 45 },
 
   /** TODO_CONFIRM, PM suggested ~10. Also used as the SIDEWAY_SCALPER/COMPRESSION boundary. */
   COMPRESSION_BBW_PCT_THRESHOLD: symmetric(10),
@@ -65,4 +65,10 @@ export const RegimeConfig = {
 
   /** TODO_CONFIRM: not suggested by PM, placeholder. */
   SIDEWAY_ADX_THRESHOLD: symmetric(20),
+
+  // ---- TICKET-014: post-crash false-trend filters (TREND_RIDER only) ----
+  /** TODO_CONFIRM, PM suggested 3. Consecutive 1H candles adx1h must clear the threshold for, not just the latest one. */
+  TREND_ADX_PERSISTENCE_CANDLES: 3,
+  /** TODO_CONFIRM, PM suggested 72. Hours after a confirmed DANGER_ZONE during which TREND_RIDER candidates are forced down to NEUTRAL_TRANSITION. */
+  POST_DANGER_COOLDOWN_HOURS: 72,
 } as const;

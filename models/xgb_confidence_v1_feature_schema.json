@@ -1,0 +1,78 @@
+{
+  "numeric_features": [
+    "adx1h",
+    "atrPercentile5m",
+    "bbWidthPercentile15m",
+    "volumeZScore5m",
+    "slDistancePercent"
+  ],
+  "categorical_feature_order": [
+    "regime",
+    "setupType",
+    "side",
+    "atrTrend5m",
+    "adxDirection1h",
+    "macroDirection",
+    "symbol"
+  ],
+  "categorical_features": {
+    "regime": [
+      "COMPRESSION",
+      "SIDEWAY_SCALPER",
+      "TREND_RIDER"
+    ],
+    "setupType": [
+      "BOX_BREAKOUT",
+      "OB"
+    ],
+    "side": [
+      "LONG",
+      "SHORT"
+    ],
+    "atrTrend5m": [
+      "decreasing",
+      "increasing"
+    ],
+    "adxDirection1h": [
+      "DOWN",
+      "UP"
+    ],
+    "macroDirection": [
+      "DOWN",
+      "UNKNOWN",
+      "UP"
+    ],
+    "symbol": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT",
+      "XRPUSDT"
+    ]
+  },
+  "missing_categorical_value": "UNKNOWN",
+  "feature_order": [
+    "adx1h",
+    "atrPercentile5m",
+    "bbWidthPercentile15m",
+    "volumeZScore5m",
+    "slDistancePercent",
+    "regime__COMPRESSION",
+    "regime__SIDEWAY_SCALPER",
+    "regime__TREND_RIDER",
+    "setupType__BOX_BREAKOUT",
+    "setupType__OB",
+    "side__LONG",
+    "side__SHORT",
+    "atrTrend5m__decreasing",
+    "atrTrend5m__increasing",
+    "adxDirection1h__DOWN",
+    "adxDirection1h__UP",
+    "macroDirection__DOWN",
+    "macroDirection__UNKNOWN",
+    "macroDirection__UP",
+    "symbol__BTCUSDT",
+    "symbol__ETHUSDT",
+    "symbol__SOLUSDT",
+    "symbol__XRPUSDT"
+  ]
+}

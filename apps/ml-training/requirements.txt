@@ -1,2 +1,9 @@
-# Placeholder — Python training pipeline chưa setup ở sprint này.
-# Không chạy trong bot live (Node.js/TypeScript). Sẽ điền dependency khi bắt đầu Tầng XGBoost.
+xgboost
+pandas
+scikit-learn
+onnxmltools
+onnx
+numpy
+# Not in the original ticket list — needed as actual runtime dependencies:
+packaging   # onnxmltools imports this directly but doesn't declare it as a dependency (pip install fails without it)
+onnxruntime # used by train_xgb.py to numerically validate the exported .onnx against sklearn's predict_proba before writing it to disk

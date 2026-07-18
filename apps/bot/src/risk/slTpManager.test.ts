@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   computeBreakevenPlusFeeSlPrice,
   computeFeeBufferDollar,
+  computeRealizedPnl,
+  onCounterTrendTpHit,
   onSlHit,
   onTp1Hit,
+  onTp2Hit,
   openPosition,
   type SlTpManagerInput,
 } from './slTpManager.js';
@@ -57,5 +60,38 @@ describe('Mục 6 — breakeven+fee SL covers ALL 3 tiers, and PNL stays >= 0 if
     // Total fees paid across both legs equal the full-position fee buffer, regardless of the 2-fill split.
     const totalFees = 0.4 * trendLongPlanA.positionSize * trendLongPlanA.takerFeeRate * 2 + 0.6 * trendLongPlanA.positionSize * trendLongPlanA.takerFeeRate * 2;
     expect(totalFees).toBeCloseTo(computeFeeBufferDollar(trendLongPlanA.positionSize, trendLongPlanA.takerFeeRate), 10);
+  });
+});
+
+// TICKET-010 — computeRealizedPnl, needed for backtest trade logging (pnlUsd/pnlPct were the 2
+// fields missing in the old system). Not covered by the reduced-test-scope memo, but this is new
+// money-math added for this ticket, so it gets the same rigor as Mục 6.
+describe('computeRealizedPnl', () => {
+  it('matches the Mục 6 mandatory test\'s own numbers for TP1-then-SL', () => {
+    const afterTp1 = onTp1Hit(openPosition(trendLongPlanA));
+    const closed = onSlHit(afterTp1);
+    expect(computeRealizedPnl(closed, closed.currentSlPrice)).toBeCloseTo(4.4352, 4);
+  });
+
+  it('sums TP1 + TP2 + the remaining Runner portion at its own exit price', () => {
+    const afterTp2 = onTp2Hit(onTp1Hit(openPosition(trendLongPlanA)));
+    // TP1: 0.4*990*0.012=4.752, TP2: 0.3*990*0.025=7.425, remaining 0.3 at 105: 0.3*990*0.05=14.85
+    // gross=27.027, fees=990*0.0004*2=0.792, net=26.235
+    expect(computeRealizedPnl(afterTp2, 105)).toBeCloseTo(26.235, 6);
+  });
+
+  it('COUNTER_TREND: uses the tier price when TP hit, ignores the passed finalExitPrice', () => {
+    const counterTrend: SlTpManagerInput = { ...trendLongPlanA, scenario: 'COUNTER_TREND', slPrice: 99.3 };
+    const closed = onCounterTrendTpHit(openPosition(counterTrend));
+    // TP = 100 + 1*0.7 = 100.7; gross=990*0.007=6.93; fees=0.792; net=6.138
+    expect(computeRealizedPnl(closed, 999 /* unused, tier already filled */)).toBeCloseTo(6.138, 6);
+  });
+
+  it('COUNTER_TREND: uses finalExitPrice when SL hit instead (loss, still nets the same fee once)', () => {
+    const counterTrend: SlTpManagerInput = { ...trendLongPlanA, scenario: 'COUNTER_TREND', slPrice: 99.3 };
+    const opened = openPosition(counterTrend);
+    const closed = onSlHit(opened);
+    // gross=990*(99.3-100)/100=-6.93; fees=0.792; net=-7.722
+    expect(computeRealizedPnl(closed, closed.currentSlPrice)).toBeCloseTo(-7.722, 6);
   });
 });

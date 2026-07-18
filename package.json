@@ -11,6 +11,17 @@
   "scripts": {
     "test": "npm test --workspace apps/bot",
     "build": "npm run build --workspace apps/bot",
-    "typecheck": "npm run typecheck --workspace apps/bot"
+    "typecheck": "npm run typecheck --workspace apps/bot",
+    "build:scripts": "tsc -p apps/bot/scripts/tsconfig.json",
+    "fetch-ohlcv": "npm run build:scripts && node apps/bot/scripts-dist/fetchOhlcv.js",
+    "calibrate": "npm run build:scripts && node apps/bot/scripts-dist/calibrateThresholds.js",
+    "backtest": "npm run build:scripts && node apps/bot/scripts-dist/backtest.js",
+    "generate-training-data": "npm run build:scripts && node apps/bot/scripts-dist/generateTrainingData.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1"
   }
 }

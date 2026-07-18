@@ -13,6 +13,7 @@ import {
   trendDirection,
   wilderADXSeries,
   wilderATRSeries,
+  wilderDIDirectionSeries,
   zScoreSeries,
 } from './indicators.js';
 
@@ -45,9 +46,20 @@ export function detectManipulated(_input: RegimeInput): never {
   throw new RegimeNotImplementedError(MarketRegime.MANIPULATED);
 }
 
+/** Last `count` non-NaN values of `series`, oldest to newest. Fewer than `count` if not enough valid history yet. */
+function lastDefinedN(series: number[], count: number): number[] {
+  const valid = series.filter((v) => !Number.isNaN(v));
+  return valid.slice(-count);
+}
+
 function computeMetrics(input: RegimeInput): ComputedMetrics {
   const adxSeries1h = wilderADXSeries(input.candles1h, RegimeConfig.ADX_PERIOD_1H);
   const adx1h = lastDefined(adxSeries1h);
+  // TICKET-014 Phần A: TREND_RIDER persistence check needs more than the latest value.
+  const adx1hRecent = lastDefinedN(adxSeries1h, RegimeConfig.TREND_ADX_PERSISTENCE_CANDLES);
+
+  const adxDirectionSeries1h = wilderDIDirectionSeries(input.candles1h, RegimeConfig.ADX_PERIOD_1H);
+  const adxDirection1h = adxDirectionSeries1h.length > 0 ? adxDirectionSeries1h[adxDirectionSeries1h.length - 1] : undefined;
 
   const atrSeries5m = wilderATRSeries(input.candles5m, RegimeConfig.ATR_PERIOD_5M);
   const atrPercentileSeries5m = percentileRankSeries(atrSeries5m, RegimeConfig.ATR_PCT_LOOKBACK_5M);
@@ -63,16 +75,20 @@ function computeMetrics(input: RegimeInput): ComputedMetrics {
   const volumeZScoreSeries5m = zScoreSeries(volumeSeries5m, RegimeConfig.VOLUME_ZSCORE_LOOKBACK_5M);
   const volumeZScore5m = lastDefined(volumeZScoreSeries5m);
 
-  return { adx1h, atrPercentile5m, bbWidthPercentile15m, atrTrend5m, volumeZScore5m };
+  return { adx1h, adx1hRecent, adxDirection1h, atrPercentile5m, bbWidthPercentile15m, atrTrend5m, volumeZScore5m };
 }
 
 function thresholdFor(t: Threshold, isCurrentRegime: boolean): number {
   return isCurrentRegime ? t.exit : t.enter;
 }
 
-/** Priority-order decision tree per PM's spec — first matching branch wins. Thresholds in config.ts. */
-function classifyCandidate(metrics: ComputedMetrics, previousRegime: MarketRegime | null): MarketRegime {
-  const { adx1h, atrPercentile5m, bbWidthPercentile15m, atrTrend5m, volumeZScore5m } = metrics;
+/**
+ * Priority-order decision tree per PM's spec — first matching branch wins. Thresholds in config.ts.
+ * Exported so calibration scripts (apps/bot/scripts/) can reuse the exact live classification
+ * logic against precomputed metric series, instead of re-deriving it.
+ */
+export function classifyCandidate(metrics: ComputedMetrics, previousRegime: MarketRegime | null): MarketRegime {
+  const { adx1h, adx1hRecent, atrPercentile5m, bbWidthPercentile15m, atrTrend5m, volumeZScore5m } = metrics;
 
   if (
     adx1h === undefined ||
@@ -99,10 +115,17 @@ function classifyCandidate(metrics: ComputedMetrics, previousRegime: MarketRegim
     return MarketRegime.DANGER_ZONE;
   }
 
-  // 2. TREND_RIDER
+  // 2. TREND_RIDER — TICKET-014 Phần A: adx1h must clear the threshold for
+  // TREND_ADX_PERSISTENCE_CANDLES consecutive 1H candles, not just the latest one (post-crash
+  // chop was producing 1-candle ADX spikes that looked like a trend but weren't). Not enough
+  // history for the full window -> persistence fails, falls through to the next branch.
   const trendAdxThreshold = thresholdFor(RegimeConfig.TREND_ENTER_ADX, isCurrently(MarketRegime.TREND_RIDER));
   const trendAtrThreshold = thresholdFor(RegimeConfig.TREND_ENTER_ATR_PCT, isCurrently(MarketRegime.TREND_RIDER));
-  if (adx1h >= trendAdxThreshold && atrPercentile5m >= trendAtrThreshold) {
+  const adxPersistent =
+    adx1hRecent !== undefined &&
+    adx1hRecent.length === RegimeConfig.TREND_ADX_PERSISTENCE_CANDLES &&
+    adx1hRecent.every((v) => v >= trendAdxThreshold);
+  if (adxPersistent && atrPercentile5m >= trendAtrThreshold) {
     return MarketRegime.TREND_RIDER;
   }
 
@@ -132,47 +155,87 @@ function classifyCandidate(metrics: ComputedMetrics, previousRegime: MarketRegim
   return MarketRegime.NEUTRAL_TRANSITION;
 }
 
+export interface HysteresisState {
+  regime: MarketRegime;
+  candidateRegime: MarketRegime | null;
+  streakCount: number;
+}
+
+/**
+ * Hysteresis bookkeeping, isolated from metric computation so it can run cheaply over a
+ * precomputed metric series (calibration scripts) without recomputing indicators per step.
+ * `previous: null` means no prior state (first call ever). Confirms `candidateRegime` as the
+ * new `regime` only after it holds for RegimeConfig.N_CANDLE_CONFIRM consecutive calls —
+ * EXCEPT entering DANGER_ZONE, which bypasses that wait entirely (TICKET-007: fast in, slow out).
+ */
+export function applyHysteresis(candidateRegime: MarketRegime, previous: HysteresisState | null): HysteresisState {
+  const previouslyInDanger = previous !== null && previous.regime === MarketRegime.DANGER_ZONE;
+  if (candidateRegime === MarketRegime.DANGER_ZONE && !previouslyInDanger) {
+    return { regime: MarketRegime.DANGER_ZONE, candidateRegime: MarketRegime.DANGER_ZONE, streakCount: 0 };
+  }
+
+  if (previous === null) {
+    return { regime: candidateRegime, candidateRegime, streakCount: 1 };
+  }
+  if (candidateRegime === previous.regime) {
+    return { regime: candidateRegime, candidateRegime, streakCount: 0 };
+  }
+  const continuingSameCandidate = candidateRegime === previous.candidateRegime;
+  const newStreak = continuingSameCandidate ? previous.streakCount + 1 : 1;
+  if (newStreak >= RegimeConfig.N_CANDLE_CONFIRM) {
+    return { regime: candidateRegime, candidateRegime, streakCount: 0 };
+  }
+  return { regime: previous.regime, candidateRegime, streakCount: newStreak }; // hold until confirmed (also covers leaving DANGER_ZONE, unchanged)
+}
+
 /**
  * Pure function (PM-confirmed): caller persists RegimeOutput.{regime, candidateRegime,
- * streakCount} and feeds them back as RegimeInput on the next 5m candle close. Confirms a
- * candidate regime after N_CANDLE_CONFIRM consecutive candles. Does NOT import entry/ or risk/.
+ * streakCount} and feeds them back as RegimeInput on the next 5m candle close. Does NOT import
+ * entry/ or risk/.
  */
 export function detectRegime(input: RegimeInput): RegimeOutput {
   const metrics = computeMetrics(input);
   const previousRegime = input.previousRegime ?? null;
-  const previousCandidateRegime = input.previousCandidateRegime ?? null;
-  const priorStreak = input.streakCount ?? 0;
+  let candidateRegime = classifyCandidate(metrics, previousRegime);
 
-  const candidateRegime = classifyCandidate(metrics, previousRegime);
-
-  let confirmedRegime: MarketRegime;
-  let streakCount: number;
-
-  if (previousRegime === null) {
-    // First call ever (bot just started) — no history to confirm against.
-    confirmedRegime = candidateRegime;
-    streakCount = 1;
-  } else if (candidateRegime === previousRegime) {
-    // Already the confirmed regime — nothing pending.
-    confirmedRegime = candidateRegime;
-    streakCount = 0;
-  } else {
-    const continuingSameCandidate = candidateRegime === previousCandidateRegime;
-    const newStreak = continuingSameCandidate ? priorStreak + 1 : 1;
-    if (newStreak >= RegimeConfig.N_CANDLE_CONFIRM) {
-      confirmedRegime = candidateRegime;
-      streakCount = 0;
-    } else {
-      confirmedRegime = previousRegime; // hold until confirmed
-      streakCount = newStreak;
-    }
+  // TICKET-014/015 Phần B: Post-Danger Cooldown — overrides the CANDIDATE (Phần A persistence has
+  // already run inside classifyCandidate above), before hysteresis sees it. "Now" is the latest
+  // 5m candle's own timestamp, not Date.now() — detectRegime() is also called by backtest.ts
+  // replaying historical data, where Date.now() would be the wrong (real, not simulated) clock.
+  const currentTimestamp = input.candles5m[input.candles5m.length - 1].timestamp;
+  const previousDangerZoneTimestamp = input.previousDangerZoneTimestamp ?? null;
+  const inDangerCooldown =
+    previousDangerZoneTimestamp !== null &&
+    currentTimestamp - previousDangerZoneTimestamp < RegimeConfig.POST_DANGER_COOLDOWN_HOURS * 60 * 60 * 1000;
+  // TICKET-015: same detectBoxBreakout() false-breakout root cause as TREND_RIDER, so SIDEWAY_SCALPER
+  // and COMPRESSION are suppressed too, same shared POST_DANGER_COOLDOWN_HOURS window.
+  const regimesSuppressedDuringCooldown = new Set<MarketRegime>([
+    MarketRegime.TREND_RIDER,
+    MarketRegime.SIDEWAY_SCALPER,
+    MarketRegime.COMPRESSION,
+  ]);
+  if (inDangerCooldown && regimesSuppressedDuringCooldown.has(candidateRegime)) {
+    candidateRegime = MarketRegime.NEUTRAL_TRANSITION;
   }
 
+  const previousState: HysteresisState | null =
+    previousRegime === null
+      ? null
+      : { regime: previousRegime, candidateRegime: input.previousCandidateRegime ?? null, streakCount: input.streakCount ?? 0 };
+
+  const { regime, streakCount } = applyHysteresis(candidateRegime, previousState);
+
+  // Refresh on every candle DANGER_ZONE stays confirmed (not just first entry) — cooldown counts
+  // from when danger was LAST seen, so a prolonged DANGER_ZONE naturally extends the cooldown.
+  const lastDangerZoneTimestamp = regime === MarketRegime.DANGER_ZONE ? currentTimestamp : previousDangerZoneTimestamp;
+
   return {
-    regime: confirmedRegime,
+    regime,
     candidateRegime,
     streakCount,
     computedMetrics: metrics,
+    adxDirection1h: metrics.adxDirection1h,
+    lastDangerZoneTimestamp,
     timestamp: Date.now(),
   };
 }

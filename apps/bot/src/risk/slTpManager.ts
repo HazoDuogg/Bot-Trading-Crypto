@@ -295,3 +295,32 @@ export function isTpHit(side: Side, currentPrice: number, tpPrice: number): bool
 export function isSlHitAtPrice(side: Side, currentPrice: number, slPrice: number): boolean {
   return side === 'LONG' ? currentPrice <= slPrice : currentPrice >= slPrice;
 }
+
+// ---- TICKET-010: realized PNL, for trade logging (orchestrator/backtest) ----
+
+/**
+ * Sums each filled tier's gross P&L at ITS OWN price (TP1/TP2/COUNTER_TREND_TP use their fixed
+ * tpLevel price), plus the still-open remainder (TP3_RUNNER or a position that never reached a
+ * tier) at `finalExitPrice` — the price the position actually closed at (SL or trailing SL).
+ * Total fees = positionSize × takerFeeRate × 2 regardless of tier count (proven in Mục 6's
+ * mandatory test), so they're subtracted once at the end rather than per leg.
+ */
+export function computeRealizedPnl(state: ManagedPositionState, finalExitPrice: number): number {
+  const sideMultiplier = state.side === 'LONG' ? 1 : -1;
+  let grossPnl = 0;
+  let filledPortion = 0;
+
+  for (const tier of state.tpLevels) {
+    if (tier.price === null || !state.filledTiers.includes(tier.label)) continue;
+    grossPnl += tier.closePercent * state.positionSize * ((tier.price - state.entryPrice) / state.entryPrice) * sideMultiplier;
+    filledPortion += tier.closePercent;
+  }
+
+  const remainingPortion = 1 - filledPortion;
+  if (remainingPortion > 0) {
+    grossPnl += remainingPortion * state.positionSize * ((finalExitPrice - state.entryPrice) / state.entryPrice) * sideMultiplier;
+  }
+
+  const totalFees = state.positionSize * state.takerFeeRate * 2;
+  return grossPnl - totalFees;
+}

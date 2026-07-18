@@ -1,0 +1,94 @@
+import type { MarketRegime } from '../regime/types.js';
+import type { ManagedPositionState, TpPlan } from '../risk/slTpManager.js';
+import type { EntryRouterConfig } from '../entry/types.js';
+
+export interface RegimeHysteresisState {
+  previousRegime: MarketRegime | null;
+  previousCandidateRegime: MarketRegime | null;
+  streakCount: number;
+  /** TICKET-014 Phần B: timestamp (ms) of the last candle where regime was confirmed DANGER_ZONE. Null if never. */
+  previousDangerZoneTimestamp: number | null;
+}
+
+/**
+ * Attributes of the trade at OPEN time that neither ManagedPositionState nor the entry/regime
+ * layers persist on their own, but Part D's trade log needs at CLOSE time (regime/setupType can
+ * change or go out of scope after entry; ManagedPositionState doesn't know about them at all).
+ */
+export interface OpenTradeMeta {
+  regime: MarketRegime;
+  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP';
+  entryTimestamp: number;
+  actualRiskDollar: number;
+  marginRequired: number;
+  riskMultiplier: number;
+}
+
+export interface SymbolState {
+  regimeState: RegimeHysteresisState;
+  openPosition: ManagedPositionState | null;
+  /** Null iff openPosition is null. */
+  openMeta: OpenTradeMeta | null;
+}
+
+export const INITIAL_SYMBOL_STATE: SymbolState = {
+  regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
+  openPosition: null,
+  openMeta: null,
+};
+
+export type ExitReason = 'TP1' | 'TP2' | 'RUNNER_SL' | 'SL' | 'BREAKEVEN_SL' | 'COUNTER_TREND_TP';
+
+export interface OpenTradeEvent {
+  type: 'OPEN';
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  regime: MarketRegime;
+  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP';
+  tpPlan: TpPlan;
+  entryTimestamp: number;
+  entryPrice: number;
+  riskMultiplier: number;
+  actualRiskDollar: number;
+  marginRequired: number;
+}
+
+export interface CloseTradeEvent {
+  type: 'CLOSE';
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  regime: MarketRegime;
+  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP';
+  tpPlan: TpPlan;
+  entryTimestamp: number;
+  entryPrice: number;
+  exitTimestamp: number;
+  exitPrice: number;
+  exitReason: ExitReason;
+  pnlUsd: number;
+  /** % return on margin deployed at open (marginRequired), not on notional. */
+  pnlPct: number;
+  riskMultiplier: number;
+  accountBalanceAfter: number;
+}
+
+export interface SkippedEntryEvent {
+  type: 'SKIPPED';
+  symbol: string;
+  timestamp: number;
+  reason: 'RISK_POOL_EXCEEDED';
+}
+
+export type OrchestratorEvent = OpenTradeEvent | CloseTradeEvent | SkippedEntryEvent;
+
+export interface OrchestratorConfig {
+  entryRouterConfig: EntryRouterConfig;
+  tpPlan: TpPlan;
+  takerFeeRate: number;
+  riskDollarOrPercent: number;
+  maxMarginCap: number;
+  leverage: number;
+  riskPoolMaxPct: number;
+  /** No Confidence Score exists yet to set this dynamically — defaults false (normal 60% Giveback lock). */
+  isLowConfidenceOrLowLiquidity: boolean;
+}

@@ -32,11 +32,12 @@ export function wilderATRSeries(candles: CandleData[], period: number): number[]
   return atr;
 }
 
-/** Wilder's ADX, via smoothed +DM/-DM/TR -> +DI/-DI -> DX -> RMA(DX). */
-export function wilderADXSeries(candles: CandleData[], period: number): number[] {
+/** Shared by wilderADXSeries and wilderDIDirectionSeries — smoothed +DI/-DI, the DX/ADX and direction both derive from. */
+function wilderDISeries(candles: CandleData[], period: number): { plusDI: number[]; minusDI: number[] } {
   const n = candles.length;
-  const adx = new Array<number>(n).fill(NaN);
-  if (n < period * 2) return adx;
+  const plusDI = new Array<number>(n).fill(NaN);
+  const minusDI = new Array<number>(n).fill(NaN);
+  if (n < period + 1) return { plusDI, minusDI };
 
   const tr = trueRangeSeries(candles);
   const plusDM = new Array<number>(n).fill(0);
@@ -63,13 +64,39 @@ export function wilderADXSeries(candles: CandleData[], period: number): number[]
   const smoothedPlusDM = wilderSmooth(plusDM);
   const smoothedMinusDM = wilderSmooth(minusDM);
 
-  const dx = new Array<number>(n).fill(NaN);
   for (let i = period; i < n; i++) {
     if (Number.isNaN(smoothedTR[i]) || smoothedTR[i] === 0) continue;
-    const plusDI = (smoothedPlusDM[i] / smoothedTR[i]) * 100;
-    const minusDI = (smoothedMinusDM[i] / smoothedTR[i]) * 100;
-    const diSum = plusDI + minusDI;
-    dx[i] = diSum === 0 ? 0 : (Math.abs(plusDI - minusDI) / diSum) * 100;
+    plusDI[i] = (smoothedPlusDM[i] / smoothedTR[i]) * 100;
+    minusDI[i] = (smoothedMinusDM[i] / smoothedTR[i]) * 100;
+  }
+  return { plusDI, minusDI };
+}
+
+/** Direction of the trend per Wilder's +DI/-DI: 'UP' if +DI > -DI, 'DOWN' if opposite, 'FLAT' if equal/both zero. */
+export function wilderDIDirectionSeries(candles: CandleData[], period: number): Array<'UP' | 'DOWN' | 'FLAT' | undefined> {
+  const { plusDI, minusDI } = wilderDISeries(candles, period);
+  return plusDI.map((plus, i) => {
+    const minus = minusDI[i];
+    if (Number.isNaN(plus) || Number.isNaN(minus)) return undefined;
+    if (plus > minus) return 'UP';
+    if (plus < minus) return 'DOWN';
+    return 'FLAT';
+  });
+}
+
+/** Wilder's ADX, via smoothed +DM/-DM/TR -> +DI/-DI -> DX -> RMA(DX). */
+export function wilderADXSeries(candles: CandleData[], period: number): number[] {
+  const n = candles.length;
+  const adx = new Array<number>(n).fill(NaN);
+  if (n < period * 2) return adx;
+
+  const { plusDI, minusDI } = wilderDISeries(candles, period);
+
+  const dx = new Array<number>(n).fill(NaN);
+  for (let i = period; i < n; i++) {
+    if (Number.isNaN(plusDI[i])) continue;
+    const diSum = plusDI[i] + minusDI[i];
+    dx[i] = diSum === 0 ? 0 : (Math.abs(plusDI[i] - minusDI[i]) / diSum) * 100;
   }
 
   let seedSum = 0;
@@ -169,19 +196,24 @@ export function zScoreSeries(values: number[], lookback: number): number[] {
   return out;
 }
 
+export type TrendDirection = 'increasing' | 'decreasing' | 'flat' | undefined;
+
+/** Direction of each value vs `lookbackN` periods before it. */
+export function trendDirectionSeries(values: number[], lookbackN: number): TrendDirection[] {
+  return values.map((current, i) => {
+    if (i < lookbackN) return undefined;
+    const prior = values[i - lookbackN];
+    if (Number.isNaN(current) || Number.isNaN(prior)) return undefined;
+    if (current > prior) return 'increasing';
+    if (current < prior) return 'decreasing';
+    return 'flat';
+  });
+}
+
 /** Direction of the latest value vs `lookbackN` periods ago. */
-export function trendDirection(
-  values: number[],
-  lookbackN: number,
-): 'increasing' | 'decreasing' | 'flat' | undefined {
-  const n = values.length;
-  if (n <= lookbackN) return undefined;
-  const current = values[n - 1];
-  const prior = values[n - 1 - lookbackN];
-  if (Number.isNaN(current) || Number.isNaN(prior)) return undefined;
-  if (current > prior) return 'increasing';
-  if (current < prior) return 'decreasing';
-  return 'flat';
+export function trendDirection(values: number[], lookbackN: number): TrendDirection {
+  const series = trendDirectionSeries(values, lookbackN);
+  return series.length > 0 ? series[series.length - 1] : undefined;
 }
 
 /** Last non-NaN value in a series, or undefined if the series has no computed values yet. */

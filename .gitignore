@@ -1,7 +1,10 @@
 node_modules/
 dist/
+scripts-dist/
 build/
 *.log
+apps/ml-training/.venv/
+apps/ml-training/__pycache__/
 .env
 .env.*
 !.env.example
