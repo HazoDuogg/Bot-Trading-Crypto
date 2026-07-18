@@ -16,6 +16,7 @@ import { processCandle, type ProcessCandleInput } from '../dist/orchestrator/orc
 import { INITIAL_SYMBOL_STATE, type CloseTradeEvent, type OrchestratorConfig, type SymbolState } from '../dist/orchestrator/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import type { EntryStyleForNeutral } from '../dist/entry/types.js';
+import { DEFAULT_MOMENTUM_FILTER_CONFIG } from '../dist/xgbFilter/config.js';
 import type { OpenPositionRisk } from '../dist/risk/riskPool.js';
 import type { TpPlan } from '../dist/risk/slTpManager.js';
 
@@ -33,6 +34,9 @@ const WINDOW_15M = 325;
 const WINDOW_1H = 40;
 const WINDOW_1M = 200;
 const WINDOW_1D = 40; // >> EntryConfig.MACRO_TREND_ADX_PERIOD_1D(14), matches WINDOW_1H's margin
+// TICKET-024: separate, much larger 1h window for the momentum model's emaRatioSlow (EMA 50/200) —
+// intentionally NOT used for regime/entry (see ProcessCandleInput.candles1hMomentum doc comment for why).
+const WINDOW_1H_MOMENTUM = 250;
 
 function parseArgs(): {
   entryStyleForNeutral: EntryStyleForNeutral;
@@ -40,6 +44,7 @@ function parseArgs(): {
   macroTrendFilterEnabled: boolean;
   obDisabledSymbols: string[];
   macroTrendFilterAppliesToBoxBreakout: boolean;
+  momentumFilterEnabled: boolean;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -47,6 +52,7 @@ function parseArgs(): {
   const macroArg = args.find((a) => a.startsWith('--macro-trend-filter='));
   const obArg = args.find((a) => a.startsWith('--ob-disabled-symbols='));
   const macroBoxArg = args.find((a) => a.startsWith('--macro-trend-box-breakout='));
+  const momentumArg = args.find((a) => a.startsWith('--momentum-filter='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -54,11 +60,12 @@ function parseArgs(): {
     macroTrendFilterEnabled: macroArg ? macroArg.split('=')[1] === 'true' : false,
     obDisabledSymbols: obValue.trim() === '' ? [] : obValue.split(','),
     macroTrendFilterAppliesToBoxBreakout: macroBoxArg ? macroBoxArg.split('=')[1] === 'true' : false,
+    momentumFilterEnabled: momentumArg ? momentumArg.split('=')[1] === 'true' : false,
   };
 }
 
-/** TICKET-017/018 Phần C: output filenames auto-derived from which filters are active, so the A/B combinations never overwrite each other. */
-function outputSuffix(macroTrendFilterEnabled: boolean, obDisabledSymbols: string[], macroTrendFilterAppliesToBoxBreakout: boolean): string {
+/** TICKET-017/018/024 Phần C: output filenames auto-derived from which filters are active, so the A/B combinations never overwrite each other. */
+function outputSuffix(macroTrendFilterEnabled: boolean, obDisabledSymbols: string[], macroTrendFilterAppliesToBoxBreakout: boolean, momentumFilterEnabled: boolean): string {
   const macro = macroTrendFilterEnabled;
   const ob = obDisabledSymbols.length > 0;
   let base: string;
@@ -66,7 +73,9 @@ function outputSuffix(macroTrendFilterEnabled: boolean, obDisabledSymbols: strin
   else if (macro) base = 'macrofilter';
   else if (ob) base = 'obfilter';
   else base = 'baseline';
-  return macroTrendFilterAppliesToBoxBreakout ? `${base}-with-boxfilter` : base;
+  if (macroTrendFilterAppliesToBoxBreakout) base += '-with-boxfilter';
+  if (momentumFilterEnabled) base += '-momentum';
+  return base;
 }
 
 function readCsv(filePath: string): CandleData[] {
@@ -156,9 +165,9 @@ function tradesCsv(trades: CloseTradeEvent[]): string {
 }
 
 async function main(): Promise<void> {
-  const { entryStyleForNeutral, tpPlan, macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout } = parseArgs();
+  const { entryStyleForNeutral, tpPlan, macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -174,6 +183,7 @@ async function main(): Promise<void> {
     leverage: 30,
     riskPoolMaxPct: 0.1,
     isLowConfidenceOrLowLiquidity: false,
+    momentumFilterConfig: { ...DEFAULT_MOMENTUM_FILTER_CONFIG, momentumFilterEnabled },
   };
 
   let accountBalance = START_BALANCE;
@@ -205,6 +215,10 @@ async function main(): Promise<void> {
       sd.ptr15m = w15.ptr;
       const w1h = closedWindow(sd.candles1h, sd.ptr1h, 60 * 60_000, decisionTime, WINDOW_1H);
       sd.ptr1h = w1h.ptr;
+      // TICKET-024: same closed-candle pointer, just a longer slice — momentum's EMA(200) needs far
+      // more 1h history than regime/entry's own WINDOW_1H(40). closedWindow's ptr advancement doesn't
+      // depend on windowSize, so this is safe to compute from the same (now-updated) sd.ptr1h.
+      const w1hMomentum = closedWindow(sd.candles1h, sd.ptr1h, 60 * 60_000, decisionTime, WINDOW_1H_MOMENTUM);
       const w1m = closedWindow(sd.candles1m, sd.ptr1m, 60_000, decisionTime, WINDOW_1M);
       sd.ptr1m = w1m.ptr;
       const w1d = closedWindow(sd.candles1d, sd.ptr1d, 24 * 60 * 60_000, decisionTime, WINDOW_1D);
@@ -222,11 +236,12 @@ async function main(): Promise<void> {
         candles1h: w1h.window,
         candles1m: w1m.window,
         candles1d: w1d.window,
+        candles1hMomentum: w1hMomentum.window,
         accountBalance,
         otherOpenPositionsRisk,
       };
 
-      const result = processCandle(input, sd.state, config);
+      const result = await processCandle(input, sd.state, config);
       sd.state = result.symbolState;
       accountBalance = result.accountBalance;
 
@@ -242,7 +257,7 @@ async function main(): Promise<void> {
 
   console.log(`Xong. ${trades.length} lệnh đóng, ${skippedCount} lệnh bị bỏ qua (risk pool), balance cuối=$${accountBalance.toFixed(2)}`);
 
-  const suffix = outputSuffix(macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout);
+  const suffix = outputSuffix(macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled);
   const tradesPath = path.resolve(process.cwd(), `data/backtest-trades-${suffix}.csv`);
   writeFileSync(tradesPath, tradesCsv(trades));
   console.log(`→ ${tradesPath}`);
@@ -255,7 +270,7 @@ async function main(): Promise<void> {
   const report = [
     '# Backtest Report — TICKET-010',
     '',
-    `Sinh tự động từ \`npm run backtest -- --entry-style=${entryStyleForNeutral} --tp-plan=${tpPlan} --macro-trend-filter=${macroTrendFilterEnabled} --ob-disabled-symbols=${obDisabledSymbols.join(',')} --macro-trend-box-breakout=${macroTrendFilterAppliesToBoxBreakout}\` — dữ liệu thật ${new Date().toISOString()}.`,
+    `Sinh tự động từ \`npm run backtest -- --entry-style=${entryStyleForNeutral} --tp-plan=${tpPlan} --macro-trend-filter=${macroTrendFilterEnabled} --ob-disabled-symbols=${obDisabledSymbols.join(',')} --macro-trend-box-breakout=${macroTrendFilterAppliesToBoxBreakout} --momentum-filter=${momentumFilterEnabled}\` — dữ liệu thật ${new Date().toISOString()}.`,
     '',
     `- Vốn ban đầu: $${START_BALANCE}, vốn cuối: $${accountBalance.toFixed(2)}`,
     `- Tổng số lệnh đóng: ${totalTrades}`,
@@ -281,6 +296,7 @@ async function main(): Promise<void> {
     `- macroTrendFilterEnabled: ${macroTrendFilterEnabled} (TICKET-017 Phần A)`,
     `- obDisabledSymbols: [${obDisabledSymbols.join(',')}] (TICKET-017 Phần B)`,
     `- macroTrendFilterAppliesToBoxBreakout: ${macroTrendFilterAppliesToBoxBreakout} (TICKET-018)`,
+    `- momentumFilterEnabled: ${momentumFilterEnabled} (TICKET-024, thresholds: low=${config.momentumFilterConfig.momentumLowThreshold} high=${config.momentumFilterConfig.momentumHighThreshold} lowMultiplier=${config.momentumFilterConfig.momentumLowMultiplier})`,
     `- Runner trailing: ATR (2.5×ATR), không dùng Structure trailing`,
     `- takerFeeRate: 0.0004 (TODO_CONFIRM — Trader chưa cung cấp số thật)`,
     `- Quy tắc SL/TP cùng nến: SL chạm trước`,

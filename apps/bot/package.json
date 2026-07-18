@@ -12,6 +12,9 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
+  "dependencies": {
+    "onnxruntime-node": "^1.19.2"
+  },
   "devDependencies": {
     "@types/node": "^26.1.1",
     "typescript": "^5.5.0",

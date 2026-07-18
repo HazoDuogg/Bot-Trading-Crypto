@@ -1,6 +1,7 @@
 import type { MarketRegime } from '../regime/types.js';
 import type { ManagedPositionState, TpPlan } from '../risk/slTpManager.js';
 import type { EntryRouterConfig } from '../entry/types.js';
+import type { MomentumFilterConfig } from '../xgbFilter/config.js';
 
 export interface RegimeHysteresisState {
   previousRegime: MarketRegime | null;
@@ -91,4 +92,6 @@ export interface OrchestratorConfig {
   riskPoolMaxPct: number;
   /** No Confidence Score exists yet to set this dynamically — defaults false (normal 60% Giveback lock). */
   isLowConfidenceOrLowLiquidity: boolean;
+  /** TICKET-024 Phần C: soft risk-multiplier from the momentum ONNX model — backtest-only A/B testing, not wired into live. */
+  momentumFilterConfig: MomentumFilterConfig;
 }

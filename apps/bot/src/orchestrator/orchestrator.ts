@@ -10,6 +10,10 @@ import { lastDefined, wilderATRSeries, wilderDIDirectionSeries } from '../regime
 import type { CandleData } from '../regime/types.js';
 import { routeEntry } from '../entry/entryRouter.js';
 import { EntryConfig } from '../entry/config.js';
+import { buildFeatureVector, computeMomentumCrossFeatures, loadFeatureSchema, type FeatureSchema } from '../xgbFilter/featureBuilder.js';
+import { scoreMomentum } from '../xgbFilter/momentumScorer.js';
+import { computeMomentumMultiplier } from '../xgbFilter/momentumMultiplier.js';
+import { MOMENTUM_MODEL_PATH, MOMENTUM_SCHEMA_PATH } from '../xgbFilter/config.js';
 import { DynamicRMarginSizer } from '../risk/dynamicRMarginSizer.js';
 import { wouldExceedRiskPool, type OpenPositionRisk } from '../risk/riskPool.js';
 import {
@@ -37,6 +41,17 @@ export interface ProcessCandleInput {
   candles1m: CandleData[];
   /** TICKET-017 Phần A: daily candles, ending at "now" like the other timeframes — feeds the macro trend filter (unused unless EntryRouterConfig.macroTrendFilterEnabled is true). */
   candles1d: CandleData[];
+  /**
+   * TICKET-024 Phần B: 1h candles ending at "now", SEPARATE from `candles1h` above and sized much
+   * longer (>= EMA_1H_SLOW_PERIOD = 200 candles) — momentum's emaRatioSlow needs 200 1h candles of
+   * history, far more than regime/entry's own `candles1h` window (40) ever needed. Deliberately kept
+   * as its own field rather than just enlarging `candles1h` itself: Wilder's RMA-style smoothing
+   * (used throughout regime/) is NOT invariant to how far back the window starts — a longer window
+   * changes the seed point and therefore the tail ADX/DI values regime classification reads, which
+   * would silently change entry/backtest results this ticket must not touch. Unused unless
+   * momentumFilterConfig.momentumFilterEnabled is true.
+   */
+  candles1hMomentum: CandleData[];
   accountBalance: number;
   /** Other symbols' currently open positions — THIS symbol's own position must not be included (checked separately by construction: only called when this symbol has none open). */
   otherOpenPositionsRisk: OpenPositionRisk[];
@@ -115,7 +130,17 @@ export function advancePosition(
   return { position: trailed, exitReason: null, exitPrice: null };
 }
 
-export function processCandle(input: ProcessCandleInput, state: SymbolState, config: OrchestratorConfig): ProcessCandleResult {
+// TICKET-024 Phần B.1: cached across calls — read once, never re-parsed per candle. Schema content
+// itself is still always read fresh from disk on first use, never hard-coded in TS.
+let cachedMomentumSchema: FeatureSchema | undefined;
+function getMomentumSchema(): FeatureSchema {
+  if (cachedMomentumSchema === undefined) {
+    cachedMomentumSchema = loadFeatureSchema(MOMENTUM_SCHEMA_PATH);
+  }
+  return cachedMomentumSchema;
+}
+
+export async function processCandle(input: ProcessCandleInput, state: SymbolState, config: OrchestratorConfig): Promise<ProcessCandleResult> {
   // Step 1 — regime, always runs.
   const regimeOutput = detectRegime({
     candles5m: input.candles5m,
@@ -166,10 +191,45 @@ export function processCandle(input: ProcessCandleInput, state: SymbolState, con
       return { symbolState: { ...state, regimeState }, accountBalance: input.accountBalance, event: null };
     }
 
+    // TICKET-024 Phần C/D — soft risk-multiplier from the momentum model, applied to the sizer's
+    // REQUESTED risk (riskDollarOrPercent) so it flows through maxMarginCap capping the same way a
+    // smaller riskDollarOrPercent naturally would. Never gates entry outright — only scales size.
+    // Off by default: momentumMultiplier stays 1.0 and combinedRiskMultiplier === draftSetup.riskMultiplier
+    // (itself always 1.0 for every regime that currently reaches this point), so behavior is
+    // byte-for-byte unchanged from before this ticket unless momentumFilterConfig.momentumFilterEnabled.
+    let momentumMultiplier = 1.0;
+    if (config.momentumFilterConfig.momentumFilterEnabled) {
+      const crossFeatures = computeMomentumCrossFeatures(input.candles5m, input.candles1hMomentum);
+      if (crossFeatures !== undefined) {
+        const schema = getMomentumSchema();
+        const featureVector = buildFeatureVector(
+          {
+            symbol: input.symbol,
+            adx1h: regimeOutput.computedMetrics.adx1h as number,
+            atrPercentile5m: regimeOutput.computedMetrics.atrPercentile5m as number,
+            bbWidthPercentile15m: regimeOutput.computedMetrics.bbWidthPercentile15m as number,
+            volumeZScore5m: regimeOutput.computedMetrics.volumeZScore5m as number,
+            atrTrend5m: regimeOutput.computedMetrics.atrTrend5m as string,
+            adxDirection1h: regimeOutput.adxDirection1h as string,
+            macroDirection,
+            ...crossFeatures,
+          },
+          schema,
+        );
+        const rawScore = await scoreMomentum(MOMENTUM_MODEL_PATH, featureVector);
+        // PM-approved approximation (TICKET-024): the model only learned P(upward move); SHORT uses
+        // 1-p as its "supporting score" instead of a real down-move probability.
+        const p = draftSetup.side === 'LONG' ? rawScore : 1 - rawScore;
+        momentumMultiplier = computeMomentumMultiplier(p, config.momentumFilterConfig);
+      }
+      // crossFeatures undefined (insufficient EMA/ATR history) -> momentumMultiplier stays 1.0, same as disabled.
+    }
+    const combinedRiskMultiplier = draftSetup.riskMultiplier * momentumMultiplier;
+
     const slDistancePercent = Math.abs(draftSetup.entryPrice - draftSetup.slPrice) / draftSetup.entryPrice;
     const sizingOutput = new DynamicRMarginSizer().calculate({
       accountBalance: input.accountBalance,
-      riskDollarOrPercent: config.riskDollarOrPercent,
+      riskDollarOrPercent: config.riskDollarOrPercent * combinedRiskMultiplier,
       entryPrice: draftSetup.entryPrice,
       slDistancePercent,
       leverage: config.leverage,
@@ -206,7 +266,7 @@ export function processCandle(input: ProcessCandleInput, state: SymbolState, con
       tpPlan: config.tpPlan,
       entryTimestamp: currentCandle.timestamp,
       entryPrice: draftSetup.entryPrice,
-      riskMultiplier: draftSetup.riskMultiplier,
+      riskMultiplier: combinedRiskMultiplier,
       actualRiskDollar: sizingOutput.actualRiskDollar,
       marginRequired: sizingOutput.marginRequired,
     };
@@ -221,7 +281,7 @@ export function processCandle(input: ProcessCandleInput, state: SymbolState, con
           entryTimestamp: currentCandle.timestamp,
           actualRiskDollar: sizingOutput.actualRiskDollar,
           marginRequired: sizingOutput.marginRequired,
-          riskMultiplier: draftSetup.riskMultiplier,
+          riskMultiplier: combinedRiskMultiplier,
         },
       },
       accountBalance: input.accountBalance,
