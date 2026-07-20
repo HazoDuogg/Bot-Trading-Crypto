@@ -1,0 +1,57 @@
+{
+  "numeric_features": [
+    "volAdjReturn5m",
+    "emaRatioFast",
+    "emaRatioSlow",
+    "adx1h",
+    "atrPercentile5m",
+    "bbWidthPercentile15m",
+    "volumeZScore5m"
+  ],
+  "categorical_feature_order": [
+    "atrTrend5m",
+    "adxDirection1h",
+    "macroDirection",
+    "symbol"
+  ],
+  "categorical_features": {
+    "atrTrend5m": [
+      "decreasing",
+      "increasing"
+    ],
+    "adxDirection1h": [
+      "DOWN",
+      "UP"
+    ],
+    "macroDirection": [
+      "DOWN",
+      "UP"
+    ],
+    "symbol": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT",
+      "XRPUSDT"
+    ]
+  },
+  "missing_categorical_value": "UNKNOWN",
+  "feature_order": [
+    "volAdjReturn5m",
+    "emaRatioFast",
+    "emaRatioSlow",
+    "adx1h",
+    "atrPercentile5m",
+    "bbWidthPercentile15m",
+    "volumeZScore5m",
+    "atrTrend5m__decreasing",
+    "atrTrend5m__increasing",
+    "adxDirection1h__DOWN",
+    "adxDirection1h__UP",
+    "macroDirection__DOWN",
+    "macroDirection__UP",
+    "symbol__BTCUSDT",
+    "symbol__ETHUSDT",
+    "symbol__SOLUSDT",
+    "symbol__XRPUSDT"
+  ]
+}

@@ -13,7 +13,7 @@ import { EntryConfig } from '../entry/config.js';
 import { buildFeatureVector, computeMomentumCrossFeatures, loadFeatureSchema, type FeatureSchema } from '../xgbFilter/featureBuilder.js';
 import { scoreMomentum } from '../xgbFilter/momentumScorer.js';
 import { computeMomentumMultiplier } from '../xgbFilter/momentumMultiplier.js';
-import { MOMENTUM_MODEL_PATH, MOMENTUM_SCHEMA_PATH } from '../xgbFilter/config.js';
+import { MOMENTUM_MODEL_PATH, MOMENTUM_SCHEMA_PATH, MOMENTUM_BEARISH_MODEL_PATH, MOMENTUM_BEARISH_SCHEMA_PATH } from '../xgbFilter/config.js';
 import { DynamicRMarginSizer } from '../risk/dynamicRMarginSizer.js';
 import { wouldExceedRiskPool, type OpenPositionRisk } from '../risk/riskPool.js';
 import {
@@ -130,14 +130,24 @@ export function advancePosition(
   return { position: trailed, exitReason: null, exitPrice: null };
 }
 
-// TICKET-024 Phần B.1: cached across calls — read once, never re-parsed per candle. Schema content
-// itself is still always read fresh from disk on first use, never hard-coded in TS.
+// TICKET-024 Phần B.1 / TICKET-025 Phần C: cached across calls — read once, never re-parsed per
+// candle. Schema content itself is still always read fresh from disk on first use, never
+// hard-coded in TS. Bullish (LONG) and bearish (SHORT) are separately-trained models — their
+// schemas are NOT assumed identical (category order can legitimately differ) and are cached apart.
 let cachedMomentumSchema: FeatureSchema | undefined;
 function getMomentumSchema(): FeatureSchema {
   if (cachedMomentumSchema === undefined) {
     cachedMomentumSchema = loadFeatureSchema(MOMENTUM_SCHEMA_PATH);
   }
   return cachedMomentumSchema;
+}
+
+let cachedMomentumBearishSchema: FeatureSchema | undefined;
+function getMomentumBearishSchema(): FeatureSchema {
+  if (cachedMomentumBearishSchema === undefined) {
+    cachedMomentumBearishSchema = loadFeatureSchema(MOMENTUM_BEARISH_SCHEMA_PATH);
+  }
+  return cachedMomentumBearishSchema;
 }
 
 export async function processCandle(input: ProcessCandleInput, state: SymbolState, config: OrchestratorConfig): Promise<ProcessCandleResult> {
@@ -201,7 +211,11 @@ export async function processCandle(input: ProcessCandleInput, state: SymbolStat
     if (config.momentumFilterConfig.momentumFilterEnabled) {
       const crossFeatures = computeMomentumCrossFeatures(input.candles5m, input.candles1hMomentum);
       if (crossFeatures !== undefined) {
-        const schema = getMomentumSchema();
+        // TICKET-025 Phần C: dedicated LONG/SHORT models — no more 1-p(bullish) approximation for
+        // SHORT (TICKET-024). Each side's own model + own schema (never assumed identical).
+        const isLong = draftSetup.side === 'LONG';
+        const modelPath = isLong ? MOMENTUM_MODEL_PATH : MOMENTUM_BEARISH_MODEL_PATH;
+        const schema = isLong ? getMomentumSchema() : getMomentumBearishSchema();
         const featureVector = buildFeatureVector(
           {
             symbol: input.symbol,
@@ -216,10 +230,7 @@ export async function processCandle(input: ProcessCandleInput, state: SymbolStat
           },
           schema,
         );
-        const rawScore = await scoreMomentum(MOMENTUM_MODEL_PATH, featureVector);
-        // PM-approved approximation (TICKET-024): the model only learned P(upward move); SHORT uses
-        // 1-p as its "supporting score" instead of a real down-move probability.
-        const p = draftSetup.side === 'LONG' ? rawScore : 1 - rawScore;
+        const p = await scoreMomentum(modelPath, featureVector);
         momentumMultiplier = computeMomentumMultiplier(p, config.momentumFilterConfig);
       }
       // crossFeatures undefined (insufficient EMA/ATR history) -> momentumMultiplier stays 1.0, same as disabled.

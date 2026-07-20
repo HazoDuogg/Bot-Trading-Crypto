@@ -16,6 +16,10 @@
  * Output: data/training/momentum-labeled.csv (or --out=) — separate from
  * data/training/draft-setups-labeled*.csv (TICKET-019/020/022), not overwritten.
  *
+ * TICKET-025 Phần A: added label_bearish_momentum (symmetric Fixed-Time-Horizon label, opposite
+ * comparison direction) on the SAME already-computed features per row — no feature recomputed twice.
+ * Trains the SHORT-side model, replacing the 1-p(bullish) approximation used since TICKET-024.
+ *
  * Run from repo root: `npm run build:scripts && node apps/bot/scripts-dist/generateMomentumTrainingData.js`
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -84,6 +88,8 @@ interface Row {
   emaRatioFast: number;
   emaRatioSlow: number;
   label_bullish_momentum: 0 | 1;
+  /** TICKET-025 Phần A: symmetric label on the SAME features (down-move instead of up-move) — trains the SHORT-side model, replacing the 1-p approximation. */
+  label_bearish_momentum: 0 | 1;
 }
 
 function rowsForSymbol(symbol: string, ohlcvDir: string): Row[] {
@@ -162,13 +168,14 @@ function rowsForSymbol(symbol: string, ohlcvDir: string): Row[] {
     // B.3 — Fixed-Time-Horizon label: does price reach +THRESHOLD_PCT at ANY point in the next
     // HORIZON_CANDLES closes? Not "ends up higher" — "touches the target at least once".
     if (i + HORIZON_CANDLES >= candles5m.length) continue; // not enough future candles to label — skip
-    const target = candle.close * (1 + THRESHOLD_PCT);
-    let label: 0 | 1 = 0;
+    const bullishTarget = candle.close * (1 + THRESHOLD_PCT);
+    const bearishTarget = candle.close * (1 - THRESHOLD_PCT); // TICKET-025 Phần A: symmetric, opposite comparison
+    let bullishLabel: 0 | 1 = 0;
+    let bearishLabel: 0 | 1 = 0;
     for (let j = i + 1; j <= i + HORIZON_CANDLES; j++) {
-      if (candles5m[j].close >= target) {
-        label = 1;
-        break;
-      }
+      if (candles5m[j].close >= bullishTarget) bullishLabel = 1;
+      if (candles5m[j].close <= bearishTarget) bearishLabel = 1;
+      if (bullishLabel === 1 && bearishLabel === 1) break;
     }
 
     rows.push({
@@ -184,7 +191,8 @@ function rowsForSymbol(symbol: string, ohlcvDir: string): Row[] {
       volAdjReturn5m,
       emaRatioFast,
       emaRatioSlow,
-      label_bullish_momentum: label,
+      label_bullish_momentum: bullishLabel,
+      label_bearish_momentum: bearishLabel,
     });
   }
 
@@ -193,7 +201,7 @@ function rowsForSymbol(symbol: string, ohlcvDir: string): Row[] {
 
 function rowsCsv(rows: Row[]): string {
   const header =
-    'symbol,timestampUtc,adx1h,atrPercentile5m,bbWidthPercentile15m,volumeZScore5m,atrTrend5m,adxDirection1h,macroDirection,volAdjReturn5m,emaRatioFast,emaRatioSlow,label_bullish_momentum';
+    'symbol,timestampUtc,adx1h,atrPercentile5m,bbWidthPercentile15m,volumeZScore5m,atrTrend5m,adxDirection1h,macroDirection,volAdjReturn5m,emaRatioFast,emaRatioSlow,label_bullish_momentum,label_bearish_momentum';
   const lines = rows.map((r) =>
     [
       r.symbol,
@@ -209,6 +217,7 @@ function rowsCsv(rows: Row[]): string {
       r.emaRatioFast,
       r.emaRatioSlow,
       r.label_bullish_momentum,
+      r.label_bearish_momentum,
     ].join(','),
   );
   return [header, ...lines].join('\n') + '\n';
@@ -238,10 +247,12 @@ function main(): void {
 
   const totalRows = allRows.length;
   const bullishCount = allRows.filter((r) => r.label_bullish_momentum === 1).length;
+  const bearishCount = allRows.filter((r) => r.label_bearish_momentum === 1).length;
 
   console.log('');
   console.log(`Tổng số dòng: ${totalRows}`);
   console.log(`label_bullish_momentum=1: ${bullishCount} (${totalRows > 0 ? ((bullishCount / totalRows) * 100).toFixed(1) : '0.0'}%) — =0: ${totalRows - bullishCount} (${totalRows > 0 ? (((totalRows - bullishCount) / totalRows) * 100).toFixed(1) : '0.0'}%)`);
+  console.log(`label_bearish_momentum=1: ${bearishCount} (${totalRows > 0 ? ((bearishCount / totalRows) * 100).toFixed(1) : '0.0'}%) — =0: ${totalRows - bearishCount} (${totalRows > 0 ? (((totalRows - bearishCount) / totalRows) * 100).toFixed(1) : '0.0'}%)`);
   console.log(`→ ${outPath}`);
 }
 

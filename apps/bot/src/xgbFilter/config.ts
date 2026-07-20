@@ -33,3 +33,8 @@ export const DEFAULT_MOMENTUM_FILTER_CONFIG: MomentumFilterConfig = {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 export const MOMENTUM_MODEL_PATH = path.join(REPO_ROOT, 'models', 'xgb_momentum_v1.onnx');
 export const MOMENTUM_SCHEMA_PATH = path.join(REPO_ROOT, 'models', 'xgb_momentum_v1_feature_schema.json');
+// TICKET-025 Phần C: SHORT-side model — replaces the 1-p(bullish) approximation used since TICKET-024.
+// Its own schema, NOT assumed identical to the bullish one (category order can legitimately differ
+// between the two separately-trained models).
+export const MOMENTUM_BEARISH_MODEL_PATH = path.join(REPO_ROOT, 'models', 'xgb_momentum_bearish_v1.onnx');
+export const MOMENTUM_BEARISH_SCHEMA_PATH = path.join(REPO_ROOT, 'models', 'xgb_momentum_bearish_v1_feature_schema.json');

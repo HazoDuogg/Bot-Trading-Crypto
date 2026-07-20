@@ -3,7 +3,13 @@ import { processCandle, type ProcessCandleInput } from './orchestrator.js';
 import { INITIAL_SYMBOL_STATE, type OrchestratorConfig, type SymbolState } from './types.js';
 import { MarketRegime, type CandleData } from '../regime/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../entry/entryRouter.js';
-import { DEFAULT_MOMENTUM_FILTER_CONFIG } from '../xgbFilter/config.js';
+import { DEFAULT_MOMENTUM_FILTER_CONFIG, MOMENTUM_BEARISH_MODEL_PATH, MOMENTUM_BEARISH_SCHEMA_PATH } from '../xgbFilter/config.js';
+import { buildFeatureVector, computeMomentumCrossFeatures, loadFeatureSchema } from '../xgbFilter/featureBuilder.js';
+import { scoreMomentum } from '../xgbFilter/momentumScorer.js';
+import { computeMomentumMultiplier } from '../xgbFilter/momentumMultiplier.js';
+import { detectRegime } from '../regime/regimeDetector.js';
+import { wilderDIDirectionSeries } from '../regime/indicators.js';
+import { EntryConfig } from '../entry/config.js';
 import { openPosition, type SlTpManagerInput } from '../risk/slTpManager.js';
 
 function c(open: number, close: number, high: number, low: number, timestamp = 0): CandleData {
@@ -288,5 +294,113 @@ describe('processCandle — no open position, entry pipeline wiring', () => {
     expect(result.symbolState.openPosition).toBeNull();
     expect(result.event).toMatchObject({ type: 'SKIPPED', reason: 'RISK_POOL_EXCEEDED' });
     expect(result.accountBalance).toBe(400);
+  });
+});
+
+// TICKET-025 Phần C: SHORT setups now score via the DEDICATED bearish model — no more 1-p(bullish)
+// approximation (TICKET-024). This exercises that path end-to-end with the real ONNX model.
+describe('processCandle — momentum filter on SHORT uses the bearish model directly (TICKET-025)', () => {
+  // Mirrors fullOpenFlowFixture() (LONG) but BEARISH throughout: downtrend 1h, up-close OB candle
+  // before a down-push BOS, "between" MSS confirming a lower-high reversal down. Same technique as
+  // entryRouter.test.ts's bearishTrendCandles5m/bearishMssCandles, offset to the ~94-106 price scale
+  // fullOpenFlowFixture() already uses.
+  function fullOpenFlowFixtureShort() {
+    // 250 candles so candles1hMomentum has enough history for emaRatioSlow's EMA(200); regime/entry
+    // only ever sees the last 40 (matches backtest.ts's WINDOW_1H vs WINDOW_1H_MOMENTUM split).
+    const fullCandles1h = makeCandles(250, 3_600_000, (i) => 300 - i * 0.5, () => 1); // downtrend -> high ADX, adxDirection1h=DOWN
+    const candles1h = fullCandles1h.slice(-40);
+
+    const fillerCount = 310;
+    const filler5m = makeCandles(fillerCount, 300_000, () => 100, () => 0.5);
+    const obPatternBearish5m: CandleData[] = [
+      c(101, 101, 102, 100),
+      c(99.5, 99.5, 101, 98),
+      c(97, 97, 99, 95), // swing low (95)
+      c(99, 99, 100, 98),
+      c(101, 101, 102, 100),
+      c(99, 101, 101, 99), // OB candidate (up), zone [99, 101]
+      c(101, 98, 101, 97.5),
+      c(98, 94, 98.5, 94), // BOS confirmed, close 94 < 95
+    ];
+    const lastFillerTs = filler5m[filler5m.length - 1].timestamp;
+    const obPatternWithTs = obPatternBearish5m.map((candle, i) => ({ ...candle, timestamp: lastFillerTs + (i + 1) * 300_000 }));
+    const candles5m = [...filler5m, ...obPatternWithTs];
+    const obCandleIndex = fillerCount + 5;
+
+    const candles15m = makeCandles(325, 900_000, () => 100, () => 1);
+
+    const mssStartTs = candles5m[obCandleIndex].timestamp;
+    const mssPatternBearish1m: CandleData[] = [
+      c(99.5, 99.5, 100, 99),
+      c(99.75, 99.75, 100.5, 99),
+      c(101.5, 101.5, 103, 100), // swing high #1 (103)
+      c(99.75, 99.75, 100.5, 99),
+      c(99.5, 99.5, 100, 99),
+      c(98, 98, 100, 96), // swing low BETWEEN the two highs (96)
+      c(99.75, 99.75, 100.5, 99),
+      c(99.5, 99.5, 100, 99),
+      c(100.5, 100.5, 102, 99), // swing high #2 (102) — lower-high vs the first
+      c(99.75, 99.75, 100.5, 99),
+      c(99.5, 99.5, 100, 99),
+      c(96.5, 95, 96.8, 94.8), // MSS confirmed here, close = 95
+    ].map((candle, i) => ({ ...candle, timestamp: mssStartTs + i * 60_000 }));
+
+    return { candles5m, candles15m, candles1h, candles1m: mssPatternBearish1m, candles1hMomentum: fullCandles1h };
+  }
+
+  it('opens a SHORT and sizes it using scoreMomentum() on the bearish model+schema (not 1-p of bullish)', async () => {
+    const fixture = fullOpenFlowFixtureShort();
+    const momentumConfig: OrchestratorConfig = {
+      ...baseConfig,
+      momentumFilterConfig: { ...DEFAULT_MOMENTUM_FILTER_CONFIG, momentumFilterEnabled: true },
+    };
+
+    const input = baseInput(fixture);
+    const result = await processCandle(input, INITIAL_SYMBOL_STATE, momentumConfig);
+
+    expect(result.symbolState.regimeState.previousRegime).toBe(MarketRegime.TREND_RIDER);
+    expect(result.event).toMatchObject({ type: 'OPEN', symbol: 'BTCUSDT', side: 'SHORT', setupType: 'OB', regime: MarketRegime.TREND_RIDER });
+
+    // Independently recompute the EXACT feature vector orchestrator.ts itself would have built for
+    // this candle (same detectRegime()/macroDirection calls it makes internally, on the SAME `input`
+    // actually passed to processCandle — not the raw fixture, since baseInput() fills in candles1d),
+    // score it against the bearish model, and assert the event's riskMultiplier matches to
+    // floating-point precision — proves the wiring genuinely runs the bearish model end-to-end.
+    const regimeOutput = detectRegime({
+      candles5m: input.candles5m,
+      candles15m: input.candles15m,
+      candles1h: input.candles1h,
+      previousRegime: null,
+      previousCandidateRegime: null,
+      streakCount: 0,
+      previousDangerZoneTimestamp: null,
+    });
+    const macroDirectionSeries = wilderDIDirectionSeries(input.candles1d, EntryConfig.MACRO_TREND_ADX_PERIOD_1D);
+    const macroDirection = macroDirectionSeries.length > 0 ? macroDirectionSeries[macroDirectionSeries.length - 1] : undefined;
+    const crossFeatures = computeMomentumCrossFeatures(input.candles5m, input.candles1hMomentum);
+    expect(crossFeatures).toBeDefined();
+
+    const bearishSchema = loadFeatureSchema(MOMENTUM_BEARISH_SCHEMA_PATH);
+    const vector = buildFeatureVector(
+      {
+        symbol: 'BTCUSDT',
+        adx1h: regimeOutput.computedMetrics.adx1h as number,
+        atrPercentile5m: regimeOutput.computedMetrics.atrPercentile5m as number,
+        bbWidthPercentile15m: regimeOutput.computedMetrics.bbWidthPercentile15m as number,
+        volumeZScore5m: regimeOutput.computedMetrics.volumeZScore5m as number,
+        atrTrend5m: regimeOutput.computedMetrics.atrTrend5m as string,
+        adxDirection1h: regimeOutput.adxDirection1h as string,
+        macroDirection,
+        ...crossFeatures!,
+      },
+      bearishSchema,
+    );
+    const bearishP = await scoreMomentum(MOMENTUM_BEARISH_MODEL_PATH, vector);
+    const expectedMomentumMultiplier = computeMomentumMultiplier(bearishP, momentumConfig.momentumFilterConfig);
+    // draftSetup.riskMultiplier is 1.0 for TREND_RIDER (DEFAULT_ENTRY_ROUTER_CONFIG), so combined == momentumMultiplier alone.
+    const expectedCombinedRiskMultiplier = 1.0 * expectedMomentumMultiplier;
+
+    const eventRiskMultiplier = (result.event as { riskMultiplier: number }).riskMultiplier;
+    expect(eventRiskMultiplier).toBeCloseTo(expectedCombinedRiskMultiplier, 6);
   });
 });

@@ -11,6 +11,12 @@ Run from repo root: apps/ml-training/.venv/Scripts/python.exe apps/ml-training/t
 (after `pip install -r apps/ml-training/requirements.txt` in that venv, and
 `npm run generate-momentum-training-data` to produce data/training/momentum-labeled.csv).
 
+TICKET-025 Phần B: --label-column=<col> --model-name=<name> trains against a different label column
+in the SAME momentum-labeled.csv (features are shared/unchanged) and writes models/<name>.onnx +
+models/<name>_feature_schema.json — e.g. --label-column=label_bearish_momentum
+--model-name=xgb_momentum_bearish_v1 for the SHORT-side model. Defaults reproduce the TICKET-023
+bullish run exactly (label_bullish_momentum / xgb_momentum_v1). Logic below is otherwise untouched.
+
 === C.2/C.3 note: how early stopping and calibration combine ===
 C.2 requires fitting XGBClassifier directly with eval_set + early_stopping_rounds against a held-out
 VALIDATION set (not test). C.3 requires the SAME calibrated-ONNX-export mechanism already verified in
@@ -28,6 +34,7 @@ that isn't the held-out test set) — train_xgb.py's train-set-internal-CV calib
 usable here since it requires an UNfrozen (re-fittable) estimator.
 """
 
+import argparse
 import json
 import os
 import sys
@@ -45,10 +52,18 @@ from xgboost import XGBClassifier
 from onnx_calibration_bridge import export_calibrated_onnx, validate_onnx_matches_sklearn
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-CSV_PATH = os.path.join(REPO_ROOT, "data", "training", "momentum-labeled.csv")
 MODELS_DIR = os.path.join(REPO_ROOT, "models")
-ONNX_PATH = os.path.join(MODELS_DIR, "xgb_momentum_v1.onnx")
-SCHEMA_PATH = os.path.join(MODELS_DIR, "xgb_momentum_v1_feature_schema.json")
+
+# TICKET-025 Phần B — defaults reproduce the TICKET-023 bullish run exactly when no args are passed.
+_parser = argparse.ArgumentParser()
+_parser.add_argument("--label-column", default="label_bullish_momentum")
+_parser.add_argument("--model-name", default="xgb_momentum_v1")
+_args = _parser.parse_args()
+
+CSV_PATH = os.path.join(REPO_ROOT, "data", "training", "momentum-labeled.csv")
+LABEL_COLUMN = _args.label_column
+ONNX_PATH = os.path.join(MODELS_DIR, f"{_args.model_name}.onnx")
+SCHEMA_PATH = os.path.join(MODELS_DIR, f"{_args.model_name}_feature_schema.json")
 
 # B.2/B.4 columns — order here IS the order fed into the model.
 NUMERIC_FEATURES = ["volAdjReturn5m", "emaRatioFast", "emaRatioSlow", "adx1h", "atrPercentile5m", "bbWidthPercentile15m", "volumeZScore5m"]
@@ -133,15 +148,16 @@ def main() -> None:
     test_df = df.iloc[val_end:]
 
     X_train = train_df[feature_cols].values.astype(np.float32)
-    y_train = train_df["label_bullish_momentum"].values.astype(int)
+    y_train = train_df[LABEL_COLUMN].values.astype(int)
     X_val = val_df[feature_cols].values.astype(np.float32)
-    y_val = val_df["label_bullish_momentum"].values.astype(int)
+    y_val = val_df[LABEL_COLUMN].values.astype(int)
     X_test = test_df[feature_cols].values.astype(np.float32)
-    y_test = test_df["label_bullish_momentum"].values.astype(int)
+    y_test = test_df[LABEL_COLUMN].values.astype(int)
 
-    print(f"Train: {len(train_df)} dòng, label_bullish_momentum rate = {y_train.mean():.3f}")
-    print(f"Val:   {len(val_df)} dòng, label_bullish_momentum rate = {y_val.mean():.3f}")
-    print(f"Test:  {len(test_df)} dòng, label_bullish_momentum rate = {y_test.mean():.3f}")
+    print(f"Nhãn: {LABEL_COLUMN}")
+    print(f"Train: {len(train_df)} dòng, {LABEL_COLUMN} rate = {y_train.mean():.3f}")
+    print(f"Val:   {len(val_df)} dòng, {LABEL_COLUMN} rate = {y_val.mean():.3f}")
+    print(f"Test:  {len(test_df)} dòng, {LABEL_COLUMN} rate = {y_test.mean():.3f}")
     print(f"(purge gap = {purge} dòng bị bỏ ở mỗi ranh giới train/val và val/test)")
 
     # C.2
