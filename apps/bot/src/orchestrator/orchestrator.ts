@@ -93,6 +93,19 @@ export interface ManipulatedDiagnostic {
   lookbackWindow: CandleData[];
 }
 
+/**
+ * TICKET-033 — diagnostic-only payload for the moment regime freshly transitions into DANGER_ZONE
+ * (fast-in confirmation, not just candidate). Same pattern as ManipulatedDiagnostic/TICKET-027 —
+ * not part of normal orchestrator output, only built and delivered when the caller passes
+ * onDangerZoneConfirmed to processCandle.
+ */
+export interface DangerZoneDiagnostic {
+  symbol: string;
+  timestamp: number;
+  atrPercentile5m: number;
+  volumeZScore5m: number;
+}
+
 function touchesFavorable(side: 'LONG' | 'SHORT', candle: CandleData, price: number): boolean {
   return side === 'LONG' ? isTpHit(side, candle.high, price) : isTpHit(side, candle.low, price);
 }
@@ -185,6 +198,7 @@ export async function processCandle(
   state: SymbolState,
   config: OrchestratorConfig,
   onManipulatedConfirmed?: (diagnostic: ManipulatedDiagnostic) => void,
+  onDangerZoneConfirmed?: (diagnostic: DangerZoneDiagnostic) => void,
 ): Promise<ProcessCandleResult> {
   // Step 1 — regime, always runs.
   const regimeOutput = detectRegime({
@@ -220,6 +234,22 @@ export async function processCandle(
       lowerSweepCount: regimeOutput.computedMetrics.lowerSweepCount5m as number,
       volumeZScore5m: regimeOutput.computedMetrics.volumeZScore5m as number,
       lookbackWindow: input.candles5m.slice(-RegimeConfig.MANIPULATED_LOOKBACK_CANDLES),
+    });
+  }
+
+  // TICKET-033 — diagnostic-only, no effect on any decision below: fires once per fresh transition
+  // into DANGER_ZONE (state.regimeState.previousRegime was something else, now confirmed DANGER_ZONE).
+  // Same pattern as the MANIPULATED block above (TICKET-027).
+  if (
+    onDangerZoneConfirmed &&
+    regimeOutput.regime === MarketRegime.DANGER_ZONE &&
+    state.regimeState.previousRegime !== MarketRegime.DANGER_ZONE
+  ) {
+    onDangerZoneConfirmed({
+      symbol: input.symbol,
+      timestamp: currentCandle.timestamp,
+      atrPercentile5m: regimeOutput.computedMetrics.atrPercentile5m as number,
+      volumeZScore5m: regimeOutput.computedMetrics.volumeZScore5m as number,
     });
   }
 

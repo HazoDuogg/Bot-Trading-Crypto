@@ -14,7 +14,7 @@ import path from 'node:path';
 import type { CandleData } from '../dist/regime/types.js';
 import { RegimeConfig } from '../dist/regime/config.js';
 import { computeCorrelatedRiskRatio } from '../dist/regime/correlatedRisk.js';
-import { processCandle, type ManipulatedDiagnostic, type ProcessCandleInput } from '../dist/orchestrator/orchestrator.js';
+import { processCandle, type DangerZoneDiagnostic, type ManipulatedDiagnostic, type ProcessCandleInput } from '../dist/orchestrator/orchestrator.js';
 import { INITIAL_SYMBOL_STATE, type CloseTradeEvent, type OrchestratorConfig, type SymbolState } from '../dist/orchestrator/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import type { EntryStyleForNeutral } from '../dist/entry/types.js';
@@ -175,6 +175,12 @@ function formatManipulatedDiagnostic(d: ManipulatedDiagnostic): string {
   ].join('\n');
 }
 
+// TICKET-033 — diagnostic log only, separate file from backtest-report/trades. Formats one entry per
+// fresh DANGER_ZONE confirmation (see orchestrator.ts's onDangerZoneConfirmed callback). Same pattern as TICKET-027.
+function formatDangerZoneDiagnostic(d: DangerZoneDiagnostic): string {
+  return `[DANGER_ZONE] symbol=${d.symbol} timestamp=${new Date(d.timestamp).toISOString()} atrPercentile5m=${d.atrPercentile5m}\n  volumeZScore5m=${d.volumeZScore5m}`;
+}
+
 function tradesCsv(trades: CloseTradeEvent[]): string {
   const header = 'symbol,side,regime,setupType,tpPlan,entryTimestamp,entryPrice,exitTimestamp,exitPrice,exitReason,pnlUsd,pnlPct,riskMultiplierApplied,accountBalanceAfter';
   const rows = trades.map((t) =>
@@ -209,6 +215,7 @@ async function main(): Promise<void> {
   const trades: CloseTradeEvent[] = [];
   let skippedCount = 0;
   const manipulatedLogLines: string[] = []; // TICKET-027
+  const dangerZoneLogLines: string[] = []; // TICKET-033
 
   const totalSteps = Math.min(...SYMBOLS.map((s) => symbolsData[s].candles5m.length));
   // startStep must guarantee enough REAL TIME has elapsed for every timeframe's window to be full,
@@ -279,7 +286,13 @@ async function main(): Promise<void> {
         otherOpenPositionsRisk,
       };
 
-      const result = await processCandle(input, sd.state, config, (d) => manipulatedLogLines.push(formatManipulatedDiagnostic(d)));
+      const result = await processCandle(
+        input,
+        sd.state,
+        config,
+        (d) => manipulatedLogLines.push(formatManipulatedDiagnostic(d)),
+        (d) => dangerZoneLogLines.push(formatDangerZoneDiagnostic(d)),
+      );
       sd.state = result.symbolState;
       accountBalance = result.accountBalance;
 
@@ -299,6 +312,11 @@ async function main(): Promise<void> {
   const manipulatedLogPath = path.resolve(process.cwd(), 'data/manipulated-log.txt');
   writeFileSync(manipulatedLogPath, manipulatedLogLines.join('\n\n') + '\n');
   console.log(`→ ${manipulatedLogPath} (${manipulatedLogLines.length} lần MANIPULATED được xác nhận mới)`);
+
+  // TICKET-033 — điều tra riêng, không trộn vào backtest-report.md/backtest-trades.csv.
+  const dangerZoneLogPath = path.resolve(process.cwd(), 'data/danger-zone-log.txt');
+  writeFileSync(dangerZoneLogPath, dangerZoneLogLines.join('\n\n') + '\n');
+  console.log(`→ ${dangerZoneLogPath} (${dangerZoneLogLines.length} lần DANGER_ZONE được xác nhận mới)`);
 
   // TICKET-030: CORRELATED_RISK has no CLI on/off flag (unconditionally wired in, same pattern as
   // MANIPULATED/LOW_LIQUIDITY) — "-correlated" appended so this run's report/trades never overwrite
