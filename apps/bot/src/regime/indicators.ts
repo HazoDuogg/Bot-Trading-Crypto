@@ -248,6 +248,36 @@ export function lastDefined(series: number[]): number | undefined {
   return undefined;
 }
 
+const CANDLES_PER_DAY_5M = 288; // 24h / 5min
+
+/**
+ * TICKET-028: volume compared against the SAME time-of-day on the `lookbackDays` prior days
+ * (index i-288, i-288*2, ...), NOT a plain rolling window — crypto volume has a strong intraday
+ * session cycle (Asia/Europe/US), so a flat rolling average would flag every quiet off-session
+ * hour as "low liquidity" even on a perfectly normal day. `candles` must be 5m candles.
+ * sessionAvgVolume is the mean of however many same-time-of-day candles actually exist (fewer
+ * than lookbackDays near the start of a dataset is not an error). NaN wherever ZERO such candles
+ * exist yet (less than 1 full day of history behind index i).
+ */
+export function sessionRelativeVolumeRatio(candles: CandleData[], lookbackDays: number): number[] {
+  const n = candles.length;
+  const out = new Array<number>(n).fill(NaN);
+  for (let i = 0; i < n; i++) {
+    let sum = 0;
+    let count = 0;
+    for (let k = 1; k <= lookbackDays; k++) {
+      const idx = i - CANDLES_PER_DAY_5M * k;
+      if (idx < 0) break; // further-back days don't exist either
+      sum += candles[idx].volume;
+      count++;
+    }
+    if (count === 0) continue;
+    const sessionAvgVolume = sum / count;
+    out[i] = sessionAvgVolume === 0 ? NaN : candles[i].volume / sessionAvgVolume;
+  }
+  return out;
+}
+
 /**
  * PM-given formula (2026-07-17, entry/detectors/liquiditySweep.ts B.3): fraction of a candle's
  * high-low range that sits above the body (upper) / below the body (lower), 0-1. Zero-range candle

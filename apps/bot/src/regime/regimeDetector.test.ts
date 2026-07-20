@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { applyHysteresis, classifyCandidate, detectRegime, type HysteresisState } from './regimeDetector.js';
 import { MarketRegime, type CandleData, type ComputedMetrics } from './types.js';
 import { RegimeConfig } from './config.js';
+import { sessionRelativeVolumeRatio } from './indicators.js';
 
 // TICKET-007 Phần A — not covered by the reduced-test-scope memo (that memo applies to
 // slTpManager.ts only). DANGER_ZONE: bypass N_CANDLE_CONFIRM entering, keep it leaving.
@@ -320,5 +321,168 @@ describe('detectRegime — MANIPULATED integration (TICKET-026)', () => {
     expect(output.computedMetrics.volumeZScore5m).toBe(0);
     expect(output.candidateRegime).toBe(MarketRegime.MANIPULATED);
     expect(output.regime).toBe(MarketRegime.MANIPULATED); // fast-in — confirmed on the very first call
+  });
+});
+
+// TICKET-028 — LOW_LIQUIDITY: session-relative volume (current volume vs the SAME time-of-day on
+// prior days). Volume-only (no order book depth data available). Priority: right after MANIPULATED,
+// before TREND_RIDER.
+describe('classifyCandidate — LOW_LIQUIDITY (TICKET-028)', () => {
+  // Deliberately fails every OTHER branch (DANGER/MANIPULATED/TREND/COMPRESSION/CHOP/SIDEWAY), same
+  // isolation style as the MANIPULATED tests above — the only question under test is lowLiquidityRatio.
+  const neutralMetrics = {
+    adx1h: 25, // > SIDEWAY_ADX_THRESHOLD(20); adx1hRecent below has insufficient length -> no TREND_RIDER either
+    adx1hRecent: [25],
+    atrPercentile5m: 50, // < CHOP_ATR_PCT_THRESHOLD(70) and < DANGER_ATR_PCT_THRESHOLD(95)
+    bbWidthPercentile15m: 50, // > COMPRESSION_BBW_PCT_THRESHOLD(10)
+    atrTrend5m: 'flat' as const,
+    volumeZScore5m: 0, // < DANGER_VOLUME_ZSCORE_THRESHOLD(2.5)
+    upperSweepCount5m: 0, // < MANIPULATED_MIN_SWEEPS_EACH_SIDE(2)
+    lowerSweepCount5m: 0,
+  };
+
+  it('matches LOW_LIQUIDITY when lowLiquidityRatio is below LOW_LIQUIDITY_VOLUME_RATIO_THRESHOLD (sufficient session history)', () => {
+    const metrics: ComputedMetrics = { ...neutralMetrics, lowLiquidityRatio: 0.1 };
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.LOW_LIQUIDITY);
+  });
+
+  it('does NOT match LOW_LIQUIDITY when lowLiquidityRatio is at/above the threshold (volume normal for this time of day)', () => {
+    const metrics: ComputedMetrics = { ...neutralMetrics, lowLiquidityRatio: 0.9 };
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.NEUTRAL_TRANSITION);
+  });
+
+  it('does NOT throw and classifies normally when lowLiquidityRatio is undefined (insufficient session history — optional field, not in the mandatory-metrics check)', () => {
+    const metrics: ComputedMetrics = { ...neutralMetrics, lowLiquidityRatio: undefined };
+    expect(() => classifyCandidate(metrics, null)).not.toThrow();
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.NEUTRAL_TRANSITION);
+  });
+
+  it('does NOT throw and classifies normally when lowLiquidityRatio is NaN (insufficient session history)', () => {
+    const metrics: ComputedMetrics = { ...neutralMetrics, lowLiquidityRatio: NaN };
+    expect(() => classifyCandidate(metrics, null)).not.toThrow();
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.NEUTRAL_TRANSITION);
+  });
+});
+
+// TICKET-028 — LOW_LIQUIDITY uses NORMAL symmetric N_CANDLE_CONFIRM hysteresis both ways, unlike
+// DANGER_ZONE/MANIPULATED's fast-in/slow-out — thin liquidity is a slowly-changing session
+// characteristic, not a shock requiring an immediate reaction. NOT added to FAST_IN_SLOW_OUT_REGIMES.
+describe('applyHysteresis — LOW_LIQUIDITY normal hysteresis, not fast-in/slow-out (TICKET-028)', () => {
+  it('does NOT confirm LOW_LIQUIDITY immediately from a different confirmed state — requires N_CANDLE_CONFIRM to ENTER, unlike DANGER_ZONE/MANIPULATED', () => {
+    let state: HysteresisState = { regime: MarketRegime.SIDEWAY_SCALPER, candidateRegime: MarketRegime.SIDEWAY_SCALPER, streakCount: 0 };
+    for (let i = 0; i < RegimeConfig.N_CANDLE_CONFIRM - 1; i++) {
+      state = applyHysteresis(MarketRegime.LOW_LIQUIDITY, state);
+      expect(state.regime).toBe(MarketRegime.SIDEWAY_SCALPER); // still held
+    }
+    state = applyHysteresis(MarketRegime.LOW_LIQUIDITY, state);
+    expect(state.regime).toBe(MarketRegime.LOW_LIQUIDITY); // confirmed only once the streak completes
+  });
+
+  it('also requires N_CANDLE_CONFIRM to LEAVE a confirmed LOW_LIQUIDITY (symmetric, same rule both directions)', () => {
+    let state: HysteresisState = { regime: MarketRegime.LOW_LIQUIDITY, candidateRegime: MarketRegime.LOW_LIQUIDITY, streakCount: 0 };
+    for (let i = 0; i < RegimeConfig.N_CANDLE_CONFIRM - 1; i++) {
+      state = applyHysteresis(MarketRegime.TREND_RIDER, state);
+      expect(state.regime).toBe(MarketRegime.LOW_LIQUIDITY); // still held
+    }
+    state = applyHysteresis(MarketRegime.TREND_RIDER, state);
+    expect(state.regime).toBe(MarketRegime.TREND_RIDER);
+  });
+});
+
+// TICKET-028 — sessionRelativeVolumeRatio itself: proves the metric compares against the SAME
+// time-of-day on prior days, not a plain rolling/whole-day average (the entire reason
+// zScoreSeries/percentileRankSeries were NOT reused for this metric).
+describe('sessionRelativeVolumeRatio — session-relative, not a flat daily average (TICKET-028)', () => {
+  const CANDLES_PER_DAY = 288;
+
+  function buildCandles(days: number, quietSlotVolume: number, normalVolume: number, quietSlotIndex = 0): CandleData[] {
+    const startTs = Date.UTC(2024, 0, 1);
+    const candles: CandleData[] = [];
+    for (let d = 0; d < days; d++) {
+      for (let slot = 0; slot < CANDLES_PER_DAY; slot++) {
+        const i = d * CANDLES_PER_DAY + slot;
+        const volume = slot === quietSlotIndex ? quietSlotVolume : normalVolume;
+        candles.push({ timestamp: startTs + i * 300_000, open: 100, high: 100.5, low: 99.5, close: 100, volume });
+      }
+    }
+    return candles;
+  }
+
+  it('does NOT flag a candle as low volume when it matches its own recurring quiet-session baseline, even though far below the whole-day average', () => {
+    // slot 0 of every day is a recurring quiet session (volume 100), every other slot is 1000 —
+    // a whole-day average/z-score would flag slot 0 as a huge anomaly every single day.
+    const candles = buildCandles(6, 100, 1000);
+    const ratios = sessionRelativeVolumeRatio(candles, RegimeConfig.LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS);
+    const day6Slot0 = 5 * CANDLES_PER_DAY + 0;
+    expect(ratios[day6Slot0]).toBeCloseTo(1.0, 5); // matches its own session baseline exactly -> ratio 1.0, not low
+  });
+
+  it('DOES flag a candle as low volume when it drops well below its own recurring session baseline', () => {
+    const candles = buildCandles(6, 100, 1000);
+    const day6Slot0 = 5 * CANDLES_PER_DAY + 0;
+    candles[day6Slot0].volume = 10; // crashes to 10, well under this slot's usual 100
+    const ratios = sessionRelativeVolumeRatio(candles, RegimeConfig.LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS);
+    expect(ratios[day6Slot0]).toBeLessThan(RegimeConfig.LOW_LIQUIDITY_VOLUME_RATIO_THRESHOLD.enter);
+  });
+
+  it('returns NaN for every index in the first day of any dataset (zero same-time-of-day history yet)', () => {
+    const candles = buildCandles(1, 100, 1000);
+    const ratios = sessionRelativeVolumeRatio(candles, RegimeConfig.LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS);
+    expect(ratios.every((r) => Number.isNaN(r))).toBe(true);
+  });
+
+  it('averages over however many prior same-time-of-day candles exist when fewer than lookbackDays are available (not an error)', () => {
+    const candles = buildCandles(2, 100, 1000); // only 1 full prior day available, lookbackDays=14 requested
+    const ratios = sessionRelativeVolumeRatio(candles, RegimeConfig.LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS);
+    const day2Slot0 = 1 * CANDLES_PER_DAY + 0;
+    expect(ratios[day2Slot0]).toBeCloseTo(1.0, 5); // averaged over the single available prior day (100), current is 100 too
+  });
+});
+
+// TICKET-028 — full pipeline: computeMetrics()'s lowLiquidityRatio wiring (via the dedicated
+// candles5mSessionVolume field) feeding classifyCandidate() end-to-end, not just the isolated
+// unit-level tests above.
+describe('detectRegime — LOW_LIQUIDITY integration (TICKET-028)', () => {
+  function c(volume: number, timestamp: number): CandleData {
+    return { timestamp, open: 100, high: 100.5, low: 99.5, close: 100, volume }; // flat price -> adx1h ~ 0, bbWidth/atr stay boring
+  }
+
+  function makeFlatCandles(count: number, intervalMs: number, startTs: number, volume: number): CandleData[] {
+    return Array.from({ length: count }, (_, i) => c(volume, startTs + i * intervalMs));
+  }
+
+  it('classifies LOW_LIQUIDITY end-to-end when the latest candle drops well below its own recurring session-volume baseline', () => {
+    const startTs = Date.UTC(2024, 0, 1);
+    const candles1h = makeFlatCandles(40, 3_600_000, startTs, 1000); // flat -> adx1h ~ 0, avoids TREND_RIDER/CHOP
+    const candles15m = makeFlatCandles(325, 900_000, startTs, 1000); // avoids COMPRESSION
+
+    const CANDLES_PER_DAY = 288;
+    const days = RegimeConfig.LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS + 1; // full lookback + the "current" day
+    const candles5mSessionVolume: CandleData[] = [];
+    for (let d = 0; d < days; d++) {
+      for (let slot = 0; slot < CANDLES_PER_DAY; slot++) {
+        const i = d * CANDLES_PER_DAY + slot;
+        const isLastCandle = d === days - 1 && slot === CANDLES_PER_DAY - 1;
+        candles5mSessionVolume.push(c(isLastCandle ? 50 : 1000, startTs + i * 300_000)); // last candle's slot always 1000 historically, crashes to 50 now
+      }
+    }
+    const candles5m = candles5mSessionVolume.slice(-320); // regime/entry's own smaller window — same underlying candles, matching real orchestrator wiring
+
+    const output = detectRegime({ candles5m, candles15m, candles1h, previousRegime: null, candles5mSessionVolume });
+
+    expect(output.computedMetrics.lowLiquidityRatio).toBeCloseTo(0.05, 2); // 50 / 1000
+    expect(output.candidateRegime).toBe(MarketRegime.LOW_LIQUIDITY);
+  });
+
+  it('does not compute lowLiquidityRatio at all when candles5mSessionVolume is omitted (LOW_LIQUIDITY never fires, no error)', () => {
+    const startTs = Date.UTC(2024, 0, 1);
+    const candles1h = makeFlatCandles(40, 3_600_000, startTs, 1000);
+    const candles15m = makeFlatCandles(325, 900_000, startTs, 1000);
+    const candles5m = makeFlatCandles(320, 300_000, startTs, 1000);
+
+    const output = detectRegime({ candles5m, candles15m, candles1h, previousRegime: null });
+
+    expect(output.computedMetrics.lowLiquidityRatio).toBeUndefined();
+    expect(output.candidateRegime).not.toBe(MarketRegime.LOW_LIQUIDITY);
   });
 });

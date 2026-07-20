@@ -10,6 +10,7 @@ import {
   bollingerBandwidthSeries,
   lastDefined,
   percentileRankSeries,
+  sessionRelativeVolumeRatio,
   trendDirection,
   wickRatios,
   wilderADXSeries,
@@ -39,9 +40,6 @@ export function detectEventRisk(_input: RegimeInput): never {
 }
 export function detectCorrelatedRisk(_input: RegimeInput): never {
   throw new RegimeNotImplementedError(MarketRegime.CORRELATED_RISK);
-}
-export function detectLowLiquidity(_input: RegimeInput): never {
-  throw new RegimeNotImplementedError(MarketRegime.LOW_LIQUIDITY);
 }
 
 /** Last `count` non-NaN values of `series`, oldest to newest. Fewer than `count` if not enough valid history yet. */
@@ -91,6 +89,17 @@ function computeMetrics(input: RegimeInput): ComputedMetrics {
     }
   }
 
+  // TICKET-028: LOW_LIQUIDITY — session-relative volume ratio, needs far more history
+  // (RegimeConfig.LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS days) than every other metric above. Only
+  // computed when the caller supplies the dedicated candles5mSessionVolume window; omitted
+  // entirely otherwise (stays undefined — classifyCandidate() treats that as "not enough data yet",
+  // never throws).
+  let lowLiquidityRatio: number | undefined;
+  if (input.candles5mSessionVolume !== undefined) {
+    const lowLiquidityRatioSeries = sessionRelativeVolumeRatio(input.candles5mSessionVolume, RegimeConfig.LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS);
+    lowLiquidityRatio = lastDefined(lowLiquidityRatioSeries);
+  }
+
   return {
     adx1h,
     adx1hRecent,
@@ -101,6 +110,7 @@ function computeMetrics(input: RegimeInput): ComputedMetrics {
     volumeZScore5m,
     upperSweepCount5m,
     lowerSweepCount5m,
+    lowLiquidityRatio,
   };
 }
 
@@ -114,7 +124,8 @@ function thresholdFor(t: Threshold, isCurrentRegime: boolean): number {
  * logic against precomputed metric series, instead of re-deriving it.
  */
 export function classifyCandidate(metrics: ComputedMetrics, previousRegime: MarketRegime | null): MarketRegime {
-  const { adx1h, adx1hRecent, atrPercentile5m, bbWidthPercentile15m, atrTrend5m, volumeZScore5m, upperSweepCount5m, lowerSweepCount5m } = metrics;
+  const { adx1h, adx1hRecent, atrPercentile5m, bbWidthPercentile15m, atrTrend5m, volumeZScore5m, upperSweepCount5m, lowerSweepCount5m, lowLiquidityRatio } =
+    metrics;
 
   if (
     adx1h === undefined ||
@@ -158,7 +169,20 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     return MarketRegime.MANIPULATED;
   }
 
-  // 3. TREND_RIDER — TICKET-014 Phần A: adx1h must clear the threshold for
+  // 3. LOW_LIQUIDITY — TICKET-028: session-relative volume (current volume vs the SAME time-of-day
+  // on prior days, not a plain rolling average — crypto volume has a strong Asia/Europe/US session
+  // cycle). No order book depth data available, so this is volume-only, a narrower scope than the
+  // original design. Skipped entirely (falls through, never throws) whenever lowLiquidityRatio is
+  // undefined/NaN — that only means "not enough session history yet" (needs
+  // LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS days), not an error condition.
+  if (lowLiquidityRatio !== undefined && !Number.isNaN(lowLiquidityRatio)) {
+    const lowLiquidityThreshold = thresholdFor(RegimeConfig.LOW_LIQUIDITY_VOLUME_RATIO_THRESHOLD, isCurrently(MarketRegime.LOW_LIQUIDITY));
+    if (lowLiquidityRatio < lowLiquidityThreshold) {
+      return MarketRegime.LOW_LIQUIDITY;
+    }
+  }
+
+  // 4. TREND_RIDER — TICKET-014 Phần A: adx1h must clear the threshold for
   // TREND_ADX_PERSISTENCE_CANDLES consecutive 1H candles, not just the latest one (post-crash
   // chop was producing 1-candle ADX spikes that looked like a trend but weren't). Not enough
   // history for the full window -> persistence fails, falls through to the next branch.
@@ -172,7 +196,7 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     return MarketRegime.TREND_RIDER;
   }
 
-  // 4. COMPRESSION — bbWidth in the extreme-low percentile band AND actively tightening (dynamic, not static).
+  // 5. COMPRESSION — bbWidth in the extreme-low percentile band AND actively tightening (dynamic, not static).
   const compressionBbwThreshold = thresholdFor(
     RegimeConfig.COMPRESSION_BBW_PCT_THRESHOLD,
     isCurrently(MarketRegime.COMPRESSION),
@@ -181,20 +205,20 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     return MarketRegime.COMPRESSION;
   }
 
-  // 5. VOLATILE_CHOP — high ATR without trend strength (choppy, non-directional volatility).
+  // 6. VOLATILE_CHOP — high ATR without trend strength (choppy, non-directional volatility).
   const chopAtrThreshold = thresholdFor(RegimeConfig.CHOP_ATR_PCT_THRESHOLD, isCurrently(MarketRegime.VOLATILE_CHOP));
   const chopAdxThreshold = thresholdFor(RegimeConfig.CHOP_ADX_THRESHOLD, isCurrently(MarketRegime.VOLATILE_CHOP));
   if (atrPercentile5m >= chopAtrThreshold && adx1h < chopAdxThreshold) {
     return MarketRegime.VOLATILE_CHOP;
   }
 
-  // 6. SIDEWAY_SCALPER — low ADX, stable range (bbWidth NOT in the extreme-low/compressing band).
+  // 7. SIDEWAY_SCALPER — low ADX, stable range (bbWidth NOT in the extreme-low/compressing band).
   const sidewayAdxThreshold = thresholdFor(RegimeConfig.SIDEWAY_ADX_THRESHOLD, isCurrently(MarketRegime.SIDEWAY_SCALPER));
   if (adx1h <= sidewayAdxThreshold && bbWidthPercentile15m > RegimeConfig.COMPRESSION_BBW_PCT_THRESHOLD.enter) {
     return MarketRegime.SIDEWAY_SCALPER;
   }
 
-  // 7. NEUTRAL_TRANSITION — fallback: grey zone between Sideway and Trend.
+  // 8. NEUTRAL_TRANSITION — fallback: grey zone between Sideway and Trend.
   return MarketRegime.NEUTRAL_TRANSITION;
 }
 

@@ -24,7 +24,6 @@ export enum MarketRegime {
 export const NOT_IMPLEMENTED_REGIMES: ReadonlySet<MarketRegime> = new Set([
   MarketRegime.EVENT_RISK,
   MarketRegime.CORRELATED_RISK,
-  MarketRegime.LOW_LIQUIDITY,
 ]);
 
 export interface RegimeInput {
@@ -42,6 +41,15 @@ export interface RegimeInput {
   previousCandidateRegime?: MarketRegime | null;
   /** TICKET-014 Phần B: timestamp (ms) of the last candle where `regime` was confirmed DANGER_ZONE. Null/omit if never. */
   previousDangerZoneTimestamp?: number | null;
+  /**
+   * TICKET-028: 5m candles ending at "now", SEPARATE from `candles5m` above and sized for
+   * RegimeConfig.LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS+ days of history — sessionRelativeVolumeRatio
+   * needs many days of same-time-of-day samples, far more than `candles5m`'s own window (used by
+   * ATR/ADX/etc, whose Wilder-smoothing is NOT invariant to window length — same reasoning as
+   * orchestrator's candles1hMomentum). Optional: omit to leave lowLiquidityRatio always undefined
+   * (LOW_LIQUIDITY simply never fires), no error.
+   */
+  candles5mSessionVolume?: CandleData[];
 }
 
 export interface ComputedMetrics {
@@ -61,6 +69,14 @@ export interface ComputedMetrics {
   /** TICKET-026: number of 5m candles in the trailing MANIPULATED_LOOKBACK_CANDLES window whose upper/lower wick ratio exceeds LIQUIDITY_SWEEP_WICK_RATIO_THRESHOLD. Undefined until the lookback window is fully populated. */
   upperSweepCount5m?: number;
   lowerSweepCount5m?: number;
+  /**
+   * TICKET-028: currentVolume / sessionAvgVolume (same time-of-day on prior days). OPTIONAL and
+   * deliberately NOT in classifyCandidate()'s mandatory-undefined check — needs far more history
+   * (LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS, ~14 days) than every other metric here (~1 day); making
+   * it mandatory would silently disable the entire Regime Detector for the first 14 days of any
+   * dataset. Undefined/NaN -> the LOW_LIQUIDITY branch is skipped, classification proceeds normally.
+   */
+  lowLiquidityRatio?: number;
   // Extensible — audit trail for metrics used by regimes not yet implemented.
   [key: string]: number | string | number[] | undefined;
 }

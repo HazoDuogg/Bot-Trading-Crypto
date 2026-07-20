@@ -13,6 +13,7 @@ import { RegimeConfig } from '../dist/regime/config.js';
 import {
   bollingerBandwidthSeries,
   percentileRankSeries,
+  sessionRelativeVolumeRatio,
   trendDirectionSeries,
   wickRatios,
   wilderADXSeries,
@@ -102,6 +103,9 @@ function calibrateSymbol(symbol: string): string {
   const atrTrendSeries5m = trendDirectionSeries(atrSeries5m, RegimeConfig.ATR_TREND_LOOKBACK_N);
   const volumeSeries5m = candles5m.map((c) => c.volume);
   const volumeZScoreSeries5m = zScoreSeries(volumeSeries5m, RegimeConfig.VOLUME_ZSCORE_LOOKBACK_5M);
+  // TICKET-028: LOW_LIQUIDITY — session-relative volume ratio, computed once over the full candles5m
+  // series (this script already holds the whole file in memory, no windowing needed like backtest.ts).
+  const lowLiquidityRatioSeries5m = sessionRelativeVolumeRatio(candles5m, RegimeConfig.LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS);
 
   // Two-pointer alignment: for each 5m candle's close time, find the latest already-closed 1h/15m candle.
   let idx1h = -1;
@@ -128,6 +132,9 @@ function calibrateSymbol(symbol: string): string {
     const bbWidthPercentile15m = idx15m >= 0 ? bbwPercentileSeries15m[idx15m] : NaN;
     const atrTrend5m = atrTrendSeries5m[i];
     const volumeZScore5m = volumeZScoreSeries5m[i];
+    // TICKET-028: LOW_LIQUIDITY — deliberately NOT part of the mandatory-NaN skip check below
+    // (needs far more history than every other metric), same rule as computeMetrics()/classifyCandidate().
+    const lowLiquidityRatio = lowLiquidityRatioSeries5m[i];
 
     // TICKET-026: classifyCandidate's MANIPULATED branch needs the trailing sweep-density window —
     // same slice-and-count as regimeDetector.ts's own computeMetrics, kept in sync manually since
@@ -148,7 +155,7 @@ function calibrateSymbol(symbol: string): string {
       continue;
     }
 
-    const metrics = { adx1h, adx1hRecent, atrPercentile5m, bbWidthPercentile15m, atrTrend5m, volumeZScore5m, upperSweepCount5m, lowerSweepCount5m };
+    const metrics = { adx1h, adx1hRecent, atrPercentile5m, bbWidthPercentile15m, atrTrend5m, volumeZScore5m, upperSweepCount5m, lowerSweepCount5m, lowLiquidityRatio };
     const candidateRegime = classifyCandidate(metrics, hysteresisState?.regime ?? null);
     hysteresisState = applyHysteresis(candidateRegime, hysteresisState);
 
@@ -170,6 +177,7 @@ function calibrateSymbol(symbol: string): string {
     statsRow('atrPercentile5m', describeSeries(atrPercentileSeries5m)),
     statsRow('bbWidthPercentile15m', describeSeries(bbwPercentileSeries15m)),
     statsRow('volumeZScore5m', describeSeries(volumeZScoreSeries5m)),
+    statsRow('lowLiquidityRatio', describeSeries(lowLiquidityRatioSeries5m)),
     '',
     '### Tỷ lệ match theo state (ngưỡng HIỆN TẠI trong config.ts, chưa đổi)',
     '',

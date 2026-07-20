@@ -37,6 +37,10 @@ const WINDOW_1D = 40; // >> EntryConfig.MACRO_TREND_ADX_PERIOD_1D(14), matches W
 // TICKET-024: separate, much larger 1h window for the momentum model's emaRatioSlow (EMA 50/200) —
 // intentionally NOT used for regime/entry (see ProcessCandleInput.candles1hMomentum doc comment for why).
 const WINDOW_1H_MOMENTUM = 250;
+// TICKET-028: separate, much larger 5m window for LOW_LIQUIDITY's session-relative volume ratio —
+// RegimeConfig.LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS(14) * 288 candles/day + 1 for the current candle
+// itself. Intentionally NOT used for regime/entry's own ATR/ADX (see ProcessCandleInput.candles5mSessionVolume doc comment for why).
+const WINDOW_5M_SESSION_VOLUME = 14 * 288 + 1;
 
 function parseArgs(): {
   entryStyleForNeutral: EntryStyleForNeutral;
@@ -225,6 +229,7 @@ async function main(): Promise<void> {
       const decisionTime = currentCandle.timestamp + 5 * 60_000;
 
       const window5m = sd.candles5m.slice(Math.max(0, step - WINDOW_5M + 1), step + 1);
+      const windowSessionVolume5m = sd.candles5m.slice(Math.max(0, step - WINDOW_5M_SESSION_VOLUME + 1), step + 1);
       const w15 = closedWindow(sd.candles15m, sd.ptr15m, 15 * 60_000, decisionTime, WINDOW_15M);
       sd.ptr15m = w15.ptr;
       const w1h = closedWindow(sd.candles1h, sd.ptr1h, 60 * 60_000, decisionTime, WINDOW_1H);
@@ -251,6 +256,7 @@ async function main(): Promise<void> {
         candles1m: w1m.window,
         candles1d: w1d.window,
         candles1hMomentum: w1hMomentum.window,
+        candles5mSessionVolume: windowSessionVolume5m,
         accountBalance,
         otherOpenPositionsRisk,
       };

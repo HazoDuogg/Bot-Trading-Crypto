@@ -52,6 +52,14 @@ export interface ProcessCandleInput {
    * momentumFilterConfig.momentumFilterEnabled is true.
    */
   candles1hMomentum: CandleData[];
+  /**
+   * TICKET-028: 5m candles ending at "now", SEPARATE from `candles5m` above and sized for
+   * RegimeConfig.LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS+ days of history — same reasoning as
+   * `candles1hMomentum` above (LOW_LIQUIDITY's session-relative volume needs far more 5m history
+   * than regime/entry's own candles5m window ever needed). Optional: omit to leave LOW_LIQUIDITY
+   * permanently unreachable (no error) rather than change any existing metric's behavior.
+   */
+  candles5mSessionVolume?: CandleData[];
   accountBalance: number;
   /** Other symbols' currently open positions — THIS symbol's own position must not be included (checked separately by construction: only called when this symbol has none open). */
   otherOpenPositionsRisk: OpenPositionRisk[];
@@ -179,6 +187,7 @@ export async function processCandle(
     previousCandidateRegime: state.regimeState.previousCandidateRegime,
     streakCount: state.regimeState.streakCount,
     previousDangerZoneTimestamp: state.regimeState.previousDangerZoneTimestamp,
+    candles5mSessionVolume: input.candles5mSessionVolume,
   });
   const regimeState = {
     previousRegime: regimeOutput.regime,

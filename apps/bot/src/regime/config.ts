@@ -95,4 +95,10 @@ export const RegimeConfig = {
    * not a duplicate; value/meaning unchanged from the original entry/config.ts constant.
    */
   LIQUIDITY_SWEEP_WICK_RATIO_THRESHOLD: 0.65,
+
+  // ---- TICKET-028: LOW_LIQUIDITY (session-relative volume, no order book depth data available) ----
+  /** TODO_CONFIRM, PM suggested 14. Days of same-time-of-day history sessionRelativeVolumeRatio averages over. */
+  LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS: 14,
+  /** TODO_CONFIRM, PM suggested 0.3. currentVolume must fall below this fraction of the same-time-of-day average across prior days. */
+  LOW_LIQUIDITY_VOLUME_RATIO_THRESHOLD: symmetric(0.3),
 } as const;
