@@ -10,8 +10,7 @@ import { detectMarketStructureShift } from './detectors/marketStructureShift.js'
 import { detectBoxBreakout } from './detectors/boxBreakout.js';
 
 export const DEFAULT_ENTRY_ROUTER_CONFIG: EntryRouterConfig = {
-  // @deprecated TICKET-012: NEUTRAL_TRANSITION never enters anymore (routeEntry returns null
-  // unconditionally), so this is never read. Kept, not removed, in case PM wants to revisit later.
+  // TICKET-036: re-enabled — picks the cascade routeEntry() runs for NEUTRAL_TRANSITION.
   entryStyleForNeutral: 'SIDEWAY_STYLE',
   // TICKET-017/018: off by default — baseline behavior unchanged unless a caller (backtest.ts CLI) opts in.
   macroTrendFilterEnabled: false,
@@ -20,8 +19,10 @@ export const DEFAULT_ENTRY_ROUTER_CONFIG: EntryRouterConfig = {
   regimeRiskMultiplier: {
     [MarketRegime.TREND_RIDER]: 1.0,
     [MarketRegime.SIDEWAY_SCALPER]: 1.0,
-    // @deprecated TICKET-012: dead value — NEUTRAL_TRANSITION never produces a DraftSetup anymore, so this is never read.
-    [MarketRegime.NEUTRAL_TRANSITION]: 0.5,
+    // TICKET-036: was a fixed 0.5 (TICKET-012, dead value while NEUTRAL_TRANSITION never entered).
+    // Now that it enters again, gated by orchestrator.ts's hard Momentum Gate instead — this fixed
+    // risk-reduction idea is retired for good, not reused; 1.0 matches every other entering regime's baseline.
+    [MarketRegime.NEUTRAL_TRANSITION]: 1.0,
     [MarketRegime.VOLATILE_CHOP]: 1.0,
     [MarketRegime.EVENT_RISK]: 1.0,
     [MarketRegime.DANGER_ZONE]: 1.0,
@@ -175,10 +176,13 @@ export function routeEntry(input: EntryRouterInput, config: EntryRouterConfig = 
       return runBoxBreakoutStyle(input, config, input.regime);
     case MarketRegime.COMPRESSION:
       return runBoxBreakoutStyle(input, config, input.regime); // "armed" — same call, null until breakout confirms
+    // TICKET-036: re-enabled (was `return null` since TICKET-012) — PM wants another attempt now
+    // that the Momentum model exists, this time gated behind orchestrator.ts's hard Momentum Gate
+    // instead of just a soft risk-multiplier. Same cascade choice as TREND_RIDER/SIDEWAY_SCALPER.
     case MarketRegime.NEUTRAL_TRANSITION:
-      return null; // PM (TICKET-012): backtest thật cho thấy giao dịch ở regime này luôn âm,
-      // bất kể entry style (SIDEWAY_STYLE hay TREND_STYLE) hay risk multiplier —
-      // dừng hẳn, không vào lệnh mới, giống nhóm regime an toàn khác.
+      return config.entryStyleForNeutral === 'TREND_STYLE'
+        ? runTrendStyle(input, config, input.regime)
+        : runBoxBreakoutStyle(input, config, input.regime);
     default:
       return null;
   }

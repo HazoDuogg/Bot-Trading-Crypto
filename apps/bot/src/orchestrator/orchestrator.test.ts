@@ -3,7 +3,14 @@ import { processCandle, type ProcessCandleInput } from './orchestrator.js';
 import { INITIAL_SYMBOL_STATE, type OrchestratorConfig, type SymbolState } from './types.js';
 import { MarketRegime, type CandleData } from '../regime/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../entry/entryRouter.js';
-import { DEFAULT_MOMENTUM_FILTER_CONFIG, MOMENTUM_BEARISH_MODEL_PATH, MOMENTUM_BEARISH_SCHEMA_PATH } from '../xgbFilter/config.js';
+import {
+  DEFAULT_MOMENTUM_FILTER_CONFIG,
+  DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG,
+  MOMENTUM_BEARISH_MODEL_PATH,
+  MOMENTUM_BEARISH_SCHEMA_PATH,
+  MOMENTUM_MODEL_PATH,
+  MOMENTUM_SCHEMA_PATH,
+} from '../xgbFilter/config.js';
 import { buildFeatureVector, computeMomentumCrossFeatures, loadFeatureSchema } from '../xgbFilter/featureBuilder.js';
 import { scoreMomentum } from '../xgbFilter/momentumScorer.js';
 import { computeMomentumMultiplier } from '../xgbFilter/momentumMultiplier.js';
@@ -62,6 +69,7 @@ const baseConfig: OrchestratorConfig = {
   riskPoolMaxPct: 0.1,
   isLowConfidenceOrLowLiquidity: false,
   momentumFilterConfig: DEFAULT_MOMENTUM_FILTER_CONFIG,
+  neutralTransitionGateConfig: DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG,
 };
 
 const trendLongInput: SlTpManagerInput = {
@@ -402,5 +410,167 @@ describe('processCandle — momentum filter on SHORT uses the bearish model dire
 
     const eventRiskMultiplier = (result.event as { riskMultiplier: number }).riskMultiplier;
     expect(eventRiskMultiplier).toBeCloseTo(expectedCombinedRiskMultiplier, 6);
+  });
+});
+
+// TICKET-036 — NEUTRAL_TRANSITION re-enabled behind a mandatory hard Momentum Gate (distinct from
+// the soft momentumMultiplier above, which never blocks outright). Real ONNX model throughout, same
+// style as the momentum-filter describe block above.
+describe('processCandle — NEUTRAL_TRANSITION Momentum Gate (TICKET-036)', () => {
+  // Same OB+MSS LONG pattern as fullOpenFlowFixture() above, but candles1h swapped for a grey-zone
+  // oscillation (neither <=SIDEWAY_ADX_THRESHOLD(20) nor persistently >=TREND_ENTER_ADX(32)) so
+  // detectRegime() lands on NEUTRAL_TRANSITION instead of TREND_RIDER — direction stays 'UP' (mild
+  // drift built into the oscillation), so entryStyleForNeutral='TREND_STYLE' finds the same setup.
+  function neutralTransitionFixture() {
+    let prevClose = 100;
+    const candles1h: CandleData[] = Array.from({ length: 40 }, (_, i) => {
+      const close = 100 + Math.sin(i * 0.5) * 0.5 + i * 0.05;
+      const open = i === 0 ? close : prevClose;
+      const candle = { timestamp: i * 3_600_000, open, high: Math.max(open, close) + 0.5, low: Math.min(open, close) - 0.5, close, volume: 1000 };
+      prevClose = close;
+      return candle;
+    });
+
+    const fillerCount = 310;
+    const filler5m = makeCandles(fillerCount, 300_000, () => 100, () => 0.5);
+    const obPattern5m: CandleData[] = [
+      c(99, 99, 100, 98),
+      c(100.5, 100.5, 102, 99),
+      c(103, 103, 105, 101), // swing high (105)
+      c(101, 101, 102, 100),
+      c(99, 99, 100, 98),
+      c(101, 99, 101, 99), // OB candidate (down), zone [99, 101]
+      c(99, 102, 102.5, 99),
+      c(102, 106, 106, 101.5), // BOS confirmed, close 106 > 105
+    ];
+    const lastFillerTs = filler5m[filler5m.length - 1].timestamp;
+    const obPatternWithTs = obPattern5m.map((candle, i) => ({ ...candle, timestamp: lastFillerTs + (i + 1) * 300_000 }));
+    const candles5m = [...filler5m, ...obPatternWithTs];
+    const obCandleIndex = fillerCount + 5;
+
+    const candles15m = makeCandles(325, 900_000, () => 100, () => 1);
+
+    const mssStartTs = candles5m[obCandleIndex].timestamp;
+    const mssPattern1m: CandleData[] = [
+      c(99.5, 99.5, 100, 99),
+      c(99.25, 99.25, 100, 98.5),
+      c(97.5, 97.5, 99.5, 96), // swing low (96)
+      c(99.25, 99.25, 100, 98.5),
+      c(99.5, 99.5, 100, 99),
+      c(100.5, 100.5, 102, 99), // swing high BETWEEN the two lows (102)
+      c(99.25, 99.25, 100, 98.5),
+      c(99.5, 99.5, 100, 99),
+      c(98.75, 98.75, 99.5, 98), // higher-low vs the first low
+      c(99.25, 99.25, 100, 98.5),
+      c(99.5, 99.5, 100, 99),
+      c(102.5, 103, 103.2, 102.3), // MSS confirmed here, close = 103
+    ].map((candle, i) => ({ ...candle, timestamp: mssStartTs + i * 60_000 }));
+
+    // 250 candles so candles1hMomentum has enough history for emaRatioSlow's EMA(200) — same margin
+    // as fullOpenFlowFixtureShort() above.
+    const candles1hMomentum = makeCandles(250, 3_600_000, (i) => 100 + i * 0.1, () => 1);
+
+    return { candles5m, candles15m, candles1h, candles1m: mssPattern1m, candles1hMomentum };
+  }
+
+  const neutralEntryRouterConfig = { ...DEFAULT_ENTRY_ROUTER_CONFIG, entryStyleForNeutral: 'TREND_STYLE' as const };
+
+  it('rejects the trade (SKIPPED/NEUTRAL_GATE_REJECTED) when the momentum score is below the gate threshold', async () => {
+    const fixture = neutralTransitionFixture();
+    const config: OrchestratorConfig = {
+      ...baseConfig,
+      entryRouterConfig: neutralEntryRouterConfig,
+      neutralTransitionGateConfig: { neutralTransitionTradingEnabled: true, neutralTransitionMomentumGateThreshold: 1.01 }, // impossible to clear — real score is always <= 1
+    };
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.symbolState.regimeState.previousRegime).toBe(MarketRegime.NEUTRAL_TRANSITION);
+    expect(result.symbolState.openPosition).toBeNull();
+    expect(result.event).toMatchObject({ type: 'SKIPPED', symbol: 'BTCUSDT', reason: 'NEUTRAL_GATE_REJECTED' });
+    expect(result.accountBalance).toBe(400); // unchanged, no trade happened
+  });
+
+  it('opens the trade when the momentum score clears the gate threshold, and the soft momentumMultiplier still applies afterward', async () => {
+    const fixture = neutralTransitionFixture();
+    const config: OrchestratorConfig = {
+      ...baseConfig,
+      entryRouterConfig: neutralEntryRouterConfig,
+      neutralTransitionGateConfig: { neutralTransitionTradingEnabled: true, neutralTransitionMomentumGateThreshold: 0 }, // always clears — real score is always >= 0
+      momentumFilterConfig: { ...DEFAULT_MOMENTUM_FILTER_CONFIG, momentumFilterEnabled: true },
+    };
+
+    const input = baseInput(fixture);
+    const result = await processCandle(input, INITIAL_SYMBOL_STATE, config);
+
+    expect(result.symbolState.regimeState.previousRegime).toBe(MarketRegime.NEUTRAL_TRANSITION);
+    expect(result.event).toMatchObject({ type: 'OPEN', symbol: 'BTCUSDT', side: 'LONG', setupType: 'OB', regime: MarketRegime.NEUTRAL_TRANSITION });
+
+    // Independently recompute the bullish momentum score the soft multiplier should have used —
+    // proves the gate passing doesn't replace the existing soft multiplier, both run.
+    const regimeOutput = detectRegime({
+      candles5m: input.candles5m,
+      candles15m: input.candles15m,
+      candles1h: input.candles1h,
+      previousRegime: null,
+      previousCandidateRegime: null,
+      streakCount: 0,
+      previousDangerZoneTimestamp: null,
+    });
+    expect(regimeOutput.regime).toBe(MarketRegime.NEUTRAL_TRANSITION); // sanity: fixture really is NEUTRAL_TRANSITION
+    const macroDirectionSeries = wilderDIDirectionSeries(input.candles1d, EntryConfig.MACRO_TREND_ADX_PERIOD_1D);
+    const macroDirection = macroDirectionSeries.length > 0 ? macroDirectionSeries[macroDirectionSeries.length - 1] : undefined;
+    const crossFeatures = computeMomentumCrossFeatures(input.candles5m, input.candles1hMomentum);
+    expect(crossFeatures).toBeDefined();
+
+    const bullishSchema = loadFeatureSchema(MOMENTUM_SCHEMA_PATH);
+    const vector = buildFeatureVector(
+      {
+        symbol: 'BTCUSDT',
+        adx1h: regimeOutput.computedMetrics.adx1h as number,
+        atrPercentile5m: regimeOutput.computedMetrics.atrPercentile5m as number,
+        bbWidthPercentile15m: regimeOutput.computedMetrics.bbWidthPercentile15m as number,
+        volumeZScore5m: regimeOutput.computedMetrics.volumeZScore5m as number,
+        atrTrend5m: regimeOutput.computedMetrics.atrTrend5m as string,
+        adxDirection1h: regimeOutput.adxDirection1h as string,
+        macroDirection,
+        ...crossFeatures!,
+      },
+      bullishSchema,
+    );
+    const bullishP = await scoreMomentum(MOMENTUM_MODEL_PATH, vector);
+    const expectedMomentumMultiplier = computeMomentumMultiplier(bullishP, config.momentumFilterConfig);
+    const expectedCombinedRiskMultiplier = 1.0 * expectedMomentumMultiplier; // draftSetup.riskMultiplier is 1.0 (TICKET-036 retired the fixed 0.5)
+
+    const eventRiskMultiplier = (result.event as { riskMultiplier: number }).riskMultiplier;
+    expect(eventRiskMultiplier).toBeCloseTo(expectedCombinedRiskMultiplier, 6);
+  });
+
+  it('rejects safely (never defaults to passing) when the momentum score cannot be computed at all', async () => {
+    const fixture = neutralTransitionFixture();
+    // Deliberately keep candles1hMomentum short (sufficientDummyCandles()'s 40-candle default,
+    // not the fixture's 250) — EMA_1H_SLOW_PERIOD(200) can't be computed -> gateScore stays undefined.
+    const { candles1hMomentum: _tooShort, ...fixtureWithoutMomentumWindow } = fixture;
+    const config: OrchestratorConfig = {
+      ...baseConfig,
+      entryRouterConfig: neutralEntryRouterConfig,
+      neutralTransitionGateConfig: { neutralTransitionTradingEnabled: true, neutralTransitionMomentumGateThreshold: 0 }, // even the most lenient threshold must still reject
+    };
+
+    const result = await processCandle(baseInput(fixtureWithoutMomentumWindow), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.symbolState.openPosition).toBeNull();
+    expect(result.event).toMatchObject({ type: 'SKIPPED', reason: 'NEUTRAL_GATE_REJECTED' });
+  });
+
+  it('reproduces the exact pre-TICKET-036 behavior (no event at all, not even SKIPPED) when neutralTransitionTradingEnabled=false', async () => {
+    const fixture = neutralTransitionFixture();
+    const config: OrchestratorConfig = { ...baseConfig, entryRouterConfig: neutralEntryRouterConfig }; // neutralTransitionGateConfig defaults to disabled
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.symbolState.openPosition).toBeNull();
+    expect(result.event).toBeNull(); // NOT a SKIPPED event — NEUTRAL_TRANSITION genuinely never entered before this ticket
+    expect(result.accountBalance).toBe(400);
   });
 });

@@ -55,9 +55,10 @@ export type EntryStyleForNeutral = 'TREND_STYLE' | 'SIDEWAY_STYLE';
 
 export interface EntryRouterConfig {
   /**
-   * @deprecated TICKET-012: NEUTRAL_TRANSITION no longer enters (backtest showed it's net
-   * negative regardless of style/risk multiplier) — routeEntry() ignores this field entirely.
-   * Kept on the type, not removed, in case PM wants to revisit with different logic later.
+   * TICKET-036: NEUTRAL_TRANSITION re-enabled (was disabled by TICKET-012) — routeEntry() picks
+   * runTrendStyle() or runBoxBreakoutStyle() per this field, same as TREND_RIDER/SIDEWAY_SCALPER.
+   * Gated behind orchestrator.ts's mandatory Momentum Gate (xgbFilter/config.ts's
+   * NeutralTransitionGateConfig), not a soft risk-multiplier like the other regimes.
    */
   entryStyleForNeutral: EntryStyleForNeutral;
   regimeRiskMultiplier: Record<MarketRegime, number>;

@@ -18,7 +18,7 @@ import { processCandle, type DangerZoneDiagnostic, type ManipulatedDiagnostic, t
 import { INITIAL_SYMBOL_STATE, type CloseTradeEvent, type OrchestratorConfig, type SymbolState } from '../dist/orchestrator/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import type { EntryStyleForNeutral } from '../dist/entry/types.js';
-import { DEFAULT_MOMENTUM_FILTER_CONFIG } from '../dist/xgbFilter/config.js';
+import { DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG } from '../dist/xgbFilter/config.js';
 import type { OpenPositionRisk } from '../dist/risk/riskPool.js';
 import type { TpPlan } from '../dist/risk/slTpManager.js';
 
@@ -51,6 +51,7 @@ function parseArgs(): {
   obDisabledSymbols: string[];
   macroTrendFilterAppliesToBoxBreakout: boolean;
   momentumFilterEnabled: boolean;
+  neutralTransitionEnabled: boolean;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -59,6 +60,7 @@ function parseArgs(): {
   const obArg = args.find((a) => a.startsWith('--ob-disabled-symbols='));
   const macroBoxArg = args.find((a) => a.startsWith('--macro-trend-box-breakout='));
   const momentumArg = args.find((a) => a.startsWith('--momentum-filter='));
+  const neutralArg = args.find((a) => a.startsWith('--neutral-transition-enabled='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -67,11 +69,19 @@ function parseArgs(): {
     obDisabledSymbols: obValue.trim() === '' ? [] : obValue.split(','),
     macroTrendFilterAppliesToBoxBreakout: macroBoxArg ? macroBoxArg.split('=')[1] === 'true' : false,
     momentumFilterEnabled: momentumArg ? momentumArg.split('=')[1] === 'true' : false,
+    // TICKET-036: off by default — matches DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG.
+    neutralTransitionEnabled: neutralArg ? neutralArg.split('=')[1] === 'true' : false,
   };
 }
 
-/** TICKET-017/018/024 Phần C: output filenames auto-derived from which filters are active, so the A/B combinations never overwrite each other. */
-function outputSuffix(macroTrendFilterEnabled: boolean, obDisabledSymbols: string[], macroTrendFilterAppliesToBoxBreakout: boolean, momentumFilterEnabled: boolean): string {
+/** TICKET-017/018/024/036 Phần C: output filenames auto-derived from which filters are active, so the A/B combinations never overwrite each other. */
+function outputSuffix(
+  macroTrendFilterEnabled: boolean,
+  obDisabledSymbols: string[],
+  macroTrendFilterAppliesToBoxBreakout: boolean,
+  momentumFilterEnabled: boolean,
+  neutralTransitionEnabled: boolean,
+): string {
   const macro = macroTrendFilterEnabled;
   const ob = obDisabledSymbols.length > 0;
   let base: string;
@@ -81,6 +91,7 @@ function outputSuffix(macroTrendFilterEnabled: boolean, obDisabledSymbols: strin
   else base = 'baseline';
   if (macroTrendFilterAppliesToBoxBreakout) base += '-with-boxfilter';
   if (momentumFilterEnabled) base += '-momentum';
+  if (neutralTransitionEnabled) base += '-neutral';
   return base;
 }
 
@@ -190,9 +201,10 @@ function tradesCsv(trades: CloseTradeEvent[]): string {
 }
 
 async function main(): Promise<void> {
-  const { entryStyleForNeutral, tpPlan, macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled } = parseArgs();
+  const { entryStyleForNeutral, tpPlan, macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled, neutralTransitionEnabled } =
+    parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -209,11 +221,15 @@ async function main(): Promise<void> {
     riskPoolMaxPct: 0.1,
     isLowConfidenceOrLowLiquidity: false,
     momentumFilterConfig: { ...DEFAULT_MOMENTUM_FILTER_CONFIG, momentumFilterEnabled },
+    neutralTransitionGateConfig: { ...DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, neutralTransitionTradingEnabled: neutralTransitionEnabled },
   };
 
   let accountBalance = START_BALANCE;
   const trades: CloseTradeEvent[] = [];
-  let skippedCount = 0;
+  // TICKET-036: SKIPPED events now have 2 distinct reasons — kept separate so this summary line
+  // never falsely blames "risk pool" for what's actually the Momentum Gate rejecting NEUTRAL_TRANSITION.
+  let riskPoolSkippedCount = 0;
+  let neutralGateRejectedCount = 0;
   const manipulatedLogLines: string[] = []; // TICKET-027
   const dangerZoneLogLines: string[] = []; // TICKET-033
 
@@ -297,16 +313,23 @@ async function main(): Promise<void> {
       accountBalance = result.accountBalance;
 
       if (result.event?.type === 'CLOSE') trades.push(result.event);
-      else if (result.event?.type === 'SKIPPED') skippedCount++;
+      else if (result.event?.type === 'SKIPPED') {
+        if (result.event.reason === 'RISK_POOL_EXCEEDED') riskPoolSkippedCount++;
+        else neutralGateRejectedCount++;
+      }
     }
 
     const progressStep = step - startStep;
     if (progressStep % 2000 === 0) {
-      console.log(`  bước ${progressStep}/${totalSteps - startStep} — balance=$${accountBalance.toFixed(2)}, trades=${trades.length}, skipped=${skippedCount}...`);
+      console.log(
+        `  bước ${progressStep}/${totalSteps - startStep} — balance=$${accountBalance.toFixed(2)}, trades=${trades.length}, riskPoolSkipped=${riskPoolSkippedCount}, neutralGateRejected=${neutralGateRejectedCount}...`,
+      );
     }
   }
 
-  console.log(`Xong. ${trades.length} lệnh đóng, ${skippedCount} lệnh bị bỏ qua (risk pool), balance cuối=$${accountBalance.toFixed(2)}`);
+  console.log(
+    `Xong. ${trades.length} lệnh đóng, ${riskPoolSkippedCount} lệnh bị bỏ qua (risk pool đầy), ${neutralGateRejectedCount} lệnh bị Momentum Gate từ chối (NEUTRAL_TRANSITION), balance cuối=$${accountBalance.toFixed(2)}`,
+  );
 
   // TICKET-027 — điều tra riêng, không trộn vào backtest-report.md/backtest-trades.csv.
   const manipulatedLogPath = path.resolve(process.cwd(), 'data/manipulated-log.txt');
@@ -321,7 +344,7 @@ async function main(): Promise<void> {
   // TICKET-030: CORRELATED_RISK has no CLI on/off flag (unconditionally wired in, same pattern as
   // MANIPULATED/LOW_LIQUIDITY) — "-correlated" appended so this run's report/trades never overwrite
   // the pre-TICKET-030 both-momentum files (PM explicitly wants the $468.49 baseline preserved for comparison).
-  const suffix = outputSuffix(macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled) + '-correlated';
+  const suffix = outputSuffix(macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled, neutralTransitionEnabled) + '-correlated';
   const tradesPath = path.resolve(process.cwd(), `data/backtest-trades-${suffix}.csv`);
   writeFileSync(tradesPath, tradesCsv(trades));
   console.log(`→ ${tradesPath}`);
@@ -340,7 +363,8 @@ async function main(): Promise<void> {
     `- Tổng số lệnh đóng: ${totalTrades}`,
     `- Winrate: ${winrate.toFixed(1)}%`,
     `- Tổng PNL: ${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)} USD`,
-    `- Số lệnh bị bỏ qua vì risk pool đầy: ${skippedCount}`,
+    `- Số lệnh bị bỏ qua vì risk pool đầy: ${riskPoolSkippedCount}`,
+    `- Số lệnh bị Momentum Gate từ chối (NEUTRAL_TRANSITION, TICKET-036): ${neutralGateRejectedCount}`,
     '',
     statsTable('PNL theo symbol', groupBy(trades, (t) => t.symbol)),
     statsTable('PNL theo regime', groupBy(trades, (t) => t.regime)),
@@ -361,6 +385,7 @@ async function main(): Promise<void> {
     `- obDisabledSymbols: [${obDisabledSymbols.join(',')}] (TICKET-017 Phần B)`,
     `- macroTrendFilterAppliesToBoxBreakout: ${macroTrendFilterAppliesToBoxBreakout} (TICKET-018)`,
     `- momentumFilterEnabled: ${momentumFilterEnabled} (TICKET-024, thresholds: low=${config.momentumFilterConfig.momentumLowThreshold} high=${config.momentumFilterConfig.momentumHighThreshold} lowMultiplier=${config.momentumFilterConfig.momentumLowMultiplier})`,
+    `- neutralTransitionEnabled: ${neutralTransitionEnabled} (TICKET-036, hard Momentum Gate, threshold=${config.neutralTransitionGateConfig.neutralTransitionMomentumGateThreshold})`,
     `- Runner trailing: ATR (2.5×ATR), không dùng Structure trailing`,
     `- takerFeeRate: 0.0004 (TODO_CONFIRM — Trader chưa cung cấp số thật)`,
     `- Quy tắc SL/TP cùng nến: SL chạm trước`,

@@ -7,7 +7,7 @@
 import { detectRegime } from '../regime/regimeDetector.js';
 import { RegimeConfig } from '../regime/config.js';
 import { lastDefined, wilderATRSeries, wilderDIDirectionSeries } from '../regime/indicators.js';
-import { MarketRegime, type CandleData } from '../regime/types.js';
+import { MarketRegime, type CandleData, type RegimeOutput } from '../regime/types.js';
 import { routeEntry } from '../entry/entryRouter.js';
 import { EntryConfig } from '../entry/config.js';
 import { buildFeatureVector, computeMomentumCrossFeatures, loadFeatureSchema, type FeatureSchema } from '../xgbFilter/featureBuilder.js';
@@ -193,6 +193,42 @@ function getMomentumBearishSchema(): FeatureSchema {
   return cachedMomentumBearishSchema;
 }
 
+/**
+ * Shared by the soft momentumMultiplier (TICKET-024/025) and the hard NEUTRAL_TRANSITION Momentum
+ * Gate (TICKET-036) — same scoring call, same LONG/SHORT model split, never re-derived twice.
+ * Undefined = insufficient EMA/ATR history for computeMomentumCrossFeatures (never itself an error;
+ * each caller decides what "no score" means for its own purpose).
+ */
+async function scoreMomentumForSide(
+  side: 'LONG' | 'SHORT',
+  symbol: string,
+  candles5m: CandleData[],
+  candles1hMomentum: CandleData[],
+  regimeOutput: RegimeOutput,
+  macroDirection: 'UP' | 'DOWN' | 'FLAT' | undefined,
+): Promise<number | undefined> {
+  const crossFeatures = computeMomentumCrossFeatures(candles5m, candles1hMomentum);
+  if (crossFeatures === undefined) return undefined;
+  const isLong = side === 'LONG';
+  const modelPath = isLong ? MOMENTUM_MODEL_PATH : MOMENTUM_BEARISH_MODEL_PATH;
+  const schema = isLong ? getMomentumSchema() : getMomentumBearishSchema();
+  const featureVector = buildFeatureVector(
+    {
+      symbol,
+      adx1h: regimeOutput.computedMetrics.adx1h as number,
+      atrPercentile5m: regimeOutput.computedMetrics.atrPercentile5m as number,
+      bbWidthPercentile15m: regimeOutput.computedMetrics.bbWidthPercentile15m as number,
+      volumeZScore5m: regimeOutput.computedMetrics.volumeZScore5m as number,
+      atrTrend5m: regimeOutput.computedMetrics.atrTrend5m as string,
+      adxDirection1h: regimeOutput.adxDirection1h as string,
+      macroDirection,
+      ...crossFeatures,
+    },
+    schema,
+  );
+  return scoreMomentum(modelPath, featureVector);
+}
+
 export async function processCandle(
   input: ProcessCandleInput,
   state: SymbolState,
@@ -278,6 +314,32 @@ export async function processCandle(
       return { symbolState: { ...state, regimeState }, accountBalance: input.accountBalance, event: null };
     }
 
+    // TICKET-036 — mandatory Momentum Gate, NEUTRAL_TRANSITION only. Runs BEFORE anything else
+    // (account-balance check, soft momentumMultiplier below) since it can outright discard the
+    // DraftSetup rather than just scale it. entryRouter.ts's routeEntry() always builds a real
+    // DraftSetup for NEUTRAL_TRANSITION now (Phần A) — neutralTransitionTradingEnabled=false must
+    // still reproduce the exact pre-TICKET-036 behavior (no event at all, same as draftSetup===null
+    // above), NOT a SKIPPED event, since NEUTRAL_TRANSITION genuinely never entered before this ticket.
+    if (draftSetup.regime === MarketRegime.NEUTRAL_TRANSITION) {
+      if (!config.neutralTransitionGateConfig.neutralTransitionTradingEnabled) {
+        return { symbolState: { ...state, regimeState }, accountBalance: input.accountBalance, event: null };
+      }
+      const gateScore = await scoreMomentumForSide(draftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
+      // Missing score (insufficient EMA/ATR history) -> gateScore undefined -> comparison is false ->
+      // rejected, same as an explicit low score. Never defaults to passing (PM's explicit "an toàn" requirement).
+      const gatePassed = gateScore !== undefined && gateScore >= config.neutralTransitionGateConfig.neutralTransitionMomentumGateThreshold;
+      if (!gatePassed) {
+        return {
+          symbolState: { ...state, regimeState },
+          accountBalance: input.accountBalance,
+          event: { type: 'SKIPPED', symbol: input.symbol, timestamp: currentCandle.timestamp, reason: 'NEUTRAL_GATE_REJECTED' },
+        };
+      }
+      // Gate passed — falls through to the normal pipeline below (account-balance check, sizing,
+      // riskPool, AND the soft momentumMultiplier below still applies on top — this gate is an
+      // ADDITIONAL hard filter before entry, not a replacement for the existing soft one).
+    }
+
     // Account blown (balance <= 0): no new positions can be sized. Not a NOT_IMPLEMENTED-style
     // error — a real, expected end state for a backtest/live account, so it's just "no entry"
     // rather than an exception (PositionSizingInput itself throws on accountBalance <= 0).
@@ -293,31 +355,13 @@ export async function processCandle(
     // byte-for-byte unchanged from before this ticket unless momentumFilterConfig.momentumFilterEnabled.
     let momentumMultiplier = 1.0;
     if (config.momentumFilterConfig.momentumFilterEnabled) {
-      const crossFeatures = computeMomentumCrossFeatures(input.candles5m, input.candles1hMomentum);
-      if (crossFeatures !== undefined) {
-        // TICKET-025 Phần C: dedicated LONG/SHORT models — no more 1-p(bullish) approximation for
-        // SHORT (TICKET-024). Each side's own model + own schema (never assumed identical).
-        const isLong = draftSetup.side === 'LONG';
-        const modelPath = isLong ? MOMENTUM_MODEL_PATH : MOMENTUM_BEARISH_MODEL_PATH;
-        const schema = isLong ? getMomentumSchema() : getMomentumBearishSchema();
-        const featureVector = buildFeatureVector(
-          {
-            symbol: input.symbol,
-            adx1h: regimeOutput.computedMetrics.adx1h as number,
-            atrPercentile5m: regimeOutput.computedMetrics.atrPercentile5m as number,
-            bbWidthPercentile15m: regimeOutput.computedMetrics.bbWidthPercentile15m as number,
-            volumeZScore5m: regimeOutput.computedMetrics.volumeZScore5m as number,
-            atrTrend5m: regimeOutput.computedMetrics.atrTrend5m as string,
-            adxDirection1h: regimeOutput.adxDirection1h as string,
-            macroDirection,
-            ...crossFeatures,
-          },
-          schema,
-        );
-        const p = await scoreMomentum(modelPath, featureVector);
+      // TICKET-036: reuses the same scoreMomentumForSide() helper the Gate above calls — no
+      // re-derivation of the LONG/SHORT model split or feature vector construction.
+      const p = await scoreMomentumForSide(draftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
+      if (p !== undefined) {
         momentumMultiplier = computeMomentumMultiplier(p, config.momentumFilterConfig);
       }
-      // crossFeatures undefined (insufficient EMA/ATR history) -> momentumMultiplier stays 1.0, same as disabled.
+      // p undefined (insufficient EMA/ATR history) -> momentumMultiplier stays 1.0, same as disabled.
     }
     const combinedRiskMultiplier = draftSetup.riskMultiplier * momentumMultiplier;
 

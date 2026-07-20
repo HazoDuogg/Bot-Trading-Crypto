@@ -23,6 +23,29 @@ export const DEFAULT_MOMENTUM_FILTER_CONFIG: MomentumFilterConfig = {
   momentumLowMultiplier: 0.5,
 };
 
+/**
+ * TICKET-036. Hard gate for NEUTRAL_TRANSITION only — unlike MomentumFilterConfig above (soft
+ * risk-multiplier, never blocks entry outright), this one REJECTS the DraftSetup entirely when the
+ * momentum score doesn't clear the threshold. Replaces the old fixed 0.5 risk-multiplier idea
+ * (TICKET-012/retired by TICKET-036) with a binary confidence gate instead of a size reduction.
+ */
+export interface NeutralTransitionGateConfig {
+  /**
+   * Off by default. entryRouter.ts's routeEntry() always builds a real DraftSetup for
+   * NEUTRAL_TRANSITION now (TICKET-036 Phần A) — this flag is read by orchestrator.ts, which
+   * discards that DraftSetup with no event (byte-for-byte the pre-TICKET-036 behavior) whenever
+   * false, instead of running it through the Momentum Gate below.
+   */
+  neutralTransitionTradingEnabled: boolean;
+  /** TODO_CONFIRM: PM suggested 0.55. Momentum score (own-side model) must be >= this to allow the trade; missing/undetermined score always rejects, never defaults to passing. */
+  neutralTransitionMomentumGateThreshold: number;
+}
+
+export const DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG: NeutralTransitionGateConfig = {
+  neutralTransitionTradingEnabled: false,
+  neutralTransitionMomentumGateThreshold: 0.55,
+};
+
 // TICKET-023 model artifacts, read at runtime (path only — never hard-code feature order/categories,
 // those are always read fresh from the schema JSON by featureBuilder.ts).
 //

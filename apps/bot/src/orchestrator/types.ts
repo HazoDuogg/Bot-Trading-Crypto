@@ -1,7 +1,7 @@
 import type { MarketRegime } from '../regime/types.js';
 import type { ManagedPositionState, TpPlan } from '../risk/slTpManager.js';
 import type { EntryRouterConfig } from '../entry/types.js';
-import type { MomentumFilterConfig } from '../xgbFilter/config.js';
+import type { MomentumFilterConfig, NeutralTransitionGateConfig } from '../xgbFilter/config.js';
 
 export interface RegimeHysteresisState {
   previousRegime: MarketRegime | null;
@@ -77,7 +77,8 @@ export interface SkippedEntryEvent {
   type: 'SKIPPED';
   symbol: string;
   timestamp: number;
-  reason: 'RISK_POOL_EXCEEDED';
+  /** TICKET-036: NEUTRAL_GATE_REJECTED = the mandatory Momentum Gate rejected a NEUTRAL_TRANSITION DraftSetup — a distinct reason from risk-pool capacity, never conflated. */
+  reason: 'RISK_POOL_EXCEEDED' | 'NEUTRAL_GATE_REJECTED';
 }
 
 export type OrchestratorEvent = OpenTradeEvent | CloseTradeEvent | SkippedEntryEvent;
@@ -94,4 +95,6 @@ export interface OrchestratorConfig {
   isLowConfidenceOrLowLiquidity: boolean;
   /** TICKET-024 Phần C: soft risk-multiplier from the momentum ONNX model — backtest-only A/B testing, not wired into live. */
   momentumFilterConfig: MomentumFilterConfig;
+  /** TICKET-036: hard Momentum Gate for NEUTRAL_TRANSITION only — backtest-only A/B testing, not wired into live. */
+  neutralTransitionGateConfig: NeutralTransitionGateConfig;
 }

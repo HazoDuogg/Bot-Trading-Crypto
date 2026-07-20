@@ -250,23 +250,66 @@ describe('routeEntry — Macro Trend Filter applied to Box Breakout (TICKET-018)
   });
 });
 
-describe('routeEntry — NEUTRAL_TRANSITION never enters (TICKET-012, backtest showed it is net negative)', () => {
-  it('returns null regardless of entryStyleForNeutral, even when OB/MSS conditions would otherwise produce a TREND setup', () => {
+// TICKET-036: re-enabled (TICKET-012 had it hard-disabled). routeEntry() now picks the same
+// cascade TREND_RIDER/SIDEWAY_SCALPER use, per entryStyleForNeutral — the hard Momentum Gate that
+// decides whether this DraftSetup is actually allowed through lives in orchestrator.ts, not here.
+describe('routeEntry — NEUTRAL_TRANSITION re-enabled (TICKET-036)', () => {
+  it('produces a LONG DraftSetup via OB+MSS (TREND_STYLE) when entryStyleForNeutral=TREND_STYLE', () => {
     const input = baseInput({
       regime: MarketRegime.NEUTRAL_TRANSITION,
       adxDirection1h: 'UP',
       candles5m: trendCandles5m,
       candlesMss: mssCandles,
     });
-    expect(routeEntry(input, { ...DEFAULT_ENTRY_ROUTER_CONFIG, entryStyleForNeutral: 'TREND_STYLE' })).toBeNull();
-    expect(routeEntry(input, { ...DEFAULT_ENTRY_ROUTER_CONFIG, entryStyleForNeutral: 'SIDEWAY_STYLE' })).toBeNull();
+    const result = routeEntry(input, { ...DEFAULT_ENTRY_ROUTER_CONFIG, entryStyleForNeutral: 'TREND_STYLE' });
+
+    const atr = lastDefined(wilderATRSeries(trendCandles5m, RegimeConfig.ATR_PERIOD_5M));
+    expect(atr).toBeDefined();
+    const expectedSl = 9 - EntryConfig.SL_BUFFER_ATR_MULTIPLIER * (atr as number);
+
+    expect(result).toEqual({
+      side: 'LONG',
+      entryPrice: 13,
+      slPrice: expectedSl,
+      setupType: 'OB',
+      regime: MarketRegime.NEUTRAL_TRANSITION,
+      riskMultiplier: 1.0, // TICKET-036: no more fixed 0.5 — gate replaces it
+    });
   });
 
-  it('returns null even when box-breakout conditions would otherwise produce a setup', () => {
+  it('returns null via TREND_STYLE when adxDirection1h is FLAT, same as TREND_RIDER would', () => {
+    const input = baseInput({
+      regime: MarketRegime.NEUTRAL_TRANSITION,
+      adxDirection1h: 'FLAT',
+      candles5m: trendCandles5m,
+      candlesMss: mssCandles,
+    });
+    expect(routeEntry(input, { ...DEFAULT_ENTRY_ROUTER_CONFIG, entryStyleForNeutral: 'TREND_STYLE' })).toBeNull();
+  });
+
+  it('produces a LONG DraftSetup on a confirmed box breakout when entryStyleForNeutral=SIDEWAY_STYLE (the config default)', () => {
     const input = baseInput({
       regime: MarketRegime.NEUTRAL_TRANSITION,
       candles15m: box15m,
       candles5m: [c(111, 115, 116, 110.5)],
+      bbWidthPercentile15m: 50,
+      volumeZScore5m: 1.5,
+    });
+    expect(routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG)).toEqual({
+      side: 'LONG',
+      entryPrice: 115,
+      slPrice: 90,
+      setupType: 'BOX_BREAKOUT',
+      regime: MarketRegime.NEUTRAL_TRANSITION,
+      riskMultiplier: 1.0,
+    });
+  });
+
+  it('returns null via SIDEWAY_STYLE when no breakout has confirmed yet, same as COMPRESSION would', () => {
+    const input = baseInput({
+      regime: MarketRegime.NEUTRAL_TRANSITION,
+      candles15m: box15m,
+      candles5m: [c(103, 105, 106, 102)], // inside the box, no breakout
       bbWidthPercentile15m: 50,
       volumeZScore5m: 1.5,
     });
