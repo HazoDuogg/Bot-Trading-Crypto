@@ -504,7 +504,7 @@ describe('classifyCandidate — CORRELATED_RISK (TICKET-030)', () => {
     lowerSweepCount5m: 0,
   };
 
-  it('matches CORRELATED_RISK when correlatedRiskRatio is above CORRELATED_RISK_THRESHOLD', () => {
+  it('matches CORRELATED_RISK when correlatedRiskRatio is above CORRELATED_RISK_THRESHOLD (TICKET-032: NOT trend-qualified — adx1hRecent too short for TREND_RIDER persistence)', () => {
     const metrics: ComputedMetrics = { ...neutralMetrics, correlatedRiskRatio: 0.97 }; // TICKET-031: threshold tightened to 0.95
     expect(classifyCandidate(metrics, null)).toBe(MarketRegime.CORRELATED_RISK);
   });
@@ -529,6 +529,22 @@ describe('classifyCandidate — CORRELATED_RISK (TICKET-030)', () => {
   it('takes priority over LOW_LIQUIDITY when both conditions are met (checked earlier in the decision tree)', () => {
     const metrics: ComputedMetrics = { ...neutralMetrics, correlatedRiskRatio: 0.97, lowLiquidityRatio: 0.01 }; // TICKET-031: threshold tightened to 0.95
     expect(classifyCandidate(metrics, null)).toBe(MarketRegime.CORRELATED_RISK);
+  });
+
+  // TICKET-032 — the key behavior change: a confirmed real TREND_RIDER (ADX persistent + ATR both
+  // clear their thresholds) must win even when correlatedRiskRatio ALSO clears CORRELATED_RISK_THRESHOLD
+  // at the same time — real backtest evidence showed the old order blocked genuine trend trades
+  // (71% winners, including all 3 during the Jan BTC-crash month) since a strong trend naturally
+  // makes all 4 coins move together (high correlation), which isn't itself abnormal risk.
+  it('TICKET-032: TREND_RIDER wins over CORRELATED_RISK when BOTH conditions are met at once', () => {
+    const metrics: ComputedMetrics = {
+      ...neutralMetrics,
+      adx1h: 40,
+      adx1hRecent: [35, 38, 40], // clears TREND_ENTER_ADX.enter(32) for the full persistence window
+      atrPercentile5m: 100, // clears TREND_ENTER_ATR_PCT.enter(65)
+      correlatedRiskRatio: 0.97, // clears CORRELATED_RISK_THRESHOLD.enter(0.95) too
+    };
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.TREND_RIDER);
   });
 });
 

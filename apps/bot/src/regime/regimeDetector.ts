@@ -179,7 +179,26 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     return MarketRegime.MANIPULATED;
   }
 
-  // 3. CORRELATED_RISK — TICKET-030: cross-symbol correlation (regime/correlatedRisk.ts), pre-computed
+  // 3. TREND_RIDER — TICKET-014 Phần A: adx1h must clear the threshold for
+  // TREND_ADX_PERSISTENCE_CANDLES consecutive 1H candles, not just the latest one (post-crash
+  // chop was producing 1-candle ADX spikes that looked like a trend but weren't). Not enough
+  // history for the full window -> persistence fails, falls through to the next branch.
+  // TICKET-032: moved ahead of CORRELATED_RISK — a confirmed real trend (ADX+ATR both clear) means
+  // every coin moving together is the TREND_RIDER opportunity itself, not portfolio-wide liquidation
+  // risk. Real backtest evidence: 71% of TREND_RIDER trades CORRELATED_RISK blocked (old order) were
+  // winners, including all 3 during the Jan BTC-crash month. CORRELATED_RISK now only protects
+  // non-trending periods (range-bound/choppy correlation spikes), its actually-intended target.
+  const trendAdxThreshold = thresholdFor(RegimeConfig.TREND_ENTER_ADX, isCurrently(MarketRegime.TREND_RIDER));
+  const trendAtrThreshold = thresholdFor(RegimeConfig.TREND_ENTER_ATR_PCT, isCurrently(MarketRegime.TREND_RIDER));
+  const adxPersistent =
+    adx1hRecent !== undefined &&
+    adx1hRecent.length === RegimeConfig.TREND_ADX_PERSISTENCE_CANDLES &&
+    adx1hRecent.every((v) => v >= trendAdxThreshold);
+  if (adxPersistent && atrPercentile5m >= trendAtrThreshold) {
+    return MarketRegime.TREND_RIDER;
+  }
+
+  // 4. CORRELATED_RISK — TICKET-030: cross-symbol correlation (regime/correlatedRisk.ts), pre-computed
   // ONCE per time-step across all 4 coins by the caller and passed in as a plain number — detectRegime()
   // never reads another symbol's candles itself. Portfolio-wide risk (chained liquidation across
   // Cross Margin positions when every coin moves together) — placed ahead of LOW_LIQUIDITY (which only
@@ -192,7 +211,7 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     }
   }
 
-  // 4. LOW_LIQUIDITY — TICKET-028: session-relative volume (current volume vs the SAME time-of-day
+  // 5. LOW_LIQUIDITY — TICKET-028: session-relative volume (current volume vs the SAME time-of-day
   // on prior days, not a plain rolling average — crypto volume has a strong Asia/Europe/US session
   // cycle). No order book depth data available, so this is volume-only, a narrower scope than the
   // original design. Skipped entirely (falls through, never throws) whenever lowLiquidityRatio is
@@ -203,20 +222,6 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     if (lowLiquidityRatio < lowLiquidityThreshold) {
       return MarketRegime.LOW_LIQUIDITY;
     }
-  }
-
-  // 5. TREND_RIDER — TICKET-014 Phần A: adx1h must clear the threshold for
-  // TREND_ADX_PERSISTENCE_CANDLES consecutive 1H candles, not just the latest one (post-crash
-  // chop was producing 1-candle ADX spikes that looked like a trend but weren't). Not enough
-  // history for the full window -> persistence fails, falls through to the next branch.
-  const trendAdxThreshold = thresholdFor(RegimeConfig.TREND_ENTER_ADX, isCurrently(MarketRegime.TREND_RIDER));
-  const trendAtrThreshold = thresholdFor(RegimeConfig.TREND_ENTER_ATR_PCT, isCurrently(MarketRegime.TREND_RIDER));
-  const adxPersistent =
-    adx1hRecent !== undefined &&
-    adx1hRecent.length === RegimeConfig.TREND_ADX_PERSISTENCE_CANDLES &&
-    adx1hRecent.every((v) => v >= trendAdxThreshold);
-  if (adxPersistent && atrPercentile5m >= trendAtrThreshold) {
-    return MarketRegime.TREND_RIDER;
   }
 
   // 6. COMPRESSION — bbWidth in the extreme-low percentile band AND actively tightening (dynamic, not static).
