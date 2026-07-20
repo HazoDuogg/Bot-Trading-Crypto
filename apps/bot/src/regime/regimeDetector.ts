@@ -198,7 +198,18 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     return MarketRegime.TREND_RIDER;
   }
 
-  // 4. CORRELATED_RISK — TICKET-030: cross-symbol correlation (regime/correlatedRisk.ts), pre-computed
+  // 4. SIDEWAY_SCALPER — low ADX, stable range (bbWidth NOT in the extreme-low/compressing band).
+  // TICKET-034: moved ahead of CORRELATED_RISK — same reasoning as TREND_RIDER's move in TICKET-032.
+  // A confirmed Box Breakout setup can be perfectly valid even while the 4 coins are highly
+  // correlated (that's not itself abnormal risk). Real backtest evidence: 2/3 SIDEWAY_SCALPER trades
+  // CORRELATED_RISK blocked (post-TICKET-032 order) were winners. Condition itself unchanged, only
+  // its position in the priority chain moved.
+  const sidewayAdxThreshold = thresholdFor(RegimeConfig.SIDEWAY_ADX_THRESHOLD, isCurrently(MarketRegime.SIDEWAY_SCALPER));
+  if (adx1h <= sidewayAdxThreshold && bbWidthPercentile15m > RegimeConfig.COMPRESSION_BBW_PCT_THRESHOLD.enter) {
+    return MarketRegime.SIDEWAY_SCALPER;
+  }
+
+  // 5. CORRELATED_RISK — TICKET-030: cross-symbol correlation (regime/correlatedRisk.ts), pre-computed
   // ONCE per time-step across all 4 coins by the caller and passed in as a plain number — detectRegime()
   // never reads another symbol's candles itself. Portfolio-wide risk (chained liquidation across
   // Cross Margin positions when every coin moves together) — placed ahead of LOW_LIQUIDITY (which only
@@ -211,7 +222,7 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     }
   }
 
-  // 5. LOW_LIQUIDITY — TICKET-028: session-relative volume (current volume vs the SAME time-of-day
+  // 6. LOW_LIQUIDITY — TICKET-028: session-relative volume (current volume vs the SAME time-of-day
   // on prior days, not a plain rolling average — crypto volume has a strong Asia/Europe/US session
   // cycle). No order book depth data available, so this is volume-only, a narrower scope than the
   // original design. Skipped entirely (falls through, never throws) whenever lowLiquidityRatio is
@@ -224,7 +235,7 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     }
   }
 
-  // 6. COMPRESSION — bbWidth in the extreme-low percentile band AND actively tightening (dynamic, not static).
+  // 7. COMPRESSION — bbWidth in the extreme-low percentile band AND actively tightening (dynamic, not static).
   const compressionBbwThreshold = thresholdFor(
     RegimeConfig.COMPRESSION_BBW_PCT_THRESHOLD,
     isCurrently(MarketRegime.COMPRESSION),
@@ -233,17 +244,11 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     return MarketRegime.COMPRESSION;
   }
 
-  // 7. VOLATILE_CHOP — high ATR without trend strength (choppy, non-directional volatility).
+  // 8. VOLATILE_CHOP — high ATR without trend strength (choppy, non-directional volatility).
   const chopAtrThreshold = thresholdFor(RegimeConfig.CHOP_ATR_PCT_THRESHOLD, isCurrently(MarketRegime.VOLATILE_CHOP));
   const chopAdxThreshold = thresholdFor(RegimeConfig.CHOP_ADX_THRESHOLD, isCurrently(MarketRegime.VOLATILE_CHOP));
   if (atrPercentile5m >= chopAtrThreshold && adx1h < chopAdxThreshold) {
     return MarketRegime.VOLATILE_CHOP;
-  }
-
-  // 8. SIDEWAY_SCALPER — low ADX, stable range (bbWidth NOT in the extreme-low/compressing band).
-  const sidewayAdxThreshold = thresholdFor(RegimeConfig.SIDEWAY_ADX_THRESHOLD, isCurrently(MarketRegime.SIDEWAY_SCALPER));
-  if (adx1h <= sidewayAdxThreshold && bbWidthPercentile15m > RegimeConfig.COMPRESSION_BBW_PCT_THRESHOLD.enter) {
-    return MarketRegime.SIDEWAY_SCALPER;
   }
 
   // 9. NEUTRAL_TRANSITION — fallback: grey zone between Sideway and Trend.

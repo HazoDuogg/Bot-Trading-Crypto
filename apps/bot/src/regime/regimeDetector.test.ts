@@ -451,9 +451,24 @@ describe('detectRegime — LOW_LIQUIDITY integration (TICKET-028)', () => {
     return Array.from({ length: count }, (_, i) => c(volume, startTs + i * intervalMs));
   }
 
+  // TICKET-034: flat candles1h (adx1h ~ 0) used to safely avoid every other branch, but now also
+  // satisfies SIDEWAY_SCALPER's adx1h<=20 condition (moved ahead of LOW_LIQUIDITY/CORRELATED_RISK) —
+  // a mild oscillation + slow drift keeps adx1h in the 20-32 gap (neither SIDEWAY_SCALPER's <=20 nor
+  // TREND_RIDER's persistent >=32), isolating the branch under test same as before.
+  function makeModerateAdxCandles1h(count: number, intervalMs: number, startTs: number): CandleData[] {
+    let prevClose = 100;
+    return Array.from({ length: count }, (_, i) => {
+      const close = 100 + Math.sin(i * 0.5) * 0.5 + i * 0.05;
+      const open = i === 0 ? close : prevClose;
+      const candle = { timestamp: startTs + i * intervalMs, open, high: Math.max(open, close) + 0.5, low: Math.min(open, close) - 0.5, close, volume: 1000 };
+      prevClose = close;
+      return candle;
+    });
+  }
+
   it('classifies LOW_LIQUIDITY end-to-end when the latest candle drops well below its own recurring session-volume baseline', () => {
     const startTs = Date.UTC(2024, 0, 1);
-    const candles1h = makeFlatCandles(40, 3_600_000, startTs, 1000); // flat -> adx1h ~ 0, avoids TREND_RIDER/CHOP
+    const candles1h = makeModerateAdxCandles1h(40, 3_600_000, startTs); // adx1h ~ 25-30, avoids TREND_RIDER/SIDEWAY_SCALPER/CHOP
     const candles15m = makeFlatCandles(325, 900_000, startTs, 1000); // avoids COMPRESSION
 
     const CANDLES_PER_DAY = 288;
@@ -504,7 +519,7 @@ describe('classifyCandidate — CORRELATED_RISK (TICKET-030)', () => {
     lowerSweepCount5m: 0,
   };
 
-  it('matches CORRELATED_RISK when correlatedRiskRatio is above CORRELATED_RISK_THRESHOLD (TICKET-032: NOT trend-qualified — adx1hRecent too short for TREND_RIDER persistence)', () => {
+  it('matches CORRELATED_RISK when correlatedRiskRatio is above CORRELATED_RISK_THRESHOLD (TICKET-032/034: NOT trend-qualified — adx1hRecent too short for TREND_RIDER persistence; NOT sideway-qualified — adx1h(25) > SIDEWAY_ADX_THRESHOLD(20))', () => {
     const metrics: ComputedMetrics = { ...neutralMetrics, correlatedRiskRatio: 0.97 }; // TICKET-031: threshold tightened to 0.95
     expect(classifyCandidate(metrics, null)).toBe(MarketRegime.CORRELATED_RISK);
   });
@@ -545,6 +560,21 @@ describe('classifyCandidate — CORRELATED_RISK (TICKET-030)', () => {
       correlatedRiskRatio: 0.97, // clears CORRELATED_RISK_THRESHOLD.enter(0.95) too
     };
     expect(classifyCandidate(metrics, null)).toBe(MarketRegime.TREND_RIDER);
+  });
+
+  // TICKET-034 — same fix pattern as TICKET-032, now for SIDEWAY_SCALPER: a confirmed Box Breakout
+  // setup (low ADX, stable range) must win even when correlatedRiskRatio ALSO clears
+  // CORRELATED_RISK_THRESHOLD at the same time. Real backtest evidence: 2/3 SIDEWAY_SCALPER trades
+  // CORRELATED_RISK blocked (post-TICKET-032 order) were winners. Condition itself unchanged, only
+  // its position in the priority chain moved.
+  it('TICKET-034: SIDEWAY_SCALPER wins over CORRELATED_RISK when BOTH conditions are met at once', () => {
+    const metrics: ComputedMetrics = {
+      ...neutralMetrics,
+      adx1h: 15, // clears SIDEWAY_ADX_THRESHOLD.enter(20) — low ADX
+      bbWidthPercentile15m: 50, // > COMPRESSION_BBW_PCT_THRESHOLD.enter(10) — not compressing
+      correlatedRiskRatio: 0.97, // clears CORRELATED_RISK_THRESHOLD.enter(0.95) too
+    };
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.SIDEWAY_SCALPER);
   });
 });
 
@@ -593,9 +623,23 @@ describe('detectRegime — CORRELATED_RISK integration (TICKET-030)', () => {
     return Array.from({ length: count }, (_, i) => c(volume, startTs + i * intervalMs));
   }
 
+  // TICKET-034: flat candles1h (adx1h ~ 0) used to safely avoid every other branch, but now also
+  // satisfies SIDEWAY_SCALPER's adx1h<=20 condition (moved ahead of CORRELATED_RISK) — a mild
+  // oscillation + slow drift keeps adx1h in the 20-32 gap, isolating CORRELATED_RISK as before.
+  function makeModerateAdxCandles1h(count: number, intervalMs: number, startTs: number): CandleData[] {
+    let prevClose = 100;
+    return Array.from({ length: count }, (_, i) => {
+      const close = 100 + Math.sin(i * 0.5) * 0.5 + i * 0.05;
+      const open = i === 0 ? close : prevClose;
+      const candle = { timestamp: startTs + i * intervalMs, open, high: Math.max(open, close) + 0.5, low: Math.min(open, close) - 0.5, close, volume: 1000 };
+      prevClose = close;
+      return candle;
+    });
+  }
+
   it('classifies CORRELATED_RISK end-to-end when the caller-supplied ratio clears the threshold', () => {
     const startTs = Date.UTC(2024, 0, 1);
-    const candles1h = makeFlatCandles(40, 3_600_000, startTs, 1000);
+    const candles1h = makeModerateAdxCandles1h(40, 3_600_000, startTs); // adx1h ~ 25-30, avoids TREND_RIDER/SIDEWAY_SCALPER
     const candles15m = makeFlatCandles(325, 900_000, startTs, 1000);
     const candles5m = makeFlatCandles(320, 300_000, startTs, 1000);
 
