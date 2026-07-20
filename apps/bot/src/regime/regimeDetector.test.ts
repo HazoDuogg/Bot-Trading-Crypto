@@ -203,3 +203,122 @@ describe('detectRegime — Post-Danger Cooldown (TICKET-014 Phần B)', () => {
     expect(output.lastDangerZoneTimestamp).toBe(priorTs); // carried forward unchanged
   });
 });
+
+// TICKET-026 Phần B — MANIPULATED joins DANGER_ZONE as a FAST_IN_SLOW_OUT_REGIMES member: confirm
+// entering immediately, still require N_CANDLE_CONFIRM to leave. Mirrors the DANGER_ZONE block above.
+describe('applyHysteresis — MANIPULATED fast in / slow out', () => {
+  it('confirms MANIPULATED immediately on the very first call (previous = null)', () => {
+    const result = applyHysteresis(MarketRegime.MANIPULATED, null);
+    expect(result.regime).toBe(MarketRegime.MANIPULATED);
+    expect(result.streakCount).toBe(0);
+  });
+
+  it('confirms MANIPULATED immediately from any other confirmed state, bypassing N_CANDLE_CONFIRM', () => {
+    const previous: HysteresisState = { regime: MarketRegime.SIDEWAY_SCALPER, candidateRegime: MarketRegime.SIDEWAY_SCALPER, streakCount: 0 };
+    const result = applyHysteresis(MarketRegime.MANIPULATED, previous);
+    expect(result.regime).toBe(MarketRegime.MANIPULATED);
+    expect(result.streakCount).toBe(0);
+  });
+
+  it('does not leave MANIPULATED until the new candidate holds for N_CANDLE_CONFIRM consecutive calls', () => {
+    let state: HysteresisState = { regime: MarketRegime.MANIPULATED, candidateRegime: MarketRegime.MANIPULATED, streakCount: 0 };
+    for (let i = 0; i < RegimeConfig.N_CANDLE_CONFIRM - 1; i++) {
+      state = applyHysteresis(MarketRegime.TREND_RIDER, state);
+      expect(state.regime).toBe(MarketRegime.MANIPULATED); // still held
+    }
+  });
+
+  it('leaves MANIPULATED once the new candidate holds for exactly N_CANDLE_CONFIRM consecutive calls', () => {
+    let state: HysteresisState = { regime: MarketRegime.MANIPULATED, candidateRegime: MarketRegime.MANIPULATED, streakCount: 0 };
+    for (let i = 0; i < RegimeConfig.N_CANDLE_CONFIRM; i++) {
+      state = applyHysteresis(MarketRegime.TREND_RIDER, state);
+    }
+    expect(state.regime).toBe(MarketRegime.TREND_RIDER);
+    expect(state.streakCount).toBe(0);
+  });
+
+  it('DANGER_ZONE and MANIPULATED both fast-in independently — switching straight from one to the other still confirms immediately', () => {
+    const fromDanger: HysteresisState = { regime: MarketRegime.DANGER_ZONE, candidateRegime: MarketRegime.DANGER_ZONE, streakCount: 0 };
+    const result = applyHysteresis(MarketRegime.MANIPULATED, fromDanger);
+    expect(result.regime).toBe(MarketRegime.MANIPULATED);
+    expect(result.streakCount).toBe(0);
+  });
+});
+
+// TICKET-026 Phần A — MANIPULATED: repeated 2-sided wick sweeps (reuses regime/indicators.ts's
+// wickRatios(), same formula entry/detectors/liquiditySweep.ts uses), without a volume spike.
+describe('classifyCandidate — MANIPULATED (TICKET-026 Phần A)', () => {
+  // Deliberately fails every OTHER branch (DANGER/TREND/COMPRESSION/CHOP/SIDEWAY) so the only
+  // question being tested is the MANIPULATED condition itself — falls through to NEUTRAL_TRANSITION
+  // whenever MANIPULATED does NOT match, same isolation style as the TREND_RIDER persistence tests above.
+  const neutralMetrics = {
+    adx1h: 25, // > SIDEWAY_ADX_THRESHOLD(20); adx1hRecent below has insufficient length anyway -> no TREND_RIDER
+    adx1hRecent: [25],
+    atrPercentile5m: 50, // < CHOP_ATR_PCT_THRESHOLD(70) and < DANGER_ATR_PCT_THRESHOLD(95)
+    bbWidthPercentile15m: 50, // > COMPRESSION_BBW_PCT_THRESHOLD(10)
+    atrTrend5m: 'flat' as const,
+    volumeZScore5m: 0, // < DANGER_VOLUME_ZSCORE_THRESHOLD(2.5) and < MANIPULATED_MAX_VOLUME_ZSCORE(1.5)
+  };
+
+  it('matches MANIPULATED when BOTH sides show >= MANIPULATED_MIN_SWEEPS_EACH_SIDE sweeps and volume is normal', () => {
+    const metrics: ComputedMetrics = { ...neutralMetrics, upperSweepCount5m: 2, lowerSweepCount5m: 2 };
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.MANIPULATED);
+  });
+
+  it('does NOT match MANIPULATED when only ONE side repeats (real trend, not manipulation)', () => {
+    const metrics: ComputedMetrics = { ...neutralMetrics, upperSweepCount5m: 5, lowerSweepCount5m: 0 };
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.NEUTRAL_TRANSITION);
+  });
+
+  it('does NOT match MANIPULATED when volume is abnormally high (real volatility, per DANGER_ZONE, not staged manipulation)', () => {
+    const metrics: ComputedMetrics = { ...neutralMetrics, upperSweepCount5m: 3, lowerSweepCount5m: 3, volumeZScore5m: 2.0 };
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.NEUTRAL_TRANSITION);
+  });
+
+  it('does NOT match MANIPULATED when the lookback window has not fully populated yet (counts undefined)', () => {
+    const metrics: ComputedMetrics = { ...neutralMetrics, upperSweepCount5m: undefined, lowerSweepCount5m: undefined };
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.NEUTRAL_TRANSITION);
+  });
+});
+
+// TICKET-026 — full pipeline: real candle data with genuine 2-sided wick sweeps in the trailing
+// MANIPULATED_LOOKBACK_CANDLES window should classify MANIPULATED end-to-end (computeMetrics's
+// sweep-counting, not just classifyCandidate's decision in isolation, per the tests above).
+describe('detectRegime — MANIPULATED integration (TICKET-026)', () => {
+  function c(open: number, close: number, high: number, low: number, timestamp: number): CandleData {
+    return { timestamp, open, close, high, low, volume: 1000 }; // constant volume -> volumeZScore5m = 0
+  }
+
+  function makeFlatCandles(count: number, intervalMs: number, startTs: number): CandleData[] {
+    const candles: CandleData[] = [];
+    for (let i = 0; i < count; i++) {
+      candles.push(c(100, 100, 100.5, 99.5, startTs + i * intervalMs));
+    }
+    return candles;
+  }
+
+  it('classifies MANIPULATED when the last 10 5m candles alternate big upper/lower wicks with flat volume', () => {
+    const candles1h = makeFlatCandles(40, 3_600_000, Date.UTC(2024, 0, 1)); // flat -> adx1h ~ 0, well under every ADX-based threshold
+    const candles15m = makeFlatCandles(325, 900_000, Date.UTC(2024, 0, 1));
+
+    const fillerCount = 310; // same margin as other full-pipeline fixtures in this file
+    const filler5m = makeFlatCandles(fillerCount, 300_000, Date.UTC(2024, 0, 1));
+    const lastFillerTs = filler5m[filler5m.length - 1].timestamp;
+
+    // 10 candles, alternating a big upper wick (open=close=100, high=110) and a big lower wick
+    // (open=close=100, high=101, low=90) — upperWickRatio/lowerWickRatio ~0.91 > 0.65 threshold on
+    // the respective side each time -> 5 upper-sweep + 5 lower-sweep candles, both >= MANIPULATED_MIN_SWEEPS_EACH_SIDE(2).
+    const manipulatedTail: CandleData[] = Array.from({ length: RegimeConfig.MANIPULATED_LOOKBACK_CANDLES }, (_, i) =>
+      i % 2 === 0 ? c(100, 100, 110, 99, lastFillerTs + (i + 1) * 300_000) : c(100, 100, 101, 90, lastFillerTs + (i + 1) * 300_000),
+    );
+    const candles5m = [...filler5m, ...manipulatedTail];
+
+    const output = detectRegime({ candles5m, candles15m, candles1h, previousRegime: null });
+
+    expect(output.computedMetrics.upperSweepCount5m).toBe(5);
+    expect(output.computedMetrics.lowerSweepCount5m).toBe(5);
+    expect(output.computedMetrics.volumeZScore5m).toBe(0);
+    expect(output.candidateRegime).toBe(MarketRegime.MANIPULATED);
+    expect(output.regime).toBe(MarketRegime.MANIPULATED); // fast-in — confirmed on the very first call
+  });
+});

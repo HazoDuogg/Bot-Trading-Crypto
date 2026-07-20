@@ -11,6 +11,7 @@ import {
   lastDefined,
   percentileRankSeries,
   trendDirection,
+  wickRatios,
   wilderADXSeries,
   wilderATRSeries,
   wilderDIDirectionSeries,
@@ -42,9 +43,6 @@ export function detectCorrelatedRisk(_input: RegimeInput): never {
 export function detectLowLiquidity(_input: RegimeInput): never {
   throw new RegimeNotImplementedError(MarketRegime.LOW_LIQUIDITY);
 }
-export function detectManipulated(_input: RegimeInput): never {
-  throw new RegimeNotImplementedError(MarketRegime.MANIPULATED);
-}
 
 /** Last `count` non-NaN values of `series`, oldest to newest. Fewer than `count` if not enough valid history yet. */
 function lastDefinedN(series: number[], count: number): number[] {
@@ -75,7 +73,35 @@ function computeMetrics(input: RegimeInput): ComputedMetrics {
   const volumeZScoreSeries5m = zScoreSeries(volumeSeries5m, RegimeConfig.VOLUME_ZSCORE_LOOKBACK_5M);
   const volumeZScore5m = lastDefined(volumeZScoreSeries5m);
 
-  return { adx1h, adx1hRecent, adxDirection1h, atrPercentile5m, bbWidthPercentile15m, atrTrend5m, volumeZScore5m };
+  // TICKET-026: MANIPULATED — count 5m candles in the trailing MANIPULATED_LOOKBACK_CANDLES window
+  // whose wick ratio (regime/indicators.ts's wickRatios(), same formula as
+  // entry/detectors/liquiditySweep.ts's single-candle sweep check) exceeds the shared sweep
+  // threshold, per side. classifyCandidate() does the >= MANIPULATED_MIN_SWEEPS_EACH_SIDE comparison
+  // — this only computes the raw counts, same separation as every other metric here.
+  const manipulatedWindow = input.candles5m.slice(-RegimeConfig.MANIPULATED_LOOKBACK_CANDLES);
+  let upperSweepCount5m: number | undefined;
+  let lowerSweepCount5m: number | undefined;
+  if (manipulatedWindow.length === RegimeConfig.MANIPULATED_LOOKBACK_CANDLES) {
+    upperSweepCount5m = 0;
+    lowerSweepCount5m = 0;
+    for (const candle of manipulatedWindow) {
+      const { upperWickRatio, lowerWickRatio } = wickRatios(candle);
+      if (upperWickRatio > RegimeConfig.LIQUIDITY_SWEEP_WICK_RATIO_THRESHOLD) upperSweepCount5m++;
+      if (lowerWickRatio > RegimeConfig.LIQUIDITY_SWEEP_WICK_RATIO_THRESHOLD) lowerSweepCount5m++;
+    }
+  }
+
+  return {
+    adx1h,
+    adx1hRecent,
+    adxDirection1h,
+    atrPercentile5m,
+    bbWidthPercentile15m,
+    atrTrend5m,
+    volumeZScore5m,
+    upperSweepCount5m,
+    lowerSweepCount5m,
+  };
 }
 
 function thresholdFor(t: Threshold, isCurrentRegime: boolean): number {
@@ -88,7 +114,7 @@ function thresholdFor(t: Threshold, isCurrentRegime: boolean): number {
  * logic against precomputed metric series, instead of re-deriving it.
  */
 export function classifyCandidate(metrics: ComputedMetrics, previousRegime: MarketRegime | null): MarketRegime {
-  const { adx1h, adx1hRecent, atrPercentile5m, bbWidthPercentile15m, atrTrend5m, volumeZScore5m } = metrics;
+  const { adx1h, adx1hRecent, atrPercentile5m, bbWidthPercentile15m, atrTrend5m, volumeZScore5m, upperSweepCount5m, lowerSweepCount5m } = metrics;
 
   if (
     adx1h === undefined ||
@@ -115,7 +141,24 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     return MarketRegime.DANGER_ZONE;
   }
 
-  // 2. TREND_RIDER — TICKET-014 Phần A: adx1h must clear the threshold for
+  // 2. MANIPULATED — TICKET-026: repeated 2-sided liquidity-style wick sweeps (same wick-ratio
+  // formula/threshold as entry/detectors/liquiditySweep.ts's single-setup sweep check) within a
+  // short trailing window, WITHOUT a volume spike — distinguishes staged "dắt giá" moves from
+  // DANGER_ZONE's real high-volatility+high-volume ones. BOTH sides required (upper AND lower) —
+  // one side repeating alone is a real trend, not manipulation. Undefined counts (lookback window
+  // not fully populated yet) fall through, same as any other not-yet-available derived metric.
+  const manipulatedMaxVolThreshold = thresholdFor(RegimeConfig.MANIPULATED_MAX_VOLUME_ZSCORE, isCurrently(MarketRegime.MANIPULATED));
+  if (
+    upperSweepCount5m !== undefined &&
+    lowerSweepCount5m !== undefined &&
+    upperSweepCount5m >= RegimeConfig.MANIPULATED_MIN_SWEEPS_EACH_SIDE &&
+    lowerSweepCount5m >= RegimeConfig.MANIPULATED_MIN_SWEEPS_EACH_SIDE &&
+    volumeZScore5m < manipulatedMaxVolThreshold
+  ) {
+    return MarketRegime.MANIPULATED;
+  }
+
+  // 3. TREND_RIDER — TICKET-014 Phần A: adx1h must clear the threshold for
   // TREND_ADX_PERSISTENCE_CANDLES consecutive 1H candles, not just the latest one (post-crash
   // chop was producing 1-candle ADX spikes that looked like a trend but weren't). Not enough
   // history for the full window -> persistence fails, falls through to the next branch.
@@ -129,7 +172,7 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     return MarketRegime.TREND_RIDER;
   }
 
-  // 3. COMPRESSION — bbWidth in the extreme-low percentile band AND actively tightening (dynamic, not static).
+  // 4. COMPRESSION — bbWidth in the extreme-low percentile band AND actively tightening (dynamic, not static).
   const compressionBbwThreshold = thresholdFor(
     RegimeConfig.COMPRESSION_BBW_PCT_THRESHOLD,
     isCurrently(MarketRegime.COMPRESSION),
@@ -138,20 +181,20 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     return MarketRegime.COMPRESSION;
   }
 
-  // 4. VOLATILE_CHOP — high ATR without trend strength (choppy, non-directional volatility).
+  // 5. VOLATILE_CHOP — high ATR without trend strength (choppy, non-directional volatility).
   const chopAtrThreshold = thresholdFor(RegimeConfig.CHOP_ATR_PCT_THRESHOLD, isCurrently(MarketRegime.VOLATILE_CHOP));
   const chopAdxThreshold = thresholdFor(RegimeConfig.CHOP_ADX_THRESHOLD, isCurrently(MarketRegime.VOLATILE_CHOP));
   if (atrPercentile5m >= chopAtrThreshold && adx1h < chopAdxThreshold) {
     return MarketRegime.VOLATILE_CHOP;
   }
 
-  // 5. SIDEWAY_SCALPER — low ADX, stable range (bbWidth NOT in the extreme-low/compressing band).
+  // 6. SIDEWAY_SCALPER — low ADX, stable range (bbWidth NOT in the extreme-low/compressing band).
   const sidewayAdxThreshold = thresholdFor(RegimeConfig.SIDEWAY_ADX_THRESHOLD, isCurrently(MarketRegime.SIDEWAY_SCALPER));
   if (adx1h <= sidewayAdxThreshold && bbWidthPercentile15m > RegimeConfig.COMPRESSION_BBW_PCT_THRESHOLD.enter) {
     return MarketRegime.SIDEWAY_SCALPER;
   }
 
-  // 6. NEUTRAL_TRANSITION — fallback: grey zone between Sideway and Trend.
+  // 7. NEUTRAL_TRANSITION — fallback: grey zone between Sideway and Trend.
   return MarketRegime.NEUTRAL_TRANSITION;
 }
 
@@ -161,17 +204,22 @@ export interface HysteresisState {
   streakCount: number;
 }
 
+// TICKET-007 Phần A / TICKET-026 Phần B: both are protective "stand aside" states — confirm
+// entering immediately, but still require the normal N_CANDLE_CONFIRM streak to leave. Better to be
+// overly cautious than slow to react, for either.
+const FAST_IN_SLOW_OUT_REGIMES = new Set<MarketRegime>([MarketRegime.DANGER_ZONE, MarketRegime.MANIPULATED]);
+
 /**
  * Hysteresis bookkeeping, isolated from metric computation so it can run cheaply over a
  * precomputed metric series (calibration scripts) without recomputing indicators per step.
  * `previous: null` means no prior state (first call ever). Confirms `candidateRegime` as the
  * new `regime` only after it holds for RegimeConfig.N_CANDLE_CONFIRM consecutive calls —
- * EXCEPT entering DANGER_ZONE, which bypasses that wait entirely (TICKET-007: fast in, slow out).
+ * EXCEPT entering a FAST_IN_SLOW_OUT_REGIMES member, which bypasses that wait entirely.
  */
 export function applyHysteresis(candidateRegime: MarketRegime, previous: HysteresisState | null): HysteresisState {
-  const previouslyInDanger = previous !== null && previous.regime === MarketRegime.DANGER_ZONE;
-  if (candidateRegime === MarketRegime.DANGER_ZONE && !previouslyInDanger) {
-    return { regime: MarketRegime.DANGER_ZONE, candidateRegime: MarketRegime.DANGER_ZONE, streakCount: 0 };
+  const previouslyInSameFastInRegime = previous !== null && previous.regime === candidateRegime && FAST_IN_SLOW_OUT_REGIMES.has(candidateRegime);
+  if (FAST_IN_SLOW_OUT_REGIMES.has(candidateRegime) && !previouslyInSameFastInRegime) {
+    return { regime: candidateRegime, candidateRegime, streakCount: 0 };
   }
 
   if (previous === null) {
@@ -185,7 +233,7 @@ export function applyHysteresis(candidateRegime: MarketRegime, previous: Hystere
   if (newStreak >= RegimeConfig.N_CANDLE_CONFIRM) {
     return { regime: candidateRegime, candidateRegime, streakCount: 0 };
   }
-  return { regime: previous.regime, candidateRegime, streakCount: newStreak }; // hold until confirmed (also covers leaving DANGER_ZONE, unchanged)
+  return { regime: previous.regime, candidateRegime, streakCount: newStreak }; // hold until confirmed (also covers leaving a FAST_IN_SLOW_OUT_REGIMES member, unchanged)
 }
 
 /**

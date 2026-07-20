@@ -1,3 +1,5 @@
+import { RegimeConfig } from '../regime/config.js';
+
 /** All entry/ thresholds live here, same convention as regime/config.ts — never inline a magic number in detectors/. */
 export const EntryConfig = {
   /** TODO_CONFIRM: PM suggested N=2 (standard 5-candle fractal) as the default swing-point width. */
@@ -6,8 +8,12 @@ export const EntryConfig = {
   /** TODO_CONFIRM: PM suggested K=10 — max candles forward from an OB candidate to find BOS before giving up. */
   OB_BOS_LOOKFORWARD_K: 10,
 
-  /** TODO_CONFIRM: PM-given formula, threshold not yet backtested. lowerWickRatio/upperWickRatio > this = a sweep. */
-  LIQUIDITY_SWEEP_WICK_RATIO_THRESHOLD: 0.65,
+  /**
+   * TODO_CONFIRM: PM-given formula, threshold not yet backtested. lowerWickRatio/upperWickRatio > this = a sweep.
+   * TICKET-026: canonical value now lives in RegimeConfig (regime/regimeDetector.ts's MANIPULATED
+   * check reuses it too, and regime/ must not import entry/) — this just points at it, same number.
+   */
+  LIQUIDITY_SWEEP_WICK_RATIO_THRESHOLD: RegimeConfig.LIQUIDITY_SWEEP_WICK_RATIO_THRESHOLD,
 
   /** TODO_CONFIRM: PM suggested 1m as the default MSS confirmation timeframe (alternative: 3m). */
   MSS_TIMEFRAME: '1m' as '1m' | '3m',

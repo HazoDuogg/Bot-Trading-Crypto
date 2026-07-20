@@ -25,7 +25,6 @@ export const NOT_IMPLEMENTED_REGIMES: ReadonlySet<MarketRegime> = new Set([
   MarketRegime.EVENT_RISK,
   MarketRegime.CORRELATED_RISK,
   MarketRegime.LOW_LIQUIDITY,
-  MarketRegime.MANIPULATED,
 ]);
 
 export interface RegimeInput {
@@ -59,6 +58,9 @@ export interface ComputedMetrics {
   bbWidthPercentile15m?: number;
   atrTrend5m?: 'increasing' | 'decreasing' | 'flat';
   volumeZScore5m?: number;
+  /** TICKET-026: number of 5m candles in the trailing MANIPULATED_LOOKBACK_CANDLES window whose upper/lower wick ratio exceeds LIQUIDITY_SWEEP_WICK_RATIO_THRESHOLD. Undefined until the lookback window is fully populated. */
+  upperSweepCount5m?: number;
+  lowerSweepCount5m?: number;
   // Extensible — audit trail for metrics used by regimes not yet implemented.
   [key: string]: number | string | number[] | undefined;
 }

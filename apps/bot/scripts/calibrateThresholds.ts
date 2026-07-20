@@ -14,6 +14,7 @@ import {
   bollingerBandwidthSeries,
   percentileRankSeries,
   trendDirectionSeries,
+  wickRatios,
   wilderADXSeries,
   wilderATRSeries,
   zScoreSeries,
@@ -128,11 +129,26 @@ function calibrateSymbol(symbol: string): string {
     const atrTrend5m = atrTrendSeries5m[i];
     const volumeZScore5m = volumeZScoreSeries5m[i];
 
+    // TICKET-026: classifyCandidate's MANIPULATED branch needs the trailing sweep-density window —
+    // same slice-and-count as regimeDetector.ts's own computeMetrics, kept in sync manually since
+    // this script precomputes series instead of calling computeMetrics() directly.
+    let upperSweepCount5m: number | undefined;
+    let lowerSweepCount5m: number | undefined;
+    if (i - RegimeConfig.MANIPULATED_LOOKBACK_CANDLES + 1 >= 0) {
+      upperSweepCount5m = 0;
+      lowerSweepCount5m = 0;
+      for (let j = i - RegimeConfig.MANIPULATED_LOOKBACK_CANDLES + 1; j <= i; j++) {
+        const { upperWickRatio, lowerWickRatio } = wickRatios(candles5m[j]);
+        if (upperWickRatio > RegimeConfig.LIQUIDITY_SWEEP_WICK_RATIO_THRESHOLD) upperSweepCount5m++;
+        if (lowerWickRatio > RegimeConfig.LIQUIDITY_SWEEP_WICK_RATIO_THRESHOLD) lowerSweepCount5m++;
+      }
+    }
+
     if (Number.isNaN(adx1h) || Number.isNaN(atrPercentile5m) || Number.isNaN(bbWidthPercentile15m) || atrTrend5m === undefined || Number.isNaN(volumeZScore5m)) {
       continue;
     }
 
-    const metrics = { adx1h, adx1hRecent, atrPercentile5m, bbWidthPercentile15m, atrTrend5m, volumeZScore5m };
+    const metrics = { adx1h, adx1hRecent, atrPercentile5m, bbWidthPercentile15m, atrTrend5m, volumeZScore5m, upperSweepCount5m, lowerSweepCount5m };
     const candidateRegime = classifyCandidate(metrics, hysteresisState?.regime ?? null);
     hysteresisState = applyHysteresis(candidateRegime, hysteresisState);
 

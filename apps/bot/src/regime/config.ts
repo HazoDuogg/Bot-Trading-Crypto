@@ -71,4 +71,28 @@ export const RegimeConfig = {
   TREND_ADX_PERSISTENCE_CANDLES: 3,
   /** TODO_CONFIRM, PM suggested 72. Hours after a confirmed DANGER_ZONE during which TREND_RIDER candidates are forced down to NEUTRAL_TRANSITION. */
   POST_DANGER_COOLDOWN_HOURS: 72,
+
+  // ---- TICKET-026: MANIPULATED (repeated 2-sided liquidity sweep, no volume spike) ----
+  /** TODO_CONFIRM, PM suggested 10. Trailing 5m-candle window checked for repeated 2-sided wick sweeps. */
+  MANIPULATED_LOOKBACK_CANDLES: 10,
+  /** TODO_CONFIRM, PM suggested 2. EACH side (upper AND lower) needs at least this many sweep candles within the lookback window — one side repeating alone is a real trend, not manipulation. */
+  MANIPULATED_MIN_SWEEPS_EACH_SIDE: 2,
+  /**
+   * TODO_CONFIRM, PM suggested 1.5. volumeZScore5m must stay BELOW this — manipulation typically
+   * doesn't need high volume, unlike DANGER_ZONE's real high-volatility+high-volume moves. Threshold
+   * pair (not a plain number) for the same enter/exit hysteresis-asymmetry consistency as
+   * DANGER_VOLUME_ZSCORE_THRESHOLD above — PM only gave one number, exit mirrors enter for now.
+   */
+  MANIPULATED_MAX_VOLUME_ZSCORE: symmetric(1.5),
+  /**
+   * TODO_CONFIRM: PM-given formula, threshold not yet backtested. lowerWickRatio/upperWickRatio >
+   * this = a sweep (single 5m candle, entry/detectors/liquiditySweep.ts B.3) — same threshold TICKET-026's
+   * MANIPULATED regime check reuses per-candle within its lookback window.
+   * Canonical home moved here from entry/config.ts (TICKET-026): regime/regimeDetector.ts's
+   * MANIPULATED check needs it too, and regime/ must not import entry/ (see regimeDetector.ts's
+   * detectRegime() doc comment). entry/config.ts's EntryConfig.LIQUIDITY_SWEEP_WICK_RATIO_THRESHOLD
+   * now just points at this value (entry/ already imports regime/ freely elsewhere) — one source,
+   * not a duplicate; value/meaning unchanged from the original entry/config.ts constant.
+   */
+  LIQUIDITY_SWEEP_WICK_RATIO_THRESHOLD: 0.65,
 } as const;

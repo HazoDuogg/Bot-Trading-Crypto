@@ -247,3 +247,22 @@ export function lastDefined(series: number[]): number | undefined {
   }
   return undefined;
 }
+
+/**
+ * PM-given formula (2026-07-17, entry/detectors/liquiditySweep.ts B.3): fraction of a candle's
+ * high-low range that sits above the body (upper) / below the body (lower), 0-1. Zero-range candle
+ * -> both 0. Hosted here (not in entry/) so regime/regimeDetector.ts's MANIPULATED check (TICKET-026)
+ * can reuse it too: entry/ already imports freely from regime/ (e.g. entryRouter.ts's own
+ * RegimeConfig/wilderATRSeries imports), but regime/ must never import entry/ (see
+ * regimeDetector.ts's detectRegime() doc comment) — so the shared implementation lives on the
+ * regime/ side of that one-way boundary, and entry/detectors/liquiditySweep.ts imports it from here
+ * instead of computing its own copy inline.
+ */
+export function wickRatios(candle: CandleData): { upperWickRatio: number; lowerWickRatio: number } {
+  const range = candle.high - candle.low;
+  if (range === 0) return { upperWickRatio: 0, lowerWickRatio: 0 };
+  return {
+    upperWickRatio: (candle.high - Math.max(candle.open, candle.close)) / range,
+    lowerWickRatio: (Math.min(candle.open, candle.close) - candle.low) / range,
+  };
+}
