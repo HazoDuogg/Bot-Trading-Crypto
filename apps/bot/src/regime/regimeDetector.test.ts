@@ -342,7 +342,7 @@ describe('classifyCandidate — LOW_LIQUIDITY (TICKET-028)', () => {
   };
 
   it('matches LOW_LIQUIDITY when lowLiquidityRatio is below LOW_LIQUIDITY_VOLUME_RATIO_THRESHOLD (sufficient session history)', () => {
-    const metrics: ComputedMetrics = { ...neutralMetrics, lowLiquidityRatio: 0.1 };
+    const metrics: ComputedMetrics = { ...neutralMetrics, lowLiquidityRatio: 0.05 }; // TICKET-029: threshold tightened to 0.1
     expect(classifyCandidate(metrics, null)).toBe(MarketRegime.LOW_LIQUIDITY);
   });
 
@@ -420,7 +420,7 @@ describe('sessionRelativeVolumeRatio — session-relative, not a flat daily aver
   it('DOES flag a candle as low volume when it drops well below its own recurring session baseline', () => {
     const candles = buildCandles(6, 100, 1000);
     const day6Slot0 = 5 * CANDLES_PER_DAY + 0;
-    candles[day6Slot0].volume = 10; // crashes to 10, well under this slot's usual 100
+    candles[day6Slot0].volume = 5; // TICKET-029: crashes to 5 (ratio 0.05), safely under the tightened 0.1 threshold
     const ratios = sessionRelativeVolumeRatio(candles, RegimeConfig.LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS);
     expect(ratios[day6Slot0]).toBeLessThan(RegimeConfig.LOW_LIQUIDITY_VOLUME_RATIO_THRESHOLD.enter);
   });

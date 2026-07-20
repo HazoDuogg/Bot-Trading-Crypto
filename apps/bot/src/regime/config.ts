@@ -99,6 +99,11 @@ export const RegimeConfig = {
   // ---- TICKET-028: LOW_LIQUIDITY (session-relative volume, no order book depth data available) ----
   /** TODO_CONFIRM, PM suggested 14. Days of same-time-of-day history sessionRelativeVolumeRatio averages over. */
   LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS: 14,
-  /** TODO_CONFIRM, PM suggested 0.3. currentVolume must fall below this fraction of the same-time-of-day average across prior days. */
-  LOW_LIQUIDITY_VOLUME_RATIO_THRESHOLD: symmetric(0.3),
+  /**
+   * TICKET-029: tightened from 0.3 to 0.1 — real backtest evidence showed 0.3 sat too close to
+   * lowLiquidityRatio's real p25 (~0.4), blocking normal hour-to-hour volume swings (67% of blocked
+   * trades were winners) instead of genuinely extreme liquidity droughts. TODO_CONFIRM: 0.1 is a
+   * tighter starting point, not yet backtested-and-confirmed by PM either.
+   */
+  LOW_LIQUIDITY_VOLUME_RATIO_THRESHOLD: symmetric(0.1),
 } as const;
