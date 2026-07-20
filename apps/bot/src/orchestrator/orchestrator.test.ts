@@ -76,7 +76,7 @@ const trendLongInput: SlTpManagerInput = {
 
 function stateWithOpenPosition(position: ReturnType<typeof openPosition>): SymbolState {
   return {
-    regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0 },
+    regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
     openPosition: position,
     openMeta: {
       regime: MarketRegime.TREND_RIDER,

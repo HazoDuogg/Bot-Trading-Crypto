@@ -505,7 +505,7 @@ describe('classifyCandidate — CORRELATED_RISK (TICKET-030)', () => {
   };
 
   it('matches CORRELATED_RISK when correlatedRiskRatio is above CORRELATED_RISK_THRESHOLD', () => {
-    const metrics: ComputedMetrics = { ...neutralMetrics, correlatedRiskRatio: 0.9 };
+    const metrics: ComputedMetrics = { ...neutralMetrics, correlatedRiskRatio: 0.97 }; // TICKET-031: threshold tightened to 0.95
     expect(classifyCandidate(metrics, null)).toBe(MarketRegime.CORRELATED_RISK);
   });
 
@@ -527,7 +527,7 @@ describe('classifyCandidate — CORRELATED_RISK (TICKET-030)', () => {
   });
 
   it('takes priority over LOW_LIQUIDITY when both conditions are met (checked earlier in the decision tree)', () => {
-    const metrics: ComputedMetrics = { ...neutralMetrics, correlatedRiskRatio: 0.9, lowLiquidityRatio: 0.01 };
+    const metrics: ComputedMetrics = { ...neutralMetrics, correlatedRiskRatio: 0.97, lowLiquidityRatio: 0.01 }; // TICKET-031: threshold tightened to 0.95
     expect(classifyCandidate(metrics, null)).toBe(MarketRegime.CORRELATED_RISK);
   });
 });
@@ -583,9 +583,9 @@ describe('detectRegime — CORRELATED_RISK integration (TICKET-030)', () => {
     const candles15m = makeFlatCandles(325, 900_000, startTs, 1000);
     const candles5m = makeFlatCandles(320, 300_000, startTs, 1000);
 
-    const output = detectRegime({ candles5m, candles15m, candles1h, previousRegime: null, correlatedRiskRatio: 0.95 });
+    const output = detectRegime({ candles5m, candles15m, candles1h, previousRegime: null, correlatedRiskRatio: 0.97 }); // TICKET-031: threshold tightened to 0.95
 
-    expect(output.computedMetrics.correlatedRiskRatio).toBe(0.95);
+    expect(output.computedMetrics.correlatedRiskRatio).toBe(0.97);
     expect(output.candidateRegime).toBe(MarketRegime.CORRELATED_RISK);
   });
 

@@ -110,6 +110,12 @@ export const RegimeConfig = {
   // ---- TICKET-030: CORRELATED_RISK (cross-symbol correlation, computed once outside detectRegime()) ----
   /** TODO_CONFIRM, PM suggested 30. Trailing 1H candles the rolling Pearson correlation is computed over. */
   CORRELATED_RISK_WINDOW_CANDLES: 30,
-  /** TODO_CONFIRM, PM suggested 0.8. Average Pearson correlation (vs BTCUSDT) across the other 3 coins must exceed this. */
-  CORRELATED_RISK_THRESHOLD: symmetric(0.8),
+  /**
+   * TICKET-031: tightened from 0.8 to 0.95 — real backtest evidence showed 0.8 sat BELOW
+   * correlatedRiskRatio's real mean (0.85) and p25 (0.82) across all 4 coins, matching ~80% of the
+   * time instead of flagging genuinely extreme lockstep moves (BTC/ETH/SOL/XRP are normally highly
+   * correlated — that's not itself abnormal). 0.95 sits near the real p95 (~0.94). TODO_CONFIRM:
+   * still a starting point, not yet backtested-and-confirmed by PM either.
+   */
+  CORRELATED_RISK_THRESHOLD: symmetric(0.95),
 } as const;
