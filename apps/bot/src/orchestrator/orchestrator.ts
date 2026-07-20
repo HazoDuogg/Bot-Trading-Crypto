@@ -7,7 +7,7 @@
 import { detectRegime } from '../regime/regimeDetector.js';
 import { RegimeConfig } from '../regime/config.js';
 import { lastDefined, wilderATRSeries, wilderDIDirectionSeries } from '../regime/indicators.js';
-import type { CandleData } from '../regime/types.js';
+import { MarketRegime, type CandleData } from '../regime/types.js';
 import { routeEntry } from '../entry/entryRouter.js';
 import { EntryConfig } from '../entry/config.js';
 import { buildFeatureVector, computeMomentumCrossFeatures, loadFeatureSchema, type FeatureSchema } from '../xgbFilter/featureBuilder.js';
@@ -61,6 +61,20 @@ export interface ProcessCandleResult {
   symbolState: SymbolState;
   accountBalance: number;
   event: OrchestratorEvent | null;
+}
+
+/**
+ * TICKET-027 — diagnostic-only payload for the moment regime freshly transitions into MANIPULATED
+ * (fast-in confirmation, not just candidate). Not part of normal orchestrator output — only built
+ * and delivered when the caller passes onManipulatedConfirmed to processCandle.
+ */
+export interface ManipulatedDiagnostic {
+  symbol: string;
+  timestamp: number;
+  upperSweepCount: number;
+  lowerSweepCount: number;
+  volumeZScore5m: number;
+  lookbackWindow: CandleData[];
 }
 
 function touchesFavorable(side: 'LONG' | 'SHORT', candle: CandleData, price: number): boolean {
@@ -150,7 +164,12 @@ function getMomentumBearishSchema(): FeatureSchema {
   return cachedMomentumBearishSchema;
 }
 
-export async function processCandle(input: ProcessCandleInput, state: SymbolState, config: OrchestratorConfig): Promise<ProcessCandleResult> {
+export async function processCandle(
+  input: ProcessCandleInput,
+  state: SymbolState,
+  config: OrchestratorConfig,
+  onManipulatedConfirmed?: (diagnostic: ManipulatedDiagnostic) => void,
+): Promise<ProcessCandleResult> {
   // Step 1 — regime, always runs.
   const regimeOutput = detectRegime({
     candles5m: input.candles5m,
@@ -168,6 +187,23 @@ export async function processCandle(input: ProcessCandleInput, state: SymbolStat
     previousDangerZoneTimestamp: regimeOutput.lastDangerZoneTimestamp,
   };
   const currentCandle = input.candles5m[input.candles5m.length - 1];
+
+  // TICKET-027 — diagnostic-only, no effect on any decision below: fires once per fresh transition
+  // into MANIPULATED (state.regimeState.previousRegime was something else, now confirmed MANIPULATED).
+  if (
+    onManipulatedConfirmed &&
+    regimeOutput.regime === MarketRegime.MANIPULATED &&
+    state.regimeState.previousRegime !== MarketRegime.MANIPULATED
+  ) {
+    onManipulatedConfirmed({
+      symbol: input.symbol,
+      timestamp: currentCandle.timestamp,
+      upperSweepCount: regimeOutput.computedMetrics.upperSweepCount5m as number,
+      lowerSweepCount: regimeOutput.computedMetrics.lowerSweepCount5m as number,
+      volumeZScore5m: regimeOutput.computedMetrics.volumeZScore5m as number,
+      lookbackWindow: input.candles5m.slice(-RegimeConfig.MANIPULATED_LOOKBACK_CANDLES),
+    });
+  }
 
   // Step 2 — no open position: try to enter.
   if (state.openPosition === null) {

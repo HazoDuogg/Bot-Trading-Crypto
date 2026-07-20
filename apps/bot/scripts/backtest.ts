@@ -12,7 +12,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { CandleData } from '../dist/regime/types.js';
-import { processCandle, type ProcessCandleInput } from '../dist/orchestrator/orchestrator.js';
+import { processCandle, type ManipulatedDiagnostic, type ProcessCandleInput } from '../dist/orchestrator/orchestrator.js';
 import { INITIAL_SYMBOL_STATE, type CloseTradeEvent, type OrchestratorConfig, type SymbolState } from '../dist/orchestrator/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import type { EntryStyleForNeutral } from '../dist/entry/types.js';
@@ -156,6 +156,19 @@ function statsTable(title: string, stats: Record<string, GroupStats>, sortChrono
   return [`### ${title}`, '', '| | Số lệnh | Winrate | PNL ($) |', '|---|---|---|---|', ...rows, ''].join('\n');
 }
 
+// TICKET-027 — diagnostic log only, separate file from backtest-report/trades. Formats one entry per
+// fresh MANIPULATED confirmation (see orchestrator.ts's onManipulatedConfirmed callback).
+function formatManipulatedDiagnostic(d: ManipulatedDiagnostic): string {
+  const candleLines = d.lookbackWindow.map(
+    (c) => `    ${new Date(c.timestamp).toISOString()} open=${c.open} high=${c.high} low=${c.low} close=${c.close} volume=${c.volume}`,
+  );
+  return [
+    `[MANIPULATED] symbol=${d.symbol} timestamp=${new Date(d.timestamp).toISOString()} upperSweepCount=${d.upperSweepCount} lowerSweepCount=${d.lowerSweepCount} volumeZScore5m=${d.volumeZScore5m}`,
+    `  lookbackWindow (${d.lookbackWindow.length} nến gần nhất):`,
+    ...candleLines,
+  ].join('\n');
+}
+
 function tradesCsv(trades: CloseTradeEvent[]): string {
   const header = 'symbol,side,regime,setupType,tpPlan,entryTimestamp,entryPrice,exitTimestamp,exitPrice,exitReason,pnlUsd,pnlPct,riskMultiplierApplied,accountBalanceAfter';
   const rows = trades.map((t) =>
@@ -189,6 +202,7 @@ async function main(): Promise<void> {
   let accountBalance = START_BALANCE;
   const trades: CloseTradeEvent[] = [];
   let skippedCount = 0;
+  const manipulatedLogLines: string[] = []; // TICKET-027
 
   const totalSteps = Math.min(...SYMBOLS.map((s) => symbolsData[s].candles5m.length));
   // startStep must guarantee enough REAL TIME has elapsed for every timeframe's window to be full,
@@ -241,7 +255,7 @@ async function main(): Promise<void> {
         otherOpenPositionsRisk,
       };
 
-      const result = await processCandle(input, sd.state, config);
+      const result = await processCandle(input, sd.state, config, (d) => manipulatedLogLines.push(formatManipulatedDiagnostic(d)));
       sd.state = result.symbolState;
       accountBalance = result.accountBalance;
 
@@ -256,6 +270,11 @@ async function main(): Promise<void> {
   }
 
   console.log(`Xong. ${trades.length} lệnh đóng, ${skippedCount} lệnh bị bỏ qua (risk pool), balance cuối=$${accountBalance.toFixed(2)}`);
+
+  // TICKET-027 — điều tra riêng, không trộn vào backtest-report.md/backtest-trades.csv.
+  const manipulatedLogPath = path.resolve(process.cwd(), 'data/manipulated-log.txt');
+  writeFileSync(manipulatedLogPath, manipulatedLogLines.join('\n\n') + '\n');
+  console.log(`→ ${manipulatedLogPath} (${manipulatedLogLines.length} lần MANIPULATED được xác nhận mới)`);
 
   const suffix = outputSuffix(macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled);
   const tradesPath = path.resolve(process.cwd(), `data/backtest-trades-${suffix}.csv`);
