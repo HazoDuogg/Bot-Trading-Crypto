@@ -12,6 +12,8 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { CandleData } from '../dist/regime/types.js';
+import { RegimeConfig } from '../dist/regime/config.js';
+import { computeCorrelatedRiskRatio } from '../dist/regime/correlatedRisk.js';
 import { processCandle, type ManipulatedDiagnostic, type ProcessCandleInput } from '../dist/orchestrator/orchestrator.js';
 import { INITIAL_SYMBOL_STATE, type CloseTradeEvent, type OrchestratorConfig, type SymbolState } from '../dist/orchestrator/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
@@ -223,6 +225,22 @@ async function main(): Promise<void> {
       if (meta) openRiskBySymbol[symbol] = meta.actualRiskDollar;
     }
 
+    // TICKET-030: cross-symbol correlation needs all 4 symbols' aligned 1H windows BEFORE any
+    // processCandle() call this step — computed ONCE here, then the same value is fed into every
+    // symbol's input below. Pearson correlation over a fixed trailing window (unlike Wilder ATR/ADX)
+    // has no recursive-seed dependency on how far back the window starts, so reusing WINDOW_1H(40)
+    // — already >= CORRELATED_RISK_WINDOW_CANDLES(30)+1 — is safe; no dedicated larger window needed.
+    const w1hBySymbol: Record<string, CandleData[]> = {};
+    for (const symbol of SYMBOLS) {
+      const sd = symbolsData[symbol];
+      const decisionTime = sd.candles5m[step].timestamp + 5 * 60_000;
+      const w1h = closedWindow(sd.candles1h, sd.ptr1h, 60 * 60_000, decisionTime, WINDOW_1H);
+      sd.ptr1h = w1h.ptr;
+      w1hBySymbol[symbol] = w1h.window;
+    }
+    const correlatedRiskRatioSeries = computeCorrelatedRiskRatio(w1hBySymbol, RegimeConfig.CORRELATED_RISK_WINDOW_CANDLES, 'BTCUSDT');
+    const correlatedRiskRatio = correlatedRiskRatioSeries[correlatedRiskRatioSeries.length - 1];
+
     for (const symbol of SYMBOLS) {
       const sd = symbolsData[symbol];
       const currentCandle = sd.candles5m[step];
@@ -232,11 +250,10 @@ async function main(): Promise<void> {
       const windowSessionVolume5m = sd.candles5m.slice(Math.max(0, step - WINDOW_5M_SESSION_VOLUME + 1), step + 1);
       const w15 = closedWindow(sd.candles15m, sd.ptr15m, 15 * 60_000, decisionTime, WINDOW_15M);
       sd.ptr15m = w15.ptr;
-      const w1h = closedWindow(sd.candles1h, sd.ptr1h, 60 * 60_000, decisionTime, WINDOW_1H);
-      sd.ptr1h = w1h.ptr;
-      // TICKET-024: same closed-candle pointer, just a longer slice — momentum's EMA(200) needs far
-      // more 1h history than regime/entry's own WINDOW_1H(40). closedWindow's ptr advancement doesn't
-      // depend on windowSize, so this is safe to compute from the same (now-updated) sd.ptr1h.
+      // TICKET-024: same closed-candle pointer (sd.ptr1h, already advanced in the pre-pass above),
+      // just a longer slice — momentum's EMA(200) needs far more 1h history than regime/entry's own
+      // WINDOW_1H(40). closedWindow's ptr advancement doesn't depend on windowSize, so recomputing
+      // from the already-advanced sd.ptr1h here is safe/idempotent.
       const w1hMomentum = closedWindow(sd.candles1h, sd.ptr1h, 60 * 60_000, decisionTime, WINDOW_1H_MOMENTUM);
       const w1m = closedWindow(sd.candles1m, sd.ptr1m, 60_000, decisionTime, WINDOW_1M);
       sd.ptr1m = w1m.ptr;
@@ -252,11 +269,12 @@ async function main(): Promise<void> {
         symbol,
         candles5m: window5m,
         candles15m: w15.window,
-        candles1h: w1h.window,
+        candles1h: w1hBySymbol[symbol],
         candles1m: w1m.window,
         candles1d: w1d.window,
         candles1hMomentum: w1hMomentum.window,
         candles5mSessionVolume: windowSessionVolume5m,
+        correlatedRiskRatio,
         accountBalance,
         otherOpenPositionsRisk,
       };
@@ -282,7 +300,10 @@ async function main(): Promise<void> {
   writeFileSync(manipulatedLogPath, manipulatedLogLines.join('\n\n') + '\n');
   console.log(`→ ${manipulatedLogPath} (${manipulatedLogLines.length} lần MANIPULATED được xác nhận mới)`);
 
-  const suffix = outputSuffix(macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled);
+  // TICKET-030: CORRELATED_RISK has no CLI on/off flag (unconditionally wired in, same pattern as
+  // MANIPULATED/LOW_LIQUIDITY) — "-correlated" appended so this run's report/trades never overwrite
+  // the pre-TICKET-030 both-momentum files (PM explicitly wants the $468.49 baseline preserved for comparison).
+  const suffix = outputSuffix(macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled) + '-correlated';
   const tradesPath = path.resolve(process.cwd(), `data/backtest-trades-${suffix}.csv`);
   writeFileSync(tradesPath, tradesCsv(trades));
   console.log(`→ ${tradesPath}`);

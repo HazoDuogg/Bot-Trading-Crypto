@@ -60,6 +60,14 @@ export interface ProcessCandleInput {
    * permanently unreachable (no error) rather than change any existing metric's behavior.
    */
   candles5mSessionVolume?: CandleData[];
+  /**
+   * TICKET-030: pre-computed cross-symbol correlation ratio (regime/correlatedRisk.ts), same value
+   * for all 4 symbols at this time-step — the caller (backtest.ts / live wiring) computes this ONCE
+   * per step across all 4 coins and passes the same number into every symbol's processCandle() call.
+   * Orchestrator does NOT compute this itself, only passes it through to detectRegime(). Optional:
+   * omit to leave CORRELATED_RISK permanently unreachable (no error).
+   */
+  correlatedRiskRatio?: number;
   accountBalance: number;
   /** Other symbols' currently open positions — THIS symbol's own position must not be included (checked separately by construction: only called when this symbol has none open). */
   otherOpenPositionsRisk: OpenPositionRisk[];
@@ -188,6 +196,7 @@ export async function processCandle(
     streakCount: state.regimeState.streakCount,
     previousDangerZoneTimestamp: state.regimeState.previousDangerZoneTimestamp,
     candles5mSessionVolume: input.candles5mSessionVolume,
+    correlatedRiskRatio: input.correlatedRiskRatio,
   });
   const regimeState = {
     previousRegime: regimeOutput.regime,

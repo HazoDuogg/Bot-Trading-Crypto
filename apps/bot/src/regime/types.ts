@@ -21,17 +21,12 @@ export enum MarketRegime {
 }
 
 /** States with no PM-specified formula yet — detectRegime() throws instead of guessing. */
-export const NOT_IMPLEMENTED_REGIMES: ReadonlySet<MarketRegime> = new Set([
-  MarketRegime.EVENT_RISK,
-  MarketRegime.CORRELATED_RISK,
-]);
+export const NOT_IMPLEMENTED_REGIMES: ReadonlySet<MarketRegime> = new Set([MarketRegime.EVENT_RISK]);
 
 export interface RegimeInput {
   candles5m: CandleData[];
   candles15m: CandleData[];
   candles1h: CandleData[];
-  /** Returns of 4 correlated coins, for CORRELATED_RISK — optional, NOT_IMPLEMENTED regardless. */
-  correlatedCoinsReturns?: number[][];
   /** From external economic calendar — optional, NOT_IMPLEMENTED regardless. */
   eventRiskFlag?: boolean;
   /** Hysteresis state fed back from the previous call's RegimeOutput. Null/omit on the first call. */
@@ -50,6 +45,15 @@ export interface RegimeInput {
    * (LOW_LIQUIDITY simply never fires), no error.
    */
   candles5mSessionVolume?: CandleData[];
+  /**
+   * TICKET-030: pre-computed cross-symbol correlation ratio (average Pearson correlation of this
+   * symbol's coin universe's 1H returns against BTCUSDT, see regime/correlatedRisk.ts). Computed
+   * ONCE per time-step OUTSIDE detectRegime() (by the caller — backtest.ts/orchestrator — across
+   * all 4 symbols at once) and passed in as a plain number, same value for every symbol at that
+   * step — detectRegime() stays single-symbol and never reads another coin's candles itself.
+   * Optional: omit to leave correlatedRiskRatio always undefined (CORRELATED_RISK never fires).
+   */
+  correlatedRiskRatio?: number;
 }
 
 export interface ComputedMetrics {
@@ -77,6 +81,11 @@ export interface ComputedMetrics {
    * dataset. Undefined/NaN -> the LOW_LIQUIDITY branch is skipped, classification proceeds normally.
    */
   lowLiquidityRatio?: number;
+  /**
+   * TICKET-030: pass-through of RegimeInput.correlatedRiskRatio (see there) — OPTIONAL, deliberately
+   * NOT in classifyCandidate()'s mandatory-undefined check, same reasoning as lowLiquidityRatio.
+   */
+  correlatedRiskRatio?: number;
   // Extensible — audit trail for metrics used by regimes not yet implemented.
   [key: string]: number | string | number[] | undefined;
 }

@@ -38,9 +38,6 @@ export function assertRegimeImplemented(regime: MarketRegime): void {
 export function detectEventRisk(_input: RegimeInput): never {
   throw new RegimeNotImplementedError(MarketRegime.EVENT_RISK);
 }
-export function detectCorrelatedRisk(_input: RegimeInput): never {
-  throw new RegimeNotImplementedError(MarketRegime.CORRELATED_RISK);
-}
 
 /** Last `count` non-NaN values of `series`, oldest to newest. Fewer than `count` if not enough valid history yet. */
 function lastDefinedN(series: number[], count: number): number[] {
@@ -111,6 +108,9 @@ function computeMetrics(input: RegimeInput): ComputedMetrics {
     upperSweepCount5m,
     lowerSweepCount5m,
     lowLiquidityRatio,
+    // TICKET-030: pure pass-through, never computed here — detectRegime() stays single-symbol,
+    // the caller pre-computes this once across all 4 coins (regime/correlatedRisk.ts) and feeds it in.
+    correlatedRiskRatio: input.correlatedRiskRatio,
   };
 }
 
@@ -124,8 +124,18 @@ function thresholdFor(t: Threshold, isCurrentRegime: boolean): number {
  * logic against precomputed metric series, instead of re-deriving it.
  */
 export function classifyCandidate(metrics: ComputedMetrics, previousRegime: MarketRegime | null): MarketRegime {
-  const { adx1h, adx1hRecent, atrPercentile5m, bbWidthPercentile15m, atrTrend5m, volumeZScore5m, upperSweepCount5m, lowerSweepCount5m, lowLiquidityRatio } =
-    metrics;
+  const {
+    adx1h,
+    adx1hRecent,
+    atrPercentile5m,
+    bbWidthPercentile15m,
+    atrTrend5m,
+    volumeZScore5m,
+    upperSweepCount5m,
+    lowerSweepCount5m,
+    lowLiquidityRatio,
+    correlatedRiskRatio,
+  } = metrics;
 
   if (
     adx1h === undefined ||
@@ -169,7 +179,20 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     return MarketRegime.MANIPULATED;
   }
 
-  // 3. LOW_LIQUIDITY — TICKET-028: session-relative volume (current volume vs the SAME time-of-day
+  // 3. CORRELATED_RISK — TICKET-030: cross-symbol correlation (regime/correlatedRisk.ts), pre-computed
+  // ONCE per time-step across all 4 coins by the caller and passed in as a plain number — detectRegime()
+  // never reads another symbol's candles itself. Portfolio-wide risk (chained liquidation across
+  // Cross Margin positions when every coin moves together) — placed ahead of LOW_LIQUIDITY (which only
+  // affects one coin at a time), same "stand aside" severity ordering reasoning as MANIPULATED before
+  // it. Skipped entirely (falls through, never throws) whenever correlatedRiskRatio is undefined/NaN.
+  if (correlatedRiskRatio !== undefined && !Number.isNaN(correlatedRiskRatio)) {
+    const correlatedRiskThreshold = thresholdFor(RegimeConfig.CORRELATED_RISK_THRESHOLD, isCurrently(MarketRegime.CORRELATED_RISK));
+    if (correlatedRiskRatio > correlatedRiskThreshold) {
+      return MarketRegime.CORRELATED_RISK;
+    }
+  }
+
+  // 4. LOW_LIQUIDITY — TICKET-028: session-relative volume (current volume vs the SAME time-of-day
   // on prior days, not a plain rolling average — crypto volume has a strong Asia/Europe/US session
   // cycle). No order book depth data available, so this is volume-only, a narrower scope than the
   // original design. Skipped entirely (falls through, never throws) whenever lowLiquidityRatio is
@@ -182,7 +205,7 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     }
   }
 
-  // 4. TREND_RIDER — TICKET-014 Phần A: adx1h must clear the threshold for
+  // 5. TREND_RIDER — TICKET-014 Phần A: adx1h must clear the threshold for
   // TREND_ADX_PERSISTENCE_CANDLES consecutive 1H candles, not just the latest one (post-crash
   // chop was producing 1-candle ADX spikes that looked like a trend but weren't). Not enough
   // history for the full window -> persistence fails, falls through to the next branch.
@@ -196,7 +219,7 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     return MarketRegime.TREND_RIDER;
   }
 
-  // 5. COMPRESSION — bbWidth in the extreme-low percentile band AND actively tightening (dynamic, not static).
+  // 6. COMPRESSION — bbWidth in the extreme-low percentile band AND actively tightening (dynamic, not static).
   const compressionBbwThreshold = thresholdFor(
     RegimeConfig.COMPRESSION_BBW_PCT_THRESHOLD,
     isCurrently(MarketRegime.COMPRESSION),
@@ -205,20 +228,20 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     return MarketRegime.COMPRESSION;
   }
 
-  // 6. VOLATILE_CHOP — high ATR without trend strength (choppy, non-directional volatility).
+  // 7. VOLATILE_CHOP — high ATR without trend strength (choppy, non-directional volatility).
   const chopAtrThreshold = thresholdFor(RegimeConfig.CHOP_ATR_PCT_THRESHOLD, isCurrently(MarketRegime.VOLATILE_CHOP));
   const chopAdxThreshold = thresholdFor(RegimeConfig.CHOP_ADX_THRESHOLD, isCurrently(MarketRegime.VOLATILE_CHOP));
   if (atrPercentile5m >= chopAtrThreshold && adx1h < chopAdxThreshold) {
     return MarketRegime.VOLATILE_CHOP;
   }
 
-  // 7. SIDEWAY_SCALPER — low ADX, stable range (bbWidth NOT in the extreme-low/compressing band).
+  // 8. SIDEWAY_SCALPER — low ADX, stable range (bbWidth NOT in the extreme-low/compressing band).
   const sidewayAdxThreshold = thresholdFor(RegimeConfig.SIDEWAY_ADX_THRESHOLD, isCurrently(MarketRegime.SIDEWAY_SCALPER));
   if (adx1h <= sidewayAdxThreshold && bbWidthPercentile15m > RegimeConfig.COMPRESSION_BBW_PCT_THRESHOLD.enter) {
     return MarketRegime.SIDEWAY_SCALPER;
   }
 
-  // 8. NEUTRAL_TRANSITION — fallback: grey zone between Sideway and Trend.
+  // 9. NEUTRAL_TRANSITION — fallback: grey zone between Sideway and Trend.
   return MarketRegime.NEUTRAL_TRANSITION;
 }
 
@@ -228,10 +251,12 @@ export interface HysteresisState {
   streakCount: number;
 }
 
-// TICKET-007 Phần A / TICKET-026 Phần B: both are protective "stand aside" states — confirm
-// entering immediately, but still require the normal N_CANDLE_CONFIRM streak to leave. Better to be
-// overly cautious than slow to react, for either.
-const FAST_IN_SLOW_OUT_REGIMES = new Set<MarketRegime>([MarketRegime.DANGER_ZONE, MarketRegime.MANIPULATED]);
+// TICKET-007 Phần A / TICKET-026 Phần B / TICKET-030: all three are protective "stand aside" states
+// requiring an immediate reaction — confirm entering immediately, but still require the normal
+// N_CANDLE_CONFIRM streak to leave. Better to be overly cautious than slow to react. CORRELATED_RISK
+// joins DANGER_ZONE/MANIPULATED here (unlike LOW_LIQUIDITY, which is a slowly-changing session
+// characteristic and deliberately uses normal symmetric hysteresis instead).
+const FAST_IN_SLOW_OUT_REGIMES = new Set<MarketRegime>([MarketRegime.DANGER_ZONE, MarketRegime.MANIPULATED, MarketRegime.CORRELATED_RISK]);
 
 /**
  * Hysteresis bookkeeping, isolated from metric computation so it can run cheaply over a

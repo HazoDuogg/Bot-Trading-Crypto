@@ -20,6 +20,7 @@ import {
   wilderATRSeries,
   zScoreSeries,
 } from '../dist/regime/indicators.js';
+import { computeCorrelatedRiskRatio } from '../dist/regime/correlatedRisk.js';
 import { applyHysteresis, classifyCandidate, type HysteresisState } from '../dist/regime/regimeDetector.js';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
@@ -90,10 +91,12 @@ function stateCountsTable(candidateCounts: Map<string, number>, confirmedCounts:
   return lines.join('\n');
 }
 
-function calibrateSymbol(symbol: string): string {
+// TICKET-030: candles1h + correlatedRiskRatioSeries are precomputed ONCE in main() across all 4
+// symbols (computeCorrelatedRiskRatio must only run once, not per-symbol) and passed in — avoids
+// both a duplicate CSV read and a duplicate correlation computation per symbol.
+function calibrateSymbol(symbol: string, candles1h: CandleData[], correlatedRiskRatioSeries: number[]): string {
   const candles5m = readCsv(path.join(OHLCV_DIR, `${symbol}_5m.csv`));
   const candles15m = readCsv(path.join(OHLCV_DIR, `${symbol}_15m.csv`));
-  const candles1h = readCsv(path.join(OHLCV_DIR, `${symbol}_1h.csv`));
 
   const adxSeries1h = wilderADXSeries(candles1h, RegimeConfig.ADX_PERIOD_1H);
   const atrSeries5m = wilderATRSeries(candles5m, RegimeConfig.ATR_PERIOD_5M);
@@ -135,6 +138,11 @@ function calibrateSymbol(symbol: string): string {
     // TICKET-028: LOW_LIQUIDITY — deliberately NOT part of the mandatory-NaN skip check below
     // (needs far more history than every other metric), same rule as computeMetrics()/classifyCandidate().
     const lowLiquidityRatio = lowLiquidityRatioSeries5m[i];
+    // TICKET-030: CORRELATED_RISK — same optional/not-mandatory rule. correlatedRiskRatioSeries is
+    // indexed by the 1h array (same idx1h pointer already used for adx1h above); all 4 symbols'
+    // 1h CSVs are assumed index-aligned by timestamp (fetched together), same assumption backtest.ts
+    // makes when it indexes every symbol's candles5m by the same shared `step`.
+    const correlatedRiskRatio = idx1h >= 0 ? correlatedRiskRatioSeries[idx1h] : NaN;
 
     // TICKET-026: classifyCandidate's MANIPULATED branch needs the trailing sweep-density window —
     // same slice-and-count as regimeDetector.ts's own computeMetrics, kept in sync manually since
@@ -155,7 +163,18 @@ function calibrateSymbol(symbol: string): string {
       continue;
     }
 
-    const metrics = { adx1h, adx1hRecent, atrPercentile5m, bbWidthPercentile15m, atrTrend5m, volumeZScore5m, upperSweepCount5m, lowerSweepCount5m, lowLiquidityRatio };
+    const metrics = {
+      adx1h,
+      adx1hRecent,
+      atrPercentile5m,
+      bbWidthPercentile15m,
+      atrTrend5m,
+      volumeZScore5m,
+      upperSweepCount5m,
+      lowerSweepCount5m,
+      lowLiquidityRatio,
+      correlatedRiskRatio,
+    };
     const candidateRegime = classifyCandidate(metrics, hysteresisState?.regime ?? null);
     hysteresisState = applyHysteresis(candidateRegime, hysteresisState);
 
@@ -178,6 +197,7 @@ function calibrateSymbol(symbol: string): string {
     statsRow('bbWidthPercentile15m', describeSeries(bbwPercentileSeries15m)),
     statsRow('volumeZScore5m', describeSeries(volumeZScoreSeries5m)),
     statsRow('lowLiquidityRatio', describeSeries(lowLiquidityRatioSeries5m)),
+    statsRow('correlatedRiskRatio', describeSeries(correlatedRiskRatioSeries)),
     '',
     '### Tỷ lệ match theo state (ngưỡng HIỆN TẠI trong config.ts, chưa đổi)',
     '',
@@ -195,9 +215,18 @@ function main(): void {
     }
   }
 
+  // TICKET-030: read all 4 symbols' 1h candles ONCE here (shared with calibrateSymbol below, no
+  // duplicate read) and compute the cross-symbol correlation series ONCE for the whole coin universe
+  // — must never be recomputed per-symbol (same "compute once, reuse" rule as backtest.ts).
+  const candles1hBySymbol: Record<string, CandleData[]> = {};
+  for (const symbol of SYMBOLS) {
+    candles1hBySymbol[symbol] = readCsv(path.join(OHLCV_DIR, `${symbol}_1h.csv`));
+  }
+  const correlatedRiskRatioSeries = computeCorrelatedRiskRatio(candles1hBySymbol, RegimeConfig.CORRELATED_RISK_WINDOW_CANDLES, 'BTCUSDT');
+
   const sections = SYMBOLS.map((s) => {
     console.log(`Calibrating ${s}...`);
-    return calibrateSymbol(s);
+    return calibrateSymbol(s, candles1hBySymbol[s], correlatedRiskRatioSeries);
   });
 
   const report = [

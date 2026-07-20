@@ -106,4 +106,10 @@ export const RegimeConfig = {
    * tighter starting point, not yet backtested-and-confirmed by PM either.
    */
   LOW_LIQUIDITY_VOLUME_RATIO_THRESHOLD: symmetric(0.1),
+
+  // ---- TICKET-030: CORRELATED_RISK (cross-symbol correlation, computed once outside detectRegime()) ----
+  /** TODO_CONFIRM, PM suggested 30. Trailing 1H candles the rolling Pearson correlation is computed over. */
+  CORRELATED_RISK_WINDOW_CANDLES: 30,
+  /** TODO_CONFIRM, PM suggested 0.8. Average Pearson correlation (vs BTCUSDT) across the other 3 coins must exceed this. */
+  CORRELATED_RISK_THRESHOLD: symmetric(0.8),
 } as const;

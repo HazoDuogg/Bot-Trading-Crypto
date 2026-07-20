@@ -486,3 +486,118 @@ describe('detectRegime — LOW_LIQUIDITY integration (TICKET-028)', () => {
     expect(output.candidateRegime).not.toBe(MarketRegime.LOW_LIQUIDITY);
   });
 });
+
+// TICKET-030 — CORRELATED_RISK: cross-symbol correlation, pre-computed ONCE outside detectRegime()
+// (regime/correlatedRisk.ts, called once per time-step across all 4 coins by the caller) and passed
+// in as a plain number — detectRegime() never reads another symbol's candles itself, pure pass-through.
+// Priority: right after MANIPULATED, before LOW_LIQUIDITY (portfolio-wide risk > single-coin risk).
+describe('classifyCandidate — CORRELATED_RISK (TICKET-030)', () => {
+  // Deliberately fails every OTHER branch, same isolation style as MANIPULATED/LOW_LIQUIDITY above.
+  const neutralMetrics = {
+    adx1h: 25,
+    adx1hRecent: [25],
+    atrPercentile5m: 50,
+    bbWidthPercentile15m: 50,
+    atrTrend5m: 'flat' as const,
+    volumeZScore5m: 0,
+    upperSweepCount5m: 0,
+    lowerSweepCount5m: 0,
+  };
+
+  it('matches CORRELATED_RISK when correlatedRiskRatio is above CORRELATED_RISK_THRESHOLD', () => {
+    const metrics: ComputedMetrics = { ...neutralMetrics, correlatedRiskRatio: 0.9 };
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.CORRELATED_RISK);
+  });
+
+  it('does NOT match CORRELATED_RISK when correlatedRiskRatio is at/below the threshold (coins not moving in lockstep)', () => {
+    const metrics: ComputedMetrics = { ...neutralMetrics, correlatedRiskRatio: 0.2 };
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.NEUTRAL_TRANSITION);
+  });
+
+  it('does NOT throw and classifies normally when correlatedRiskRatio is undefined (caller did not supply it)', () => {
+    const metrics: ComputedMetrics = { ...neutralMetrics, correlatedRiskRatio: undefined };
+    expect(() => classifyCandidate(metrics, null)).not.toThrow();
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.NEUTRAL_TRANSITION);
+  });
+
+  it('does NOT throw and classifies normally when correlatedRiskRatio is NaN (insufficient window history)', () => {
+    const metrics: ComputedMetrics = { ...neutralMetrics, correlatedRiskRatio: NaN };
+    expect(() => classifyCandidate(metrics, null)).not.toThrow();
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.NEUTRAL_TRANSITION);
+  });
+
+  it('takes priority over LOW_LIQUIDITY when both conditions are met (checked earlier in the decision tree)', () => {
+    const metrics: ComputedMetrics = { ...neutralMetrics, correlatedRiskRatio: 0.9, lowLiquidityRatio: 0.01 };
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.CORRELATED_RISK);
+  });
+});
+
+// TICKET-030 — CORRELATED_RISK joins DANGER_ZONE/MANIPULATED as a FAST_IN_SLOW_OUT_REGIMES member:
+// confirm entering immediately, still require N_CANDLE_CONFIRM to leave. Mirrors those blocks above.
+describe('applyHysteresis — CORRELATED_RISK fast in / slow out (TICKET-030)', () => {
+  it('confirms CORRELATED_RISK immediately on the very first call (previous = null)', () => {
+    const result = applyHysteresis(MarketRegime.CORRELATED_RISK, null);
+    expect(result.regime).toBe(MarketRegime.CORRELATED_RISK);
+    expect(result.streakCount).toBe(0);
+  });
+
+  it('confirms CORRELATED_RISK immediately from any other confirmed state, bypassing N_CANDLE_CONFIRM', () => {
+    const previous: HysteresisState = { regime: MarketRegime.SIDEWAY_SCALPER, candidateRegime: MarketRegime.SIDEWAY_SCALPER, streakCount: 0 };
+    const result = applyHysteresis(MarketRegime.CORRELATED_RISK, previous);
+    expect(result.regime).toBe(MarketRegime.CORRELATED_RISK);
+    expect(result.streakCount).toBe(0);
+  });
+
+  it('does not leave CORRELATED_RISK until the new candidate holds for N_CANDLE_CONFIRM consecutive calls', () => {
+    let state: HysteresisState = { regime: MarketRegime.CORRELATED_RISK, candidateRegime: MarketRegime.CORRELATED_RISK, streakCount: 0 };
+    for (let i = 0; i < RegimeConfig.N_CANDLE_CONFIRM - 1; i++) {
+      state = applyHysteresis(MarketRegime.TREND_RIDER, state);
+      expect(state.regime).toBe(MarketRegime.CORRELATED_RISK); // still held
+    }
+  });
+
+  it('leaves CORRELATED_RISK once the new candidate holds for exactly N_CANDLE_CONFIRM consecutive calls', () => {
+    let state: HysteresisState = { regime: MarketRegime.CORRELATED_RISK, candidateRegime: MarketRegime.CORRELATED_RISK, streakCount: 0 };
+    for (let i = 0; i < RegimeConfig.N_CANDLE_CONFIRM; i++) {
+      state = applyHysteresis(MarketRegime.TREND_RIDER, state);
+    }
+    expect(state.regime).toBe(MarketRegime.TREND_RIDER);
+    expect(state.streakCount).toBe(0);
+  });
+});
+
+// TICKET-030 — full pipeline: detectRegime() correctly passes RegimeInput.correlatedRiskRatio through
+// computeMetrics() into classifyCandidate(), without computing anything itself.
+describe('detectRegime — CORRELATED_RISK integration (TICKET-030)', () => {
+  function c(volume: number, timestamp: number): CandleData {
+    return { timestamp, open: 100, high: 100.5, low: 99.5, close: 100, volume }; // flat price -> adx1h ~ 0, avoids every other branch
+  }
+
+  function makeFlatCandles(count: number, intervalMs: number, startTs: number, volume: number): CandleData[] {
+    return Array.from({ length: count }, (_, i) => c(volume, startTs + i * intervalMs));
+  }
+
+  it('classifies CORRELATED_RISK end-to-end when the caller-supplied ratio clears the threshold', () => {
+    const startTs = Date.UTC(2024, 0, 1);
+    const candles1h = makeFlatCandles(40, 3_600_000, startTs, 1000);
+    const candles15m = makeFlatCandles(325, 900_000, startTs, 1000);
+    const candles5m = makeFlatCandles(320, 300_000, startTs, 1000);
+
+    const output = detectRegime({ candles5m, candles15m, candles1h, previousRegime: null, correlatedRiskRatio: 0.95 });
+
+    expect(output.computedMetrics.correlatedRiskRatio).toBe(0.95);
+    expect(output.candidateRegime).toBe(MarketRegime.CORRELATED_RISK);
+  });
+
+  it('does not classify CORRELATED_RISK when correlatedRiskRatio is omitted (no error, falls through to other branches)', () => {
+    const startTs = Date.UTC(2024, 0, 1);
+    const candles1h = makeFlatCandles(40, 3_600_000, startTs, 1000);
+    const candles15m = makeFlatCandles(325, 900_000, startTs, 1000);
+    const candles5m = makeFlatCandles(320, 300_000, startTs, 1000);
+
+    const output = detectRegime({ candles5m, candles15m, candles1h, previousRegime: null });
+
+    expect(output.computedMetrics.correlatedRiskRatio).toBeUndefined();
+    expect(output.candidateRegime).not.toBe(MarketRegime.CORRELATED_RISK);
+  });
+});
