@@ -198,36 +198,17 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     return MarketRegime.TREND_RIDER;
   }
 
-  // 4. SIDEWAY_SCALPER — low ADX, stable range (bbWidth NOT in the extreme-low/compressing band).
-  // TICKET-034: moved ahead of CORRELATED_RISK — same reasoning as TREND_RIDER's move in TICKET-032.
-  // A confirmed Box Breakout setup can be perfectly valid even while the 4 coins are highly
-  // correlated (that's not itself abnormal risk). Real backtest evidence: 2/3 SIDEWAY_SCALPER trades
-  // CORRELATED_RISK blocked (post-TICKET-032 order) were winners. Condition itself unchanged, only
-  // its position in the priority chain moved.
-  const sidewayAdxThreshold = thresholdFor(RegimeConfig.SIDEWAY_ADX_THRESHOLD, isCurrently(MarketRegime.SIDEWAY_SCALPER));
-  if (adx1h <= sidewayAdxThreshold && bbWidthPercentile15m > RegimeConfig.COMPRESSION_BBW_PCT_THRESHOLD.enter) {
-    return MarketRegime.SIDEWAY_SCALPER;
-  }
-
-  // 5. CORRELATED_RISK — TICKET-030: cross-symbol correlation (regime/correlatedRisk.ts), pre-computed
-  // ONCE per time-step across all 4 coins by the caller and passed in as a plain number — detectRegime()
-  // never reads another symbol's candles itself. Portfolio-wide risk (chained liquidation across
-  // Cross Margin positions when every coin moves together) — placed ahead of LOW_LIQUIDITY (which only
-  // affects one coin at a time), same "stand aside" severity ordering reasoning as MANIPULATED before
-  // it. Skipped entirely (falls through, never throws) whenever correlatedRiskRatio is undefined/NaN.
-  if (correlatedRiskRatio !== undefined && !Number.isNaN(correlatedRiskRatio)) {
-    const correlatedRiskThreshold = thresholdFor(RegimeConfig.CORRELATED_RISK_THRESHOLD, isCurrently(MarketRegime.CORRELATED_RISK));
-    if (correlatedRiskRatio > correlatedRiskThreshold) {
-      return MarketRegime.CORRELATED_RISK;
-    }
-  }
-
-  // 6. LOW_LIQUIDITY — TICKET-028: session-relative volume (current volume vs the SAME time-of-day
+  // 4. LOW_LIQUIDITY — TICKET-028: session-relative volume (current volume vs the SAME time-of-day
   // on prior days, not a plain rolling average — crypto volume has a strong Asia/Europe/US session
   // cycle). No order book depth data available, so this is volume-only, a narrower scope than the
   // original design. Skipped entirely (falls through, never throws) whenever lowLiquidityRatio is
   // undefined/NaN — that only means "not enough session history yet" (needs
   // LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS days), not an error condition.
+  // TICKET-035: restored to its original position ahead of SIDEWAY_SCALPER/CORRELATED_RISK — TICKET-034
+  // had misread its own spec and pushed SIDEWAY_SCALPER past LOW_LIQUIDITY/COMPRESSION/VOLATILE_CHOP
+  // too, silently starving VOLATILE_CHOP (~6-9% -> ~0.1% match rate). No backtest evidence supports
+  // moving these three past SIDEWAY_SCALPER — only TREND_RIDER (TICKET-032) and SIDEWAY_SCALPER
+  // (TICKET-034) have been proven to need priority over CORRELATED_RISK specifically.
   if (lowLiquidityRatio !== undefined && !Number.isNaN(lowLiquidityRatio)) {
     const lowLiquidityThreshold = thresholdFor(RegimeConfig.LOW_LIQUIDITY_VOLUME_RATIO_THRESHOLD, isCurrently(MarketRegime.LOW_LIQUIDITY));
     if (lowLiquidityRatio < lowLiquidityThreshold) {
@@ -235,7 +216,8 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     }
   }
 
-  // 7. COMPRESSION — bbWidth in the extreme-low percentile band AND actively tightening (dynamic, not static).
+  // 5. COMPRESSION — bbWidth in the extreme-low percentile band AND actively tightening (dynamic, not static).
+  // TICKET-035: restored to its original position ahead of SIDEWAY_SCALPER (see note above).
   const compressionBbwThreshold = thresholdFor(
     RegimeConfig.COMPRESSION_BBW_PCT_THRESHOLD,
     isCurrently(MarketRegime.COMPRESSION),
@@ -244,11 +226,38 @@ export function classifyCandidate(metrics: ComputedMetrics, previousRegime: Mark
     return MarketRegime.COMPRESSION;
   }
 
-  // 8. VOLATILE_CHOP — high ATR without trend strength (choppy, non-directional volatility).
+  // 6. VOLATILE_CHOP — high ATR without trend strength (choppy, non-directional volatility).
+  // TICKET-035: restored to its original position ahead of SIDEWAY_SCALPER (see note above).
   const chopAtrThreshold = thresholdFor(RegimeConfig.CHOP_ATR_PCT_THRESHOLD, isCurrently(MarketRegime.VOLATILE_CHOP));
   const chopAdxThreshold = thresholdFor(RegimeConfig.CHOP_ADX_THRESHOLD, isCurrently(MarketRegime.VOLATILE_CHOP));
   if (atrPercentile5m >= chopAtrThreshold && adx1h < chopAdxThreshold) {
     return MarketRegime.VOLATILE_CHOP;
+  }
+
+  // 7. SIDEWAY_SCALPER — low ADX, stable range (bbWidth NOT in the extreme-low/compressing band).
+  // TICKET-034: moved ahead of CORRELATED_RISK — same reasoning as TREND_RIDER's move in TICKET-032.
+  // A confirmed Box Breakout setup can be perfectly valid even while the 4 coins are highly
+  // correlated (that's not itself abnormal risk). Real backtest evidence: 2/3 SIDEWAY_SCALPER trades
+  // CORRELATED_RISK blocked (post-TICKET-032 order) were winners. Condition itself unchanged, only
+  // its position in the priority chain moved. TICKET-035: still ahead of CORRELATED_RISK, but no
+  // longer ahead of LOW_LIQUIDITY/COMPRESSION/VOLATILE_CHOP (that part of TICKET-034 was a spec bug).
+  const sidewayAdxThreshold = thresholdFor(RegimeConfig.SIDEWAY_ADX_THRESHOLD, isCurrently(MarketRegime.SIDEWAY_SCALPER));
+  if (adx1h <= sidewayAdxThreshold && bbWidthPercentile15m > RegimeConfig.COMPRESSION_BBW_PCT_THRESHOLD.enter) {
+    return MarketRegime.SIDEWAY_SCALPER;
+  }
+
+  // 8. CORRELATED_RISK — TICKET-030: cross-symbol correlation (regime/correlatedRisk.ts), pre-computed
+  // ONCE per time-step across all 4 coins by the caller and passed in as a plain number — detectRegime()
+  // never reads another symbol's candles itself. Skipped entirely (falls through, never throws)
+  // whenever correlatedRiskRatio is undefined/NaN. TICKET-032/034/035: TREND_RIDER and SIDEWAY_SCALPER
+  // both proven to need priority over this (high correlation from a genuine trend/range setup isn't
+  // itself abnormal risk) — LOW_LIQUIDITY/COMPRESSION/VOLATILE_CHOP were never proven to need the same
+  // and sit ahead of it only because they already sat ahead of SIDEWAY_SCALPER before CORRELATED_RISK existed.
+  if (correlatedRiskRatio !== undefined && !Number.isNaN(correlatedRiskRatio)) {
+    const correlatedRiskThreshold = thresholdFor(RegimeConfig.CORRELATED_RISK_THRESHOLD, isCurrently(MarketRegime.CORRELATED_RISK));
+    if (correlatedRiskRatio > correlatedRiskThreshold) {
+      return MarketRegime.CORRELATED_RISK;
+    }
   }
 
   // 9. NEUTRAL_TRANSITION — fallback: grey zone between Sideway and Trend.

@@ -541,9 +541,13 @@ describe('classifyCandidate — CORRELATED_RISK (TICKET-030)', () => {
     expect(classifyCandidate(metrics, null)).toBe(MarketRegime.NEUTRAL_TRANSITION);
   });
 
-  it('takes priority over LOW_LIQUIDITY when both conditions are met (checked earlier in the decision tree)', () => {
+  // TICKET-035: LOW_LIQUIDITY is now checked BEFORE CORRELATED_RISK (restored to its original
+  // position ahead of SIDEWAY_SCALPER/CORRELATED_RISK — TICKET-030's original "CORRELATED_RISK ahead
+  // of LOW_LIQUIDITY" ordering was superseded by the TICKET-034 spec fix). LOW_LIQUIDITY wins when
+  // both conditions are met — the inverse of what this test originally asserted.
+  it('loses to LOW_LIQUIDITY when both conditions are met (LOW_LIQUIDITY checked earlier in the decision tree)', () => {
     const metrics: ComputedMetrics = { ...neutralMetrics, correlatedRiskRatio: 0.97, lowLiquidityRatio: 0.01 }; // TICKET-031: threshold tightened to 0.95
-    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.CORRELATED_RISK);
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.LOW_LIQUIDITY);
   });
 
   // TICKET-032 — the key behavior change: a confirmed real TREND_RIDER (ADX persistent + ATR both
@@ -575,6 +579,30 @@ describe('classifyCandidate — CORRELATED_RISK (TICKET-030)', () => {
       correlatedRiskRatio: 0.97, // clears CORRELATED_RISK_THRESHOLD.enter(0.95) too
     };
     expect(classifyCandidate(metrics, null)).toBe(MarketRegime.SIDEWAY_SCALPER);
+  });
+});
+
+// TICKET-035 — TICKET-034 had a spec bug: its text said "only swap SIDEWAY_SCALPER and
+// CORRELATED_RISK", but the priority list it gave also pushed SIDEWAY_SCALPER past
+// LOW_LIQUIDITY/COMPRESSION/VOLATILE_CHOP, which had always been checked ahead of SIDEWAY_SCALPER
+// since before CORRELATED_RISK existed (no backtest evidence supported that extra move — it silently
+// starved VOLATILE_CHOP's match rate from ~6-9% down to ~0.1%). This restores the original relative
+// order between those three and SIDEWAY_SCALPER, while keeping TREND_RIDER (TICKET-032) and
+// SIDEWAY_SCALPER (TICKET-034) ahead of CORRELATED_RISK specifically — the only two moves actually
+// proven by real backtest evidence.
+describe('classifyCandidate — VOLATILE_CHOP vs SIDEWAY_SCALPER priority (TICKET-035)', () => {
+  it('VOLATILE_CHOP wins over SIDEWAY_SCALPER when BOTH conditions are met at once', () => {
+    const metrics: ComputedMetrics = {
+      adx1h: 15, // clears SIDEWAY_ADX_THRESHOLD.enter(20) AND is < CHOP_ADX_THRESHOLD.enter(20)
+      adx1hRecent: [15], // too short for TREND_RIDER persistence
+      atrPercentile5m: 100, // clears CHOP_ATR_PCT_THRESHOLD.enter(70), but stays under DANGER's 95+volume AND
+      bbWidthPercentile15m: 50, // > COMPRESSION_BBW_PCT_THRESHOLD.enter(10) — not compressing, and satisfies SIDEWAY_SCALPER's own bbWidth condition too
+      atrTrend5m: 'flat' as const,
+      volumeZScore5m: 0, // stays under DANGER_VOLUME_ZSCORE_THRESHOLD(2.5)
+      upperSweepCount5m: 0,
+      lowerSweepCount5m: 0,
+    };
+    expect(classifyCandidate(metrics, null)).toBe(MarketRegime.VOLATILE_CHOP);
   });
 });
 
