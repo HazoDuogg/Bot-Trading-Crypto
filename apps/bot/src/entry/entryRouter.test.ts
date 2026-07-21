@@ -527,7 +527,10 @@ describe('routeEntry — Entry Funnel Analytics (TICKET-042)', () => {
     ]);
   });
 
-  it('fires SETUP(pass) -> MACRO(pass) -> MSS(fail, MSS_NOT_CONFIRMED) when no reversal has confirmed yet', () => {
+  // TICKET-043: mssCandles.slice(0, 11) has both the higher-low pair AND the reference high already
+  // formed between them (same fixture as marketStructureShift.test.ts's own NEVER_BROKE_REFERENCE
+  // case) — the confirming break candle (index 11) just hasn't happened yet in this window.
+  it('fires SETUP(pass) -> MACRO(pass) -> MSS(fail, NEVER_BROKE_REFERENCE) when no reversal has confirmed yet', () => {
     const { events, onFunnelEvent } = collect();
     const input = baseInput({
       regime: MarketRegime.TREND_RIDER,
@@ -542,7 +545,56 @@ describe('routeEntry — Entry Funnel Analytics (TICKET-042)', () => {
     expect(events).toEqual([
       { stage: 'SETUP', passed: true, setupType: 'OB' },
       { stage: 'MACRO', passed: true },
-      { stage: 'MSS', passed: false, reason: 'MSS_NOT_CONFIRMED' },
+      { stage: 'MSS', passed: false, reason: 'NEVER_BROKE_REFERENCE' },
+    ]);
+  });
+
+  it('fires SETUP(pass) -> MACRO(pass) -> MSS(fail, NO_HIGHER_LOW_PATTERN) when no higher-low pair ever forms', () => {
+    const { events, onFunnelEvent } = collect();
+    // Single swing low only (index 2, price 6) — no second low anywhere to compare against, so the
+    // higher-low pattern itself can never be found (mirrors marketStructureShift.test.ts's own case).
+    const noPatternMss: CandleData[] = [
+      c(9.5, 9.5, 10, 9),
+      c(9.25, 9.25, 10, 8.5),
+      c(7.5, 7.5, 9.5, 6), // swing low #1 (6) — the only swing low in this window
+      c(9.25, 9.25, 10, 8.5),
+      c(9.5, 9.5, 10, 9),
+    ];
+    const input = baseInput({ regime: MarketRegime.TREND_RIDER, adxDirection1h: 'UP', candles5m: trendCandles5m, candlesMss: noPatternMss });
+
+    const result = routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG, onFunnelEvent);
+
+    expect(result).toBeNull();
+    expect(events).toEqual([
+      { stage: 'SETUP', passed: true, setupType: 'OB' },
+      { stage: 'MACRO', passed: true },
+      { stage: 'MSS', passed: false, reason: 'NO_HIGHER_LOW_PATTERN' },
+    ]);
+  });
+
+  it('fires SETUP(pass) -> MACRO(pass) -> MSS(fail, NO_REFERENCE_BETWEEN) when the higher-low pair has no swing high between them', () => {
+    const { events, onFunnelEvent } = collect();
+    // Same fixture as marketStructureShift.test.ts's own NO_REFERENCE_BETWEEN case: higher-low pair
+    // (A=6, B=6.5) forms, but no swing high exists between index 2 and index 5.
+    const noReferenceMss: CandleData[] = [
+      c(9.5, 9.5, 10, 9),
+      c(9.25, 9.25, 10, 8.5),
+      c(7.5, 7.5, 9.5, 6), // low A (6)
+      c(9.25, 9.25, 10, 8.5),
+      c(9.5, 9.5, 10, 9),
+      c(8, 8, 9.5, 6.5), // low B (6.5, higher-low vs A) — no reference high between 2 and 5
+      c(9.25, 9.25, 10, 8.5),
+      c(9.5, 9.5, 10, 9),
+    ];
+    const input = baseInput({ regime: MarketRegime.TREND_RIDER, adxDirection1h: 'UP', candles5m: trendCandles5m, candlesMss: noReferenceMss });
+
+    const result = routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG, onFunnelEvent);
+
+    expect(result).toBeNull();
+    expect(events).toEqual([
+      { stage: 'SETUP', passed: true, setupType: 'OB' },
+      { stage: 'MACRO', passed: true },
+      { stage: 'MSS', passed: false, reason: 'NO_REFERENCE_BETWEEN' },
     ]);
   });
 

@@ -215,6 +215,11 @@ function formatDangerZoneDiagnostic(d: DangerZoneDiagnostic): string {
 const STATE_PASS_REGIMES = [MarketRegime.TREND_RIDER, MarketRegime.SIDEWAY_SCALPER, MarketRegime.COMPRESSION, MarketRegime.NEUTRAL_TRANSITION] as const;
 const STATE_FAIL_REGIMES = [MarketRegime.DANGER_ZONE, MarketRegime.MANIPULATED, MarketRegime.LOW_LIQUIDITY, MarketRegime.VOLATILE_CHOP, MarketRegime.CORRELATED_RISK] as const;
 
+// TICKET-043: the 3 granular reasons classifyMssFailReason() can report when detectMarketStructureShift()
+// found no confirmation at all. Deliberately excludes 'MSS_TIMEOUT' — that's a different failure mode
+// (a confirmation WAS found, just too stale) reported separately, not part of this breakdown.
+const MSS_FAIL_REASONS = ['NO_HIGHER_LOW_PATTERN', 'NO_REFERENCE_BETWEEN', 'NEVER_BROKE_REFERENCE'] as const;
+
 interface RegimeFunnelStats {
   setupPass: number;
   macroPass: number;
@@ -222,10 +227,11 @@ interface RegimeFunnelStats {
   breakoutPass: number;
   riskPoolSkip: number;
   opens: number;
+  mssFailReasons: Record<string, number>;
 }
 
 function emptyFunnelStats(): RegimeFunnelStats {
-  return { setupPass: 0, macroPass: 0, mssPass: 0, breakoutPass: 0, riskPoolSkip: 0, opens: 0 };
+  return { setupPass: 0, macroPass: 0, mssPass: 0, breakoutPass: 0, riskPoolSkip: 0, opens: 0, mssFailReasons: {} };
 }
 
 /** TREND_RIDER/SIDEWAY_SCALPER/COMPRESSION always use one fixed cascade; NEUTRAL_TRANSITION follows entryStyleForNeutral (config-driven, same rule as entryRouter.ts's routeEntry()). */
@@ -303,7 +309,26 @@ function funnelReportMarkdown(
     rows.push(`| RISK POOL PASS | ${fmtInt(riskPoolPass)} | ${pct(riskPoolPass, gatePass)} |`);
     rows.push(`| ENTRY (mở lệnh thật) | ${fmtInt(stats.opens)} | ${pct(stats.opens, riskPoolPass)} |`);
 
-    return [`### ${regime} (nhánh ${path})`, '', '| Cửa | Số lượng | Tỷ lệ chuyển đổi từ cửa trước |', '|---|---|---|', ...rows, ''].join('\n');
+    const section = [`### ${regime} (nhánh ${path})`, '', '| Cửa | Số lượng | Tỷ lệ chuyển đổi từ cửa trước |', '|---|---|---|', ...rows, ''].join('\n');
+
+    // TICKET-043 — MSS fail breakdown, TREND_RIDER only (the only regime whose fixed cascade is
+    // TREND_STYLE in every config this session has run; SIDEWAY_STYLE has no MSS stage at all).
+    if (regime === MarketRegime.TREND_RIDER) {
+      const mssFailTotal = MSS_FAIL_REASONS.reduce((sum, r) => sum + (stats.mssFailReasons[r] ?? 0), 0);
+      const mssFailRows = MSS_FAIL_REASONS.map(
+        (r) => `| ${r} | ${fmtInt(stats.mssFailReasons[r] ?? 0)} | ${pct(stats.mssFailReasons[r] ?? 0, mssFailTotal)} |`,
+      );
+      const mssFailSection = [
+        '### Chi tiết lý do MSS FAIL (nhánh TREND_RIDER)',
+        '',
+        '| Lý do | Số lượng | % trên tổng MSS FAIL |',
+        '|---|---|---|',
+        ...mssFailRows,
+        '',
+      ].join('\n');
+      return section + '\n' + mssFailSection;
+    }
+    return section;
   });
 
   return [
@@ -487,6 +512,11 @@ async function main(): Promise<void> {
       const stats = confirmedRegime !== null ? funnelStats[confirmedRegime] : undefined;
       if (stats) {
         for (const event of funnelEventsThisStep) {
+          // TICKET-043: granular MSS-fail breakdown — counted regardless of the passed/continue
+          // branch below, since these are exactly the passed=false MSS events.
+          if (event.stage === 'MSS' && !event.passed && event.reason && event.reason !== 'MSS_TIMEOUT') {
+            stats.mssFailReasons[event.reason] = (stats.mssFailReasons[event.reason] ?? 0) + 1;
+          }
           if (!event.passed) continue;
           if (event.stage === 'SETUP') stats.setupPass++;
           else if (event.stage === 'MACRO') stats.macroPass++;

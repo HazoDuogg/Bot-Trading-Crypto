@@ -6,7 +6,7 @@ import type { Direction, DraftSetup, EntryRouterConfig, FunnelCallback } from '.
 import { detectOrderBlock } from './detectors/orderBlock.js';
 import { detectFairValueGap } from './detectors/fairValueGap.js';
 import { detectLiquiditySweep } from './detectors/liquiditySweep.js';
-import { detectMarketStructureShift } from './detectors/marketStructureShift.js';
+import { classifyMssFailReason, detectMarketStructureShift } from './detectors/marketStructureShift.js';
 import { detectBoxBreakout } from './detectors/boxBreakout.js';
 
 export const DEFAULT_ENTRY_ROUTER_CONFIG: EntryRouterConfig = {
@@ -131,7 +131,13 @@ function runTrendStyle(input: EntryRouterInput, config: EntryRouterConfig, regim
   // OB/FVG/Sweep all go through the same MSS confirmation gate — no shortcut for Sweep.
   const mssConfirmedIndex = detectMarketStructureShift(mssWindow, direction, { fractalN: EntryConfig.FRACTAL_N });
   if (mssConfirmedIndex === null) {
-    onFunnelEvent?.(input.symbol, now, { stage: 'MSS', passed: false, reason: 'MSS_NOT_CONFIRMED' });
+    // TICKET-043: granular reason only computed when a callback is listening — classifyMssFailReason()
+    // is a read-only diagnostic walk, never used to decide anything (detectMarketStructureShift()'s
+    // own null result above is the only thing this branch acts on).
+    if (onFunnelEvent) {
+      const reason = classifyMssFailReason(mssWindow, direction, { fractalN: EntryConfig.FRACTAL_N });
+      onFunnelEvent(input.symbol, now, { stage: 'MSS', passed: false, reason });
+    }
     return null; // setup found, but no reversal confirmation yet — don't enter
   }
 

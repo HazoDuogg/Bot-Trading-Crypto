@@ -6,6 +6,9 @@ export interface MssConfig {
   fractalN: number;
 }
 
+/** TICKET-043 — granular reason detectMarketStructureShift() found no confirmation, for funnel reporting only. */
+export type MssFailReason = 'NO_HIGHER_LOW_PATTERN' | 'NO_REFERENCE_BETWEEN' | 'NEVER_BROKE_REFERENCE';
+
 /**
  * B.4 — confirms a reversal on a smaller timeframe (1m/3m) before entry. Caller passes only the
  * candles since the 5m setup (OB/FVG/Sweep) formed; returns the index (in `candles`) of the
@@ -49,4 +52,42 @@ export function detectMarketStructureShift(candles: CandleData[], direction: Dir
     }
   }
   return null;
+}
+
+/**
+ * TICKET-043 — read-only diagnostic mirroring detectMarketStructureShift()'s own walk, called ONLY
+ * for funnel reporting when that function has already returned null. Never used to decide anything;
+ * duplicates the same pattern/reference conditions so its "found" flags match what the real walk
+ * saw, without altering detectMarketStructureShift() itself.
+ */
+export function classifyMssFailReason(candles: CandleData[], direction: Direction, config: MssConfig): MssFailReason {
+  const swings = detectSwingPoints(candles, config.fractalN);
+  let foundPattern = false;
+  let foundReference = false;
+
+  if (direction === 'BULLISH') {
+    const lows = swings.filter((p) => p.type === 'LOW').sort((a, b) => a.index - b.index);
+    const highs = swings.filter((p) => p.type === 'HIGH').sort((a, b) => a.index - b.index);
+    for (let k = 1; k < lows.length; k++) {
+      if (lows[k].price <= lows[k - 1].price) continue;
+      foundPattern = true;
+      const between = highs.filter((h) => h.index > lows[k - 1].index && h.index < lows[k].index);
+      if (between.length === 0) continue;
+      foundReference = true;
+    }
+  } else {
+    const highs = swings.filter((p) => p.type === 'HIGH').sort((a, b) => a.index - b.index);
+    const lows = swings.filter((p) => p.type === 'LOW').sort((a, b) => a.index - b.index);
+    for (let k = 1; k < highs.length; k++) {
+      if (highs[k].price >= highs[k - 1].price) continue;
+      foundPattern = true;
+      const between = lows.filter((l) => l.index > highs[k - 1].index && l.index < highs[k].index);
+      if (between.length === 0) continue;
+      foundReference = true;
+    }
+  }
+
+  if (!foundPattern) return 'NO_HIGHER_LOW_PATTERN';
+  if (!foundReference) return 'NO_REFERENCE_BETWEEN';
+  return 'NEVER_BROKE_REFERENCE';
 }
