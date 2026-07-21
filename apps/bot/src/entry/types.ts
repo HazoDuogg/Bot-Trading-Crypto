@@ -74,6 +74,8 @@ export interface FunnelEvent {
   reason?: string;
   /** Only set when stage='SETUP' and passed=true. */
   setupType?: 'OB' | 'FVG' | 'SWEEP';
+  /** TICKET-044: only set when reason === 'MSS_TIMEOUT' — how many candles past the staleness tolerance the confirmation was. */
+  candlesLate?: number;
 }
 
 /** Return value is ignored by routeEntry() — reporting only, never influences the entry decision. */

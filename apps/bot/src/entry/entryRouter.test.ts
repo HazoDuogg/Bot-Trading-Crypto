@@ -598,7 +598,8 @@ describe('routeEntry — Entry Funnel Analytics (TICKET-042)', () => {
     ]);
   });
 
-  it('fires SETUP(pass) -> MACRO(pass) -> MSS(fail, MSS_TIMEOUT) when the confirmation is too stale', () => {
+  // TICKET-044: candlesLate must equal candlesFromEnd (6) — the same value the staleness check itself compared against the tolerance.
+  it('fires SETUP(pass) -> MACRO(pass) -> MSS(fail, MSS_TIMEOUT, candlesLate=6) when the confirmation is too stale', () => {
     const { events, onFunnelEvent } = collect();
     // mssCandles confirms at its own last index (candlesFromEnd=0) — append extra candles after it
     // so the confirmation is candlesFromEnd=6 positions from the end, past the default tolerance (5).
@@ -611,8 +612,25 @@ describe('routeEntry — Entry Funnel Analytics (TICKET-042)', () => {
     expect(events).toEqual([
       { stage: 'SETUP', passed: true, setupType: 'OB' },
       { stage: 'MACRO', passed: true },
-      { stage: 'MSS', passed: false, reason: 'MSS_TIMEOUT' },
+      { stage: 'MSS', passed: false, reason: 'MSS_TIMEOUT', candlesLate: 6 },
     ]);
+  });
+
+  // TICKET-044: candlesLate must stay undefined for the 3 granular "never confirmed" reasons — only MSS_TIMEOUT sets it.
+  it('leaves candlesLate undefined for the 3 granular MSS-not-confirmed reasons', () => {
+    const { events, onFunnelEvent } = collect();
+    const input = baseInput({
+      regime: MarketRegime.TREND_RIDER,
+      adxDirection1h: 'UP',
+      candles5m: trendCandles5m,
+      candlesMss: mssCandles.slice(0, 11), // NEVER_BROKE_REFERENCE case, per the earlier test
+    });
+
+    routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG, onFunnelEvent);
+
+    const mssEvent = events.find((e) => e.stage === 'MSS');
+    expect(mssEvent?.reason).toBe('NEVER_BROKE_REFERENCE');
+    expect(mssEvent?.candlesLate).toBeUndefined();
   });
 
   it('fires BREAKOUT(pass) for a confirmed box breakout (SIDEWAY_SCALPER)', () => {

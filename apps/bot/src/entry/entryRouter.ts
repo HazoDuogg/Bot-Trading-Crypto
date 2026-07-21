@@ -149,7 +149,7 @@ function runTrendStyle(input: EntryRouterInput, config: EntryRouterConfig, regim
   // instead of the constant directly, so backtest.ts's CLI can A/B test it without touching config.ts.
   const candlesFromEnd = mssWindow.length - 1 - mssConfirmedIndex;
   if (candlesFromEnd >= config.mssStalenessToleranceCandles) {
-    onFunnelEvent?.(input.symbol, now, { stage: 'MSS', passed: false, reason: 'MSS_TIMEOUT' });
+    onFunnelEvent?.(input.symbol, now, { stage: 'MSS', passed: false, reason: 'MSS_TIMEOUT', candlesLate: candlesFromEnd });
     return null; // confirmation is stale — don't act on it
   }
   onFunnelEvent?.(input.symbol, now, { stage: 'MSS', passed: true });

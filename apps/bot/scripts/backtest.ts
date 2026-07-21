@@ -11,7 +11,7 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { MarketRegime, type CandleData } from '../dist/regime/types.js';
+import type { CandleData } from '../dist/regime/types.js';
 import { RegimeConfig } from '../dist/regime/config.js';
 import { computeCorrelatedRiskRatio } from '../dist/regime/correlatedRisk.js';
 import { processCandle, type DangerZoneDiagnostic, type ManipulatedDiagnostic, type ProcessCandleInput } from '../dist/orchestrator/orchestrator.js';
@@ -21,6 +21,7 @@ import type { EntryStyleForNeutral, FunnelEvent } from '../dist/entry/types.js';
 import { DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG } from '../dist/xgbFilter/config.js';
 import type { OpenPositionRisk } from '../dist/risk/riskPool.js';
 import type { TpPlan } from '../dist/risk/slTpManager.js';
+import { emptyFunnelStats, funnelReportMarkdown, STATE_PASS_REGIMES, type RegimeFunnelStats } from './entryFunnelReport.js';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
 const OHLCV_DIR = path.resolve(process.cwd(), 'data/ohlcv');
@@ -209,145 +210,6 @@ function formatDangerZoneDiagnostic(d: DangerZoneDiagnostic): string {
   return `[DANGER_ZONE] symbol=${d.symbol} timestamp=${new Date(d.timestamp).toISOString()} atrPercentile5m=${d.atrPercentile5m}\n  volumeZScore5m=${d.volumeZScore5m}`;
 }
 
-// TICKET-042 — Entry Funnel Analytics. Observability only: these counters are derived purely from
-// events/state processCandle() already exposes (FunnelEvent via the optional onFunnelEvent callback,
-// SymbolState.regimeState, OrchestratorEvent) — nothing here feeds back into any decision.
-const STATE_PASS_REGIMES = [MarketRegime.TREND_RIDER, MarketRegime.SIDEWAY_SCALPER, MarketRegime.COMPRESSION, MarketRegime.NEUTRAL_TRANSITION] as const;
-const STATE_FAIL_REGIMES = [MarketRegime.DANGER_ZONE, MarketRegime.MANIPULATED, MarketRegime.LOW_LIQUIDITY, MarketRegime.VOLATILE_CHOP, MarketRegime.CORRELATED_RISK] as const;
-
-// TICKET-043: the 3 granular reasons classifyMssFailReason() can report when detectMarketStructureShift()
-// found no confirmation at all. Deliberately excludes 'MSS_TIMEOUT' — that's a different failure mode
-// (a confirmation WAS found, just too stale) reported separately, not part of this breakdown.
-const MSS_FAIL_REASONS = ['NO_HIGHER_LOW_PATTERN', 'NO_REFERENCE_BETWEEN', 'NEVER_BROKE_REFERENCE'] as const;
-
-interface RegimeFunnelStats {
-  setupPass: number;
-  macroPass: number;
-  mssPass: number;
-  breakoutPass: number;
-  riskPoolSkip: number;
-  opens: number;
-  mssFailReasons: Record<string, number>;
-}
-
-function emptyFunnelStats(): RegimeFunnelStats {
-  return { setupPass: 0, macroPass: 0, mssPass: 0, breakoutPass: 0, riskPoolSkip: 0, opens: 0, mssFailReasons: {} };
-}
-
-/** TREND_RIDER/SIDEWAY_SCALPER/COMPRESSION always use one fixed cascade; NEUTRAL_TRANSITION follows entryStyleForNeutral (config-driven, same rule as entryRouter.ts's routeEntry()). */
-function pathFor(regime: MarketRegime, entryStyleForNeutral: EntryStyleForNeutral): 'TREND_STYLE' | 'SIDEWAY_STYLE' {
-  if (regime === MarketRegime.TREND_RIDER) return 'TREND_STYLE';
-  if (regime === MarketRegime.NEUTRAL_TRANSITION) return entryStyleForNeutral;
-  return 'SIDEWAY_STYLE'; // SIDEWAY_SCALPER, COMPRESSION
-}
-
-function pct(numerator: number, denominator: number): string {
-  return denominator > 0 ? `${((numerator / denominator) * 100).toFixed(1)}%` : '—';
-}
-
-function fmtInt(n: number): string {
-  return n.toLocaleString('en-US');
-}
-
-function funnelReportMarkdown(
-  totalStepsEvaluated: number,
-  stateCounts: Record<string, number>,
-  funnelStats: Record<string, RegimeFunnelStats>,
-  neutralGateRejectedCount: number,
-  entryStyleForNeutral: EntryStyleForNeutral,
-): string {
-  const statePass = STATE_PASS_REGIMES.reduce((sum, r) => sum + (stateCounts[r] ?? 0), 0);
-
-  // Per-regime pre-gate/gate/risk-pool/entry counts, computed once and reused by both the aggregate
-  // and per-regime sections below (single source of truth, never re-derived differently twice).
-  const perRegime = STATE_PASS_REGIMES.map((regime) => {
-    const stats = funnelStats[regime] ?? emptyFunnelStats();
-    const path = pathFor(regime, entryStyleForNeutral);
-    const preGate = path === 'TREND_STYLE' ? stats.mssPass : stats.breakoutPass;
-    const gatePass = regime === MarketRegime.NEUTRAL_TRANSITION ? preGate - neutralGateRejectedCount : preGate;
-    const riskPoolPass = gatePass - stats.riskPoolSkip;
-    return { regime, path, stats, preGate, gatePass, riskPoolPass };
-  });
-
-  const setupPassTotal = perRegime.filter((r) => r.path === 'TREND_STYLE').reduce((sum, r) => sum + r.stats.setupPass, 0);
-  const macroOrBreakoutPassTotal = perRegime.reduce((sum, r) => sum + (r.path === 'TREND_STYLE' ? r.stats.macroPass : r.stats.breakoutPass), 0);
-  const mssPassTotal = perRegime.filter((r) => r.path === 'TREND_STYLE').reduce((sum, r) => sum + r.stats.mssPass, 0);
-  const aiGatePassTotal = perRegime.find((r) => r.regime === MarketRegime.NEUTRAL_TRANSITION)?.gatePass ?? 0;
-  const aiGatePreGate = perRegime.find((r) => r.regime === MarketRegime.NEUTRAL_TRANSITION)?.preGate ?? 0;
-  const riskPoolPassTotal = perRegime.reduce((sum, r) => sum + r.riskPoolPass, 0);
-  const entryTotal = perRegime.reduce((sum, r) => sum + r.stats.opens, 0);
-  // "Cửa trước" for RISK POOL PASS: everything that reached the risk-pool check this step —
-  // TREND_STYLE/SIDEWAY_STYLE regimes go straight from MSS/BREAKOUT, NEUTRAL_TRANSITION goes through
-  // the AI gate first. Mirrors exactly what orchestrator.ts checks immediately before the pool.
-  const reachedRiskPoolCheckTotal = perRegime.reduce((sum, r) => sum + (r.regime === MarketRegime.NEUTRAL_TRANSITION ? r.gatePass : r.preGate), 0);
-
-  const aggregateRows = [
-    `| Tổng bước đánh giá | ${fmtInt(totalStepsEvaluated)} | — |`,
-    `| STATE PASS | ${fmtInt(statePass)} | ${pct(statePass, totalStepsEvaluated)} |`,
-    `| SETUP PASS (nhánh TREND_STYLE) | ${fmtInt(setupPassTotal)} | ${pct(setupPassTotal, statePass)} |`,
-    `| MACRO/BREAKOUT PASS | ${fmtInt(macroOrBreakoutPassTotal)} | ${pct(macroOrBreakoutPassTotal, setupPassTotal)} |`,
-    `| MSS PASS (nhánh TREND_STYLE) | ${fmtInt(mssPassTotal)} | ${pct(mssPassTotal, macroOrBreakoutPassTotal)} |`,
-    `| AI GATE PASS (NEUTRAL_TRANSITION) | ${fmtInt(aiGatePassTotal)} | ${pct(aiGatePassTotal, aiGatePreGate)} |`,
-    `| RISK POOL PASS | ${fmtInt(riskPoolPassTotal)} | ${pct(riskPoolPassTotal, reachedRiskPoolCheckTotal)} |`,
-    `| ENTRY (mở lệnh thật) | ${fmtInt(entryTotal)} | ${pct(entryTotal, riskPoolPassTotal)} |`,
-  ];
-
-  const regimeSections = perRegime.map(({ regime, path, stats, preGate, gatePass, riskPoolPass }) => {
-    const state = stateCounts[regime] ?? 0;
-
-    const rows: string[] = [`| STATE PASS | ${fmtInt(state)} | — |`];
-    if (path === 'TREND_STYLE') {
-      rows.push(`| SETUP PASS | ${fmtInt(stats.setupPass)} | ${pct(stats.setupPass, state)} |`);
-      rows.push(`| MACRO PASS | ${fmtInt(stats.macroPass)} | ${pct(stats.macroPass, stats.setupPass)} |`);
-      rows.push(`| MSS PASS | ${fmtInt(stats.mssPass)} | ${pct(stats.mssPass, stats.macroPass)} |`);
-    } else {
-      rows.push(`| BREAKOUT PASS | ${fmtInt(stats.breakoutPass)} | ${pct(stats.breakoutPass, state)} |`);
-    }
-    if (regime === MarketRegime.NEUTRAL_TRANSITION) {
-      rows.push(`| AI GATE PASS | ${fmtInt(gatePass)} | ${pct(gatePass, preGate)} |`);
-    }
-    rows.push(`| RISK POOL PASS | ${fmtInt(riskPoolPass)} | ${pct(riskPoolPass, gatePass)} |`);
-    rows.push(`| ENTRY (mở lệnh thật) | ${fmtInt(stats.opens)} | ${pct(stats.opens, riskPoolPass)} |`);
-
-    const section = [`### ${regime} (nhánh ${path})`, '', '| Cửa | Số lượng | Tỷ lệ chuyển đổi từ cửa trước |', '|---|---|---|', ...rows, ''].join('\n');
-
-    // TICKET-043 — MSS fail breakdown, TREND_RIDER only (the only regime whose fixed cascade is
-    // TREND_STYLE in every config this session has run; SIDEWAY_STYLE has no MSS stage at all).
-    if (regime === MarketRegime.TREND_RIDER) {
-      const mssFailTotal = MSS_FAIL_REASONS.reduce((sum, r) => sum + (stats.mssFailReasons[r] ?? 0), 0);
-      const mssFailRows = MSS_FAIL_REASONS.map(
-        (r) => `| ${r} | ${fmtInt(stats.mssFailReasons[r] ?? 0)} | ${pct(stats.mssFailReasons[r] ?? 0, mssFailTotal)} |`,
-      );
-      const mssFailSection = [
-        '### Chi tiết lý do MSS FAIL (nhánh TREND_RIDER)',
-        '',
-        '| Lý do | Số lượng | % trên tổng MSS FAIL |',
-        '|---|---|---|',
-        ...mssFailRows,
-        '',
-      ].join('\n');
-      return section + '\n' + mssFailSection;
-    }
-    return section;
-  });
-
-  return [
-    '# Entry Funnel Analytics — TICKET-042',
-    '',
-    'Công cụ quan sát (observability) — không đổi bất kỳ logic quyết định giao dịch nào. Số liệu nguyên văn, không tự kết luận.',
-    '',
-    '## Funnel tổng hợp (toàn bộ 4 coin, 180 ngày)',
-    '',
-    '| Cửa | Số lượng | Tỷ lệ chuyển đổi từ cửa trước |',
-    '|---|---|---|',
-    ...aggregateRows,
-    '',
-    '## Funnel theo từng regime',
-    '',
-    ...regimeSections,
-  ].join('\n');
-}
-
 function tradesCsv(trades: CloseTradeEvent[]): string {
   const header = 'symbol,side,regime,setupType,tpPlan,entryTimestamp,entryPrice,exitTimestamp,exitPrice,exitReason,pnlUsd,pnlPct,riskMultiplierApplied,accountBalanceAfter';
   const rows = trades.map((t) =>
@@ -512,10 +374,13 @@ async function main(): Promise<void> {
       const stats = confirmedRegime !== null ? funnelStats[confirmedRegime] : undefined;
       if (stats) {
         for (const event of funnelEventsThisStep) {
-          // TICKET-043: granular MSS-fail breakdown — counted regardless of the passed/continue
-          // branch below, since these are exactly the passed=false MSS events.
-          if (event.stage === 'MSS' && !event.passed && event.reason && event.reason !== 'MSS_TIMEOUT') {
+          // TICKET-043/044: MSS-fail breakdown — counted regardless of the passed/continue branch
+          // below, since these are exactly the passed=false MSS events (all 4 possible reasons).
+          if (event.stage === 'MSS' && !event.passed && event.reason) {
             stats.mssFailReasons[event.reason] = (stats.mssFailReasons[event.reason] ?? 0) + 1;
+            if (event.reason === 'MSS_TIMEOUT' && event.candlesLate !== undefined) {
+              stats.mssTimeoutCandlesLate.push(event.candlesLate);
+            }
           }
           if (!event.passed) continue;
           if (event.stage === 'SETUP') stats.setupPass++;
