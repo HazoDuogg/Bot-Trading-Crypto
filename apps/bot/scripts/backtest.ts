@@ -52,6 +52,7 @@ function parseArgs(): {
   macroTrendFilterAppliesToBoxBreakout: boolean;
   momentumFilterEnabled: boolean;
   neutralTransitionEnabled: boolean;
+  riskPoolMaxPct: number;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -61,6 +62,7 @@ function parseArgs(): {
   const macroBoxArg = args.find((a) => a.startsWith('--macro-trend-box-breakout='));
   const momentumArg = args.find((a) => a.startsWith('--momentum-filter='));
   const neutralArg = args.find((a) => a.startsWith('--neutral-transition-enabled='));
+  const riskPoolArg = args.find((a) => a.startsWith('--risk-pool-max-pct='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -71,6 +73,9 @@ function parseArgs(): {
     momentumFilterEnabled: momentumArg ? momentumArg.split('=')[1] === 'true' : false,
     // TICKET-036: off by default — matches DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG.
     neutralTransitionEnabled: neutralArg ? neutralArg.split('=')[1] === 'true' : false,
+    // TICKET-037: takes a plain percentage number (e.g. 10, 15), not a fraction — divided by 100
+    // below. Defaults to 10 unchanged (matches risk/riskPool.ts's DEFAULT_RISK_POOL_CONFIG) when omitted.
+    riskPoolMaxPct: (riskPoolArg ? Number(riskPoolArg.split('=')[1]) : 10) / 100,
   };
 }
 
@@ -201,10 +206,18 @@ function tradesCsv(trades: CloseTradeEvent[]): string {
 }
 
 async function main(): Promise<void> {
-  const { entryStyleForNeutral, tpPlan, macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled, neutralTransitionEnabled } =
-    parseArgs();
+  const {
+    entryStyleForNeutral,
+    tpPlan,
+    macroTrendFilterEnabled,
+    obDisabledSymbols,
+    macroTrendFilterAppliesToBoxBreakout,
+    momentumFilterEnabled,
+    neutralTransitionEnabled,
+    riskPoolMaxPct,
+  } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -218,7 +231,7 @@ async function main(): Promise<void> {
     riskDollarOrPercent: 20,
     maxMarginCap: 50,
     leverage: 30,
-    riskPoolMaxPct: 0.1,
+    riskPoolMaxPct, // TICKET-037: CLI-overridable A/B testing — default (10 -> 0.1) unchanged from before this ticket.
     isLowConfidenceOrLowLiquidity: false,
     momentumFilterConfig: { ...DEFAULT_MOMENTUM_FILTER_CONFIG, momentumFilterEnabled },
     neutralTransitionGateConfig: { ...DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, neutralTransitionTradingEnabled: neutralTransitionEnabled },
@@ -386,6 +399,7 @@ async function main(): Promise<void> {
     `- macroTrendFilterAppliesToBoxBreakout: ${macroTrendFilterAppliesToBoxBreakout} (TICKET-018)`,
     `- momentumFilterEnabled: ${momentumFilterEnabled} (TICKET-024, thresholds: low=${config.momentumFilterConfig.momentumLowThreshold} high=${config.momentumFilterConfig.momentumHighThreshold} lowMultiplier=${config.momentumFilterConfig.momentumLowMultiplier})`,
     `- neutralTransitionEnabled: ${neutralTransitionEnabled} (TICKET-036, hard Momentum Gate, threshold=${config.neutralTransitionGateConfig.neutralTransitionMomentumGateThreshold})`,
+    `- riskPoolMaxPct: ${(riskPoolMaxPct * 100).toFixed(0)}% (TICKET-037, CLI-overridable, default 10%)`,
     `- Runner trailing: ATR (2.5×ATR), không dùng Structure trailing`,
     `- takerFeeRate: 0.0004 (TODO_CONFIRM — Trader chưa cung cấp số thật)`,
     `- Quy tắc SL/TP cùng nến: SL chạm trước`,
