@@ -19,6 +19,9 @@ export const DEFAULT_ENTRY_ROUTER_CONFIG: EntryRouterConfig = {
   // TICKET-040: matches EntryConfig.MSS_STALENESS_TOLERANCE_CANDLES (5, TICKET-011) — baseline
   // behavior unchanged unless a caller (backtest.ts CLI) opts into a different value.
   mssStalenessToleranceCandles: EntryConfig.MSS_STALENESS_TOLERANCE_CANDLES,
+  // TICKET-041: matches EntryConfig.OB_BOS_LOOKFORWARD_K (10, TICKET-008) — baseline behavior
+  // unchanged unless a caller (backtest.ts CLI) opts into a different value.
+  obBosLookforwardK: EntryConfig.OB_BOS_LOOKFORWARD_K,
   regimeRiskMultiplier: {
     [MarketRegime.TREND_RIDER]: 1.0,
     [MarketRegime.SIDEWAY_SCALPER]: 1.0,
@@ -81,9 +84,11 @@ function runTrendStyle(input: EntryRouterInput, config: EntryRouterConfig, regim
 
   // TICKET-017 Phần B: OB disabled per-symbol (evidence: XRPUSDT OB loses in both directions) —
   // falls through to FVG/Sweep exactly as if no OB were found.
+  // TICKET-041: lookforwardK reads config.obBosLookforwardK (defaults to EntryConfig.OB_BOS_LOOKFORWARD_K)
+  // instead of the constant directly, so backtest.ts's CLI can A/B test it without touching config.ts.
   const ob = config.obDisabledSymbols.includes(input.symbol)
     ? null
-    : detectOrderBlock(input.candles5m, direction, { fractalN: EntryConfig.FRACTAL_N, lookforwardK: EntryConfig.OB_BOS_LOOKFORWARD_K });
+    : detectOrderBlock(input.candles5m, direction, { fractalN: EntryConfig.FRACTAL_N, lookforwardK: config.obBosLookforwardK });
   if (ob) {
     setupType = 'OB';
     rawSlPrice = direction === 'BULLISH' ? ob.low : ob.high;

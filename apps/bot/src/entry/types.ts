@@ -70,4 +70,6 @@ export interface EntryRouterConfig {
   macroTrendFilterAppliesToBoxBreakout: boolean;
   /** TICKET-040: same value as EntryConfig.MSS_STALENESS_TOLERANCE_CANDLES by default (TICKET-011) — threaded through here so backtest.ts's CLI can A/B test it without touching that constant. */
   mssStalenessToleranceCandles: number;
+  /** TICKET-041: same value as EntryConfig.OB_BOS_LOOKFORWARD_K by default (TICKET-008) — threaded through here so backtest.ts's CLI can A/B test it without touching that constant. */
+  obBosLookforwardK: number;
 }

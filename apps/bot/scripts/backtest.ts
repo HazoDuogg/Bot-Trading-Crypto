@@ -55,6 +55,7 @@ function parseArgs(): {
   riskPoolMaxPct: number;
   neutralGateThreshold: number;
   mssStalenessTolerance: number;
+  obBosLookback: number;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -67,6 +68,7 @@ function parseArgs(): {
   const riskPoolArg = args.find((a) => a.startsWith('--risk-pool-max-pct='));
   const neutralGateArg = args.find((a) => a.startsWith('--neutral-gate-threshold='));
   const mssStalenessArg = args.find((a) => a.startsWith('--mss-staleness-tolerance='));
+  const obBosLookbackArg = args.find((a) => a.startsWith('--ob-bos-lookback='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -84,6 +86,8 @@ function parseArgs(): {
     neutralGateThreshold: neutralGateArg ? Number(neutralGateArg.split('=')[1]) : 0.55,
     // TICKET-040: defaults to 5 unchanged (matches EntryConfig.MSS_STALENESS_TOLERANCE_CANDLES) when omitted.
     mssStalenessTolerance: mssStalenessArg ? Number(mssStalenessArg.split('=')[1]) : 5,
+    // TICKET-041: defaults to 10 unchanged (matches EntryConfig.OB_BOS_LOOKFORWARD_K) when omitted.
+    obBosLookback: obBosLookbackArg ? Number(obBosLookbackArg.split('=')[1]) : 10,
   };
 }
 
@@ -225,9 +229,10 @@ async function main(): Promise<void> {
     riskPoolMaxPct,
     neutralGateThreshold,
     mssStalenessTolerance,
+    obBosLookback,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -242,6 +247,7 @@ async function main(): Promise<void> {
       obDisabledSymbols,
       macroTrendFilterAppliesToBoxBreakout,
       mssStalenessToleranceCandles: mssStalenessTolerance, // TICKET-040: CLI-overridable A/B testing — default (5) unchanged from before this ticket.
+      obBosLookforwardK: obBosLookback, // TICKET-041: CLI-overridable A/B testing — default (10) unchanged from before this ticket.
     },
     tpPlan,
     takerFeeRate: 0.0004, // TODO_CONFIRM per docs Mục 8 — Trader chưa cung cấp số thật theo VIP tier
@@ -422,6 +428,7 @@ async function main(): Promise<void> {
     `- neutralTransitionEnabled: ${neutralTransitionEnabled} (TICKET-036, hard Momentum Gate, threshold=${config.neutralTransitionGateConfig.neutralTransitionMomentumGateThreshold})`,
     `- riskPoolMaxPct: ${(riskPoolMaxPct * 100).toFixed(0)}% (TICKET-037, CLI-overridable, default 10%)`,
     `- mssStalenessToleranceCandles: ${config.entryRouterConfig.mssStalenessToleranceCandles} (TICKET-040, CLI-overridable, default 5)`,
+    `- obBosLookforwardK: ${config.entryRouterConfig.obBosLookforwardK} (TICKET-041, CLI-overridable, default 10)`,
     `- Runner trailing: ATR (2.5×ATR), không dùng Structure trailing`,
     `- takerFeeRate: 0.0004 (TODO_CONFIRM — Trader chưa cung cấp số thật)`,
     `- Quy tắc SL/TP cùng nến: SL chạm trước`,
