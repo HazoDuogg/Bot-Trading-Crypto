@@ -16,6 +16,9 @@ export const DEFAULT_ENTRY_ROUTER_CONFIG: EntryRouterConfig = {
   macroTrendFilterEnabled: false,
   obDisabledSymbols: [],
   macroTrendFilterAppliesToBoxBreakout: false,
+  // TICKET-040: matches EntryConfig.MSS_STALENESS_TOLERANCE_CANDLES (5, TICKET-011) — baseline
+  // behavior unchanged unless a caller (backtest.ts CLI) opts into a different value.
+  mssStalenessToleranceCandles: EntryConfig.MSS_STALENESS_TOLERANCE_CANDLES,
   regimeRiskMultiplier: {
     [MarketRegime.TREND_RIDER]: 1.0,
     [MarketRegime.SIDEWAY_SCALPER]: 1.0,
@@ -116,9 +119,11 @@ function runTrendStyle(input: EntryRouterInput, config: EntryRouterConfig, regim
   // TICKET-011: detectMarketStructureShift returns the FIRST confirming candle in the window,
   // which can be an arbitrarily old historical point (found live: up to ~85 minutes stale) — a
   // live bot only acts on a confirmation the moment it happens, not a rediscovered old one. Only
-  // accept a confirmation within the last MSS_STALENESS_TOLERANCE_CANDLES of the window (i.e. "now").
+  // accept a confirmation within the last mssStalenessToleranceCandles of the window (i.e. "now").
+  // TICKET-040: reads config.mssStalenessToleranceCandles (defaults to EntryConfig.MSS_STALENESS_TOLERANCE_CANDLES)
+  // instead of the constant directly, so backtest.ts's CLI can A/B test it without touching config.ts.
   const candlesFromEnd = mssWindow.length - 1 - mssConfirmedIndex;
-  if (candlesFromEnd >= EntryConfig.MSS_STALENESS_TOLERANCE_CANDLES) return null; // confirmation is stale — don't act on it
+  if (candlesFromEnd >= config.mssStalenessToleranceCandles) return null; // confirmation is stale — don't act on it
 
   const entryPrice = mssWindow[mssConfirmedIndex].close;
 

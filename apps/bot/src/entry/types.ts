@@ -68,4 +68,6 @@ export interface EntryRouterConfig {
   obDisabledSymbols: string[];
   /** TICKET-018: extends the macro trend filter to Box Breakout (SIDEWAY_SCALPER + COMPRESSION) — independent of macroTrendFilterEnabled, both must be true for the Box Breakout path to be filtered. A/B-testable via backtest.ts CLI, not hard-coded. */
   macroTrendFilterAppliesToBoxBreakout: boolean;
+  /** TICKET-040: same value as EntryConfig.MSS_STALENESS_TOLERANCE_CANDLES by default (TICKET-011) — threaded through here so backtest.ts's CLI can A/B test it without touching that constant. */
+  mssStalenessToleranceCandles: number;
 }
