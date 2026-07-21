@@ -370,75 +370,121 @@ async function main(): Promise<void> {
   console.log(`  → bỏ qua (hết dữ liệu tương lai để đóng lệnh): ${unresolvedFutureData}`);
   console.log(`  → bỏ qua (không tái tạo được DraftSetup, VD thiếu lịch sử ATR): ${unresolvedNoReconstruction}`);
 
-  const wins = results.filter((r) => r.pnlPct > 0).length;
-  const winrate = results.length > 0 ? (wins / results.length) * 100 : 0;
-
-  function bucketLabel(candlesLate: number): string {
-    if (candlesLate <= 30) return '10-30';
-    if (candlesLate <= 60) return '31-60';
-    if (candlesLate <= 100) return '61-100';
-    return '100+';
+  // TICKET-046: the SAME underlying stale MSS confirmation commonly fires MSS_TIMEOUT on several
+  // CONSECUTIVE 5m steps (candlesLate climbing ~5 at a time, same case-counting methodology as
+  // entry-funnel-report.md — one row per FunnelEvent) until something else changes. Winning/losing
+  // setups don't repeat the same number of times, so aggregating over the raw per-step rows (173)
+  // instead of over the real distinct setups (18) silently over/under-weights whichever setups
+  // happened to sit in the funnel longer — NOT a correction to the simulation itself (slTpManager/
+  // entryPrice/slPrice untouched), only to how these already-computed rows are aggregated. One
+  // group per (symbol, entryPrice) — the same confirming 1m candle always reproduces the same
+  // entryPrice every time it's re-evaluated (deterministic reconstruction) — keeping the row with
+  // the SMALLEST candlesLate (the first, least-stale rejection of that setup).
+  function dedupeBySetup(rs: CaseResult[]): CaseResult[] {
+    const bestByKey = new Map<string, CaseResult>();
+    for (const r of rs) {
+      const key = `${r.symbol}|${r.entryPrice}`;
+      const existing = bestByKey.get(key);
+      if (existing === undefined || r.candlesLate < existing.candlesLate) bestByKey.set(key, r);
+    }
+    return [...bestByKey.values()];
   }
-  const bucketOrder = ['10-30', '31-60', '61-100', '100+'];
-  const buckets: Record<string, CaseResult[]> = {};
-  for (const b of bucketOrder) buckets[b] = [];
-  for (const r of results) buckets[bucketLabel(r.candlesLate)].push(r);
+  const dedupedResults = dedupeBySetup(results);
 
-  const bucketRows = bucketOrder.map((b) => {
-    const rs = buckets[b];
-    const w = rs.filter((r) => r.pnlPct > 0).length;
-    const wr = rs.length > 0 ? ((w / rs.length) * 100).toFixed(1) : '—';
-    const avgPnl = rs.length > 0 ? (rs.reduce((s, r) => s + r.pnlPct, 0) / rs.length).toFixed(2) : '—';
-    return `| ${b} | ${rs.length} | ${wr === '—' ? '—' : wr + '%'} | ${avgPnl === '—' ? '—' : avgPnl + '%'} |`;
-  });
+  interface Stats {
+    n: number;
+    wins: number;
+    winrate: number;
+    bucketRows: string[];
+    exitReasonRows: string[];
+  }
+  function computeStats(rs: CaseResult[]): Stats {
+    const wins = rs.filter((r) => r.pnlPct > 0).length;
+    const winrate = rs.length > 0 ? (wins / rs.length) * 100 : 0;
 
-  const exitReasonCounts: Record<string, number> = {};
-  for (const r of results) exitReasonCounts[r.exitReason] = (exitReasonCounts[r.exitReason] ?? 0) + 1;
-  const exitReasonRows = Object.entries(exitReasonCounts)
-    .sort((a, b) => b[1] - a[1])
-    .map(([reason, count]) => `| ${reason} | ${count} | ${((count / results.length) * 100).toFixed(1)}% |`);
+    function bucketLabel(candlesLate: number): string {
+      if (candlesLate <= 30) return '10-30';
+      if (candlesLate <= 60) return '31-60';
+      if (candlesLate <= 100) return '61-100';
+      return '100+';
+    }
+    const bucketOrder = ['10-30', '31-60', '61-100', '100+'];
+    const buckets: Record<string, CaseResult[]> = {};
+    for (const b of bucketOrder) buckets[b] = [];
+    for (const r of rs) buckets[bucketLabel(r.candlesLate)].push(r);
+    const bucketRows = bucketOrder.map((b) => {
+      const bs = buckets[b];
+      const w = bs.filter((r) => r.pnlPct > 0).length;
+      const wr = bs.length > 0 ? ((w / bs.length) * 100).toFixed(1) : '—';
+      const avgPnl = bs.length > 0 ? (bs.reduce((s, r) => s + r.pnlPct, 0) / bs.length).toFixed(2) : '—';
+      return `| ${b} | ${bs.length} | ${wr === '—' ? '—' : wr + '%'} | ${avgPnl === '—' ? '—' : avgPnl + '%'} |`;
+    });
 
-  const caseRows = results.map((r) => `| ${r.symbol} | ${r.candlesLate} | ${r.exitReason} | ${r.pnlPct.toFixed(2)}% |`);
+    const exitReasonCounts: Record<string, number> = {};
+    for (const r of rs) exitReasonCounts[r.exitReason] = (exitReasonCounts[r.exitReason] ?? 0) + 1;
+    const exitReasonRows = Object.entries(exitReasonCounts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([reason, count]) => `| ${reason} | ${count} | ${((count / rs.length) * 100).toFixed(1)}% |`);
 
-  // Transparency note, not a conclusion: entryRouter.ts re-evaluates every 5m step, so the SAME
-  // underlying stale MSS confirmation commonly fires MSS_TIMEOUT on several CONSECUTIVE steps
-  // (candlesLate climbing ~5 at a time) until something else changes — same case-counting
-  // methodology as entry-funnel-report.md (one row per FunnelEvent), so "173 case" is 173 step-level
-  // rejection events, not necessarily 173 independent trading opportunities.
-  const distinctSetups = new Set(results.map((r) => `${r.symbol}|${r.entryPrice}`)).size;
+    return { n: rs.length, wins, winrate, bucketRows, exitReasonRows };
+  }
+
+  const rawStats = computeStats(results);
+  const dedupedStats = computeStats(dedupedResults);
+
+  const dedupedFlag = (r: CaseResult) => (dedupedResults.includes(r) ? '✓ (đại diện, candlesLate nhỏ nhất)' : '');
+  const caseRowsWithFlag = results.map((r) => `| ${r.symbol} | ${r.candlesLate} | ${r.exitReason} | ${r.pnlPct.toFixed(2)}% | ${dedupedFlag(r)} |`);
 
   const report = [
-    '# MSS_TIMEOUT Outcomes — TICKET-045',
+    '# MSS_TIMEOUT Outcomes — TICKET-045/046',
     '',
     'Mô phỏng riêng biệt (không ảnh hưởng entryRouter.ts/orchestrator.ts/backtest.ts đang chạy thật) —',
     'câu hỏi: NẾU bot vẫn chấp nhận các case bị từ chối vì MSS_TIMEOUT, kết quả TP/SL thật sự sẽ ra sao.',
     'Số liệu nguyên văn, không tự kết luận nên nới ngưỡng staleness hay không.',
     '',
     `- Tổng số case MSS_TIMEOUT phát hiện được (đúng cấu hình đã chốt, khớp entry-funnel-report.md): ${totalDetected}`,
-    `- Trong đó số setup (symbol+entryPrice) THỰC SỰ khác nhau: ${distinctSetups} — cùng 1 setup còn "cũ" bị đánh giá lại`,
+    `- Trong đó số setup (symbol+entryPrice) THỰC SỰ khác nhau: ${dedupedResults.length} — cùng 1 setup còn "cũ" bị đánh giá lại`,
     `  mỗi 5 phút (candlesLate tăng dần ~5 mỗi lần) nên xuất hiện nhiều dòng trùng entryPrice/pnlPct trong bảng chi tiết bên dưới.`,
     `- Mô phỏng được đến khi đóng lệnh: ${results.length}`,
     `- Bỏ qua vì hết dữ liệu tương lai để đóng lệnh: ${unresolvedFutureData}`,
     `- Bỏ qua vì không tái tạo được DraftSetup (VD thiếu lịch sử ATR tại thời điểm đó): ${unresolvedNoReconstruction}`,
-    `- Winrate tổng thể (TP1 trở lên = pnlPct > 0 tính thắng; SL/BREAKEVEN_SL âm tính thua): ${wins}/${results.length} = ${winrate.toFixed(1)}%`,
     '',
-    '## Winrate theo mức độ trễ (candlesLate, đơn vị: nến 1m)',
+    '## TICKET-046 — Winrate: theo dòng (chưa loại trùng) vs. theo setup thật (đã loại trùng)',
+    '',
+    '| | N | Winrate (pnlPct > 0 = thắng) |',
+    '|---|---|---|',
+    `| Theo dòng (chưa loại trùng) | ${rawStats.n} | ${rawStats.winrate.toFixed(1)}% |`,
+    `| Theo setup thật (đã loại trùng, giữ candlesLate nhỏ nhất mỗi (symbol,entryPrice)) | ${dedupedStats.n} | ${dedupedStats.winrate.toFixed(1)}% |`,
+    '',
+    '## Winrate theo mức độ trễ (candlesLate, đơn vị: nến 1m) — theo dòng, chưa loại trùng',
     '',
     '| Nhóm độ trễ | Số case | Winrate | PNL% trung bình |',
     '|---|---|---|---|',
-    ...bucketRows,
+    ...rawStats.bucketRows,
     '',
-    '## Phân bố exitReason',
+    '## Winrate theo mức độ trễ — theo setup thật, đã loại trùng (TICKET-046)',
+    '',
+    '| Nhóm độ trễ | Số setup | Winrate | PNL% trung bình |',
+    '|---|---|---|---|',
+    ...dedupedStats.bucketRows,
+    '',
+    '## Phân bố exitReason — theo dòng, chưa loại trùng',
     '',
     '| exitReason | Số case | % |',
     '|---|---|---|',
-    ...exitReasonRows,
+    ...rawStats.exitReasonRows,
     '',
-    '## Chi tiết từng case',
+    '## Phân bố exitReason — theo setup thật, đã loại trùng (TICKET-046)',
     '',
-    '| symbol | candlesLate | exitReason | pnlPct |',
-    '|---|---|---|---|',
-    ...caseRows,
+    '| exitReason | Số setup | % |',
+    '|---|---|---|',
+    ...dedupedStats.exitReasonRows,
+    '',
+    '## Chi tiết từng dòng (cột cuối đánh dấu dòng đại diện được giữ lại sau khi loại trùng)',
+    '',
+    '| symbol | candlesLate | exitReason | pnlPct | đại diện setup? |',
+    '|---|---|---|---|---|',
+    ...caseRowsWithFlag,
     '',
   ].join('\n');
 
