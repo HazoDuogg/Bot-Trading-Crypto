@@ -10,6 +10,7 @@ import { lastDefined, wilderATRSeries, wilderDIDirectionSeries } from '../regime
 import { MarketRegime, type CandleData, type RegimeOutput } from '../regime/types.js';
 import { routeEntry } from '../entry/entryRouter.js';
 import { EntryConfig } from '../entry/config.js';
+import type { FunnelCallback } from '../entry/types.js';
 import { buildFeatureVector, computeMomentumCrossFeatures, loadFeatureSchema, type FeatureSchema } from '../xgbFilter/featureBuilder.js';
 import { scoreMomentum } from '../xgbFilter/momentumScorer.js';
 import { computeMomentumMultiplier } from '../xgbFilter/momentumMultiplier.js';
@@ -235,6 +236,9 @@ export async function processCandle(
   config: OrchestratorConfig,
   onManipulatedConfirmed?: (diagnostic: ManipulatedDiagnostic) => void,
   onDangerZoneConfirmed?: (diagnostic: DangerZoneDiagnostic) => void,
+  // TICKET-042: pure pass-through to entryRouter.ts's routeEntry() — pure observability, never
+  // read here, never affects any decision in this function.
+  onFunnelEvent?: FunnelCallback,
 ): Promise<ProcessCandleResult> {
   // Step 1 — regime, always runs.
   const regimeOutput = detectRegime({
@@ -308,6 +312,7 @@ export async function processCandle(
         volumeZScore5m: regimeOutput.computedMetrics.volumeZScore5m,
       },
       config.entryRouterConfig,
+      onFunnelEvent,
     );
 
     if (draftSetup === null) {

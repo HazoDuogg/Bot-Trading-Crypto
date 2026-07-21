@@ -2,7 +2,7 @@ import { MarketRegime, type CandleData } from '../regime/types.js';
 import { RegimeConfig } from '../regime/config.js';
 import { lastDefined, wilderATRSeries } from '../regime/indicators.js';
 import { EntryConfig } from './config.js';
-import type { Direction, DraftSetup, EntryRouterConfig } from './types.js';
+import type { Direction, DraftSetup, EntryRouterConfig, FunnelCallback } from './types.js';
 import { detectOrderBlock } from './detectors/orderBlock.js';
 import { detectFairValueGap } from './detectors/fairValueGap.js';
 import { detectLiquiditySweep } from './detectors/liquiditySweep.js';
@@ -66,18 +66,17 @@ export interface EntryRouterInput {
   volumeZScore5m: number | undefined;
 }
 
-function runTrendStyle(input: EntryRouterInput, config: EntryRouterConfig, regime: MarketRegime): DraftSetup | null {
+function runTrendStyle(input: EntryRouterInput, config: EntryRouterConfig, regime: MarketRegime, onFunnelEvent?: FunnelCallback): DraftSetup | null {
   if (input.adxDirection1h === undefined || input.adxDirection1h === 'FLAT') return null; // no clear direction, no entry
   const direction: Direction = input.adxDirection1h === 'UP' ? 'BULLISH' : 'BEARISH';
   const side: 'LONG' | 'SHORT' = direction === 'BULLISH' ? 'LONG' : 'SHORT';
-
-  // TICKET-017 Phần A: only take entries aligned with the 1D macro trend when the filter is enabled.
-  // FLAT (or unknown) macroDirection does not block — only an outright opposing daily trend does.
-  if (config.macroTrendFilterEnabled && ((side === 'LONG' && input.macroDirection === 'DOWN') || (side === 'SHORT' && input.macroDirection === 'UP'))) {
-    return null;
-  }
+  const now = input.candles5m[input.candles5m.length - 1].timestamp;
 
   // Priority per PM: OB -> FVG -> Sweep (fallback signal #3, only when neither zone-based setup exists).
+  // TICKET-042: cascade now runs BEFORE the macro-trend-filter check below (was after) — pure
+  // functions, no side effects, so the FINAL decision (return null vs DraftSetup, and its values)
+  // is identical for every input either way; only the funnel's reporting ORDER changes, matching
+  // the observability spec's stage sequence (SETUP -> MACRO -> MSS). Decision logic itself untouched.
   let setupType: 'OB' | 'FVG' | 'SWEEP';
   let rawSlPrice: number; // the SL anchor before the ATR buffer is applied
   let zoneCandleIndex: number;
@@ -104,13 +103,25 @@ function runTrendStyle(input: EntryRouterInput, config: EntryRouterConfig, regim
         fractalN: EntryConfig.FRACTAL_N,
         wickRatioThreshold: EntryConfig.LIQUIDITY_SWEEP_WICK_RATIO_THRESHOLD,
       });
-      if (!sweep) return null; // no OB, no FVG, no Sweep — nothing to trade
+      if (!sweep) {
+        onFunnelEvent?.(input.symbol, now, { stage: 'SETUP', passed: false, reason: 'NO_SETUP_FOUND' });
+        return null; // no OB, no FVG, no Sweep — nothing to trade
+      }
       setupType = 'SWEEP';
       const sweepCandle = input.candles5m[sweep.candleIndex];
       rawSlPrice = direction === 'BULLISH' ? sweepCandle.low : sweepCandle.high;
       zoneCandleIndex = sweep.candleIndex;
     }
   }
+  onFunnelEvent?.(input.symbol, now, { stage: 'SETUP', passed: true, setupType });
+
+  // TICKET-017 Phần A: only take entries aligned with the 1D macro trend when the filter is enabled.
+  // FLAT (or unknown) macroDirection does not block — only an outright opposing daily trend does.
+  if (config.macroTrendFilterEnabled && ((side === 'LONG' && input.macroDirection === 'DOWN') || (side === 'SHORT' && input.macroDirection === 'UP'))) {
+    onFunnelEvent?.(input.symbol, now, { stage: 'MACRO', passed: false, reason: 'MACRO_TREND_OPPOSITE' });
+    return null;
+  }
+  onFunnelEvent?.(input.symbol, now, { stage: 'MACRO', passed: true });
 
   // Restrict MSS candles to "since the zone formed" — the caller passes whatever 1m/3m history it
   // has available; using older history risks confirming MSS off a reversal unrelated to this zone.
@@ -119,7 +130,10 @@ function runTrendStyle(input: EntryRouterInput, config: EntryRouterConfig, regim
 
   // OB/FVG/Sweep all go through the same MSS confirmation gate — no shortcut for Sweep.
   const mssConfirmedIndex = detectMarketStructureShift(mssWindow, direction, { fractalN: EntryConfig.FRACTAL_N });
-  if (mssConfirmedIndex === null) return null; // setup found, but no reversal confirmation yet — don't enter
+  if (mssConfirmedIndex === null) {
+    onFunnelEvent?.(input.symbol, now, { stage: 'MSS', passed: false, reason: 'MSS_NOT_CONFIRMED' });
+    return null; // setup found, but no reversal confirmation yet — don't enter
+  }
 
   // TICKET-011: detectMarketStructureShift returns the FIRST confirming candle in the window,
   // which can be an arbitrarily old historical point (found live: up to ~85 minutes stale) — a
@@ -128,7 +142,11 @@ function runTrendStyle(input: EntryRouterInput, config: EntryRouterConfig, regim
   // TICKET-040: reads config.mssStalenessToleranceCandles (defaults to EntryConfig.MSS_STALENESS_TOLERANCE_CANDLES)
   // instead of the constant directly, so backtest.ts's CLI can A/B test it without touching config.ts.
   const candlesFromEnd = mssWindow.length - 1 - mssConfirmedIndex;
-  if (candlesFromEnd >= config.mssStalenessToleranceCandles) return null; // confirmation is stale — don't act on it
+  if (candlesFromEnd >= config.mssStalenessToleranceCandles) {
+    onFunnelEvent?.(input.symbol, now, { stage: 'MSS', passed: false, reason: 'MSS_TIMEOUT' });
+    return null; // confirmation is stale — don't act on it
+  }
+  onFunnelEvent?.(input.symbol, now, { stage: 'MSS', passed: true });
 
   const entryPrice = mssWindow[mssConfirmedIndex].close;
 
@@ -141,8 +159,9 @@ function runTrendStyle(input: EntryRouterInput, config: EntryRouterConfig, regim
   return { side, entryPrice, slPrice, setupType, regime, riskMultiplier: config.regimeRiskMultiplier[regime] };
 }
 
-function runBoxBreakoutStyle(input: EntryRouterInput, config: EntryRouterConfig, regime: MarketRegime): DraftSetup | null {
+function runBoxBreakoutStyle(input: EntryRouterInput, config: EntryRouterConfig, regime: MarketRegime, onFunnelEvent?: FunnelCallback): DraftSetup | null {
   if (input.bbWidthPercentile15m === undefined || input.volumeZScore5m === undefined) return null;
+  const now = input.candles5m[input.candles5m.length - 1].timestamp;
 
   const breakout = detectBoxBreakout(input.candles15m, input.candles5m, input.bbWidthPercentile15m, input.volumeZScore5m, {
     boxLookbackM: EntryConfig.BOX_LOOKBACK_M,
@@ -150,7 +169,12 @@ function runBoxBreakoutStyle(input: EntryRouterInput, config: EntryRouterConfig,
     minBodyRatio: EntryConfig.BOX_BREAKOUT_MIN_BODY_RATIO,
     minVolumeZScore: EntryConfig.BOX_BREAKOUT_MIN_VOLUME_ZSCORE,
   });
-  if (!breakout) return null; // SIDEWAY_SCALPER: no breakout yet; COMPRESSION: still "armed"
+  if (!breakout) {
+    // TICKET-042: single 'BREAKOUT' stage covers both the detector's 3 conditions and the
+    // macro-trend-filter-for-breakout check below — SIDEWAY_STYLE has no separate MACRO stage.
+    onFunnelEvent?.(input.symbol, now, { stage: 'BREAKOUT', passed: false, reason: 'NO_BREAKOUT_YET' });
+    return null; // SIDEWAY_SCALPER: no breakout yet; COMPRESSION: still "armed"
+  }
 
   const side: 'LONG' | 'SHORT' = breakout.direction === 'UP' ? 'LONG' : 'SHORT';
 
@@ -163,8 +187,10 @@ function runBoxBreakoutStyle(input: EntryRouterInput, config: EntryRouterConfig,
     config.macroTrendFilterAppliesToBoxBreakout &&
     ((side === 'LONG' && input.macroDirection === 'DOWN') || (side === 'SHORT' && input.macroDirection === 'UP'))
   ) {
+    onFunnelEvent?.(input.symbol, now, { stage: 'BREAKOUT', passed: false, reason: 'MACRO_TREND_OPPOSITE' });
     return null;
   }
+  onFunnelEvent?.(input.symbol, now, { stage: 'BREAKOUT', passed: true });
 
   const entryPrice = input.candles5m[breakout.breakoutCandleIndex].close;
   const slPrice = breakout.direction === 'UP' ? breakout.boxLow : breakout.boxHigh;
@@ -177,22 +203,26 @@ function runBoxBreakoutStyle(input: EntryRouterInput, config: EntryRouterConfig,
  * result (no entry this candle), not an error — unlike regime/, which throws for NOT_IMPLEMENTED.
  * Does NOT call risk/ or xgbFilter/ — only returns a DraftSetup for the orchestrator (not built
  * this sprint) to size and place.
+ *
+ * TICKET-042: `onFunnelEvent` is pure observability — omitting it (the default) reproduces every
+ * prior ticket's behavior byte-for-byte. Its return value is never read; it cannot influence which
+ * branch runs or what gets returned.
  */
-export function routeEntry(input: EntryRouterInput, config: EntryRouterConfig = DEFAULT_ENTRY_ROUTER_CONFIG): DraftSetup | null {
+export function routeEntry(input: EntryRouterInput, config: EntryRouterConfig = DEFAULT_ENTRY_ROUTER_CONFIG, onFunnelEvent?: FunnelCallback): DraftSetup | null {
   switch (input.regime) {
     case MarketRegime.TREND_RIDER:
-      return runTrendStyle(input, config, input.regime);
+      return runTrendStyle(input, config, input.regime, onFunnelEvent);
     case MarketRegime.SIDEWAY_SCALPER:
-      return runBoxBreakoutStyle(input, config, input.regime);
+      return runBoxBreakoutStyle(input, config, input.regime, onFunnelEvent);
     case MarketRegime.COMPRESSION:
-      return runBoxBreakoutStyle(input, config, input.regime); // "armed" — same call, null until breakout confirms
+      return runBoxBreakoutStyle(input, config, input.regime, onFunnelEvent); // "armed" — same call, null until breakout confirms
     // TICKET-036: re-enabled (was `return null` since TICKET-012) — PM wants another attempt now
     // that the Momentum model exists, this time gated behind orchestrator.ts's hard Momentum Gate
     // instead of just a soft risk-multiplier. Same cascade choice as TREND_RIDER/SIDEWAY_SCALPER.
     case MarketRegime.NEUTRAL_TRANSITION:
       return config.entryStyleForNeutral === 'TREND_STYLE'
-        ? runTrendStyle(input, config, input.regime)
-        : runBoxBreakoutStyle(input, config, input.regime);
+        ? runTrendStyle(input, config, input.regime, onFunnelEvent)
+        : runBoxBreakoutStyle(input, config, input.regime, onFunnelEvent);
     default:
       return null;
   }

@@ -11,13 +11,13 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { CandleData } from '../dist/regime/types.js';
+import { MarketRegime, type CandleData } from '../dist/regime/types.js';
 import { RegimeConfig } from '../dist/regime/config.js';
 import { computeCorrelatedRiskRatio } from '../dist/regime/correlatedRisk.js';
 import { processCandle, type DangerZoneDiagnostic, type ManipulatedDiagnostic, type ProcessCandleInput } from '../dist/orchestrator/orchestrator.js';
 import { INITIAL_SYMBOL_STATE, type CloseTradeEvent, type OrchestratorConfig, type SymbolState } from '../dist/orchestrator/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
-import type { EntryStyleForNeutral } from '../dist/entry/types.js';
+import type { EntryStyleForNeutral, FunnelEvent } from '../dist/entry/types.js';
 import { DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG } from '../dist/xgbFilter/config.js';
 import type { OpenPositionRisk } from '../dist/risk/riskPool.js';
 import type { TpPlan } from '../dist/risk/slTpManager.js';
@@ -209,6 +209,120 @@ function formatDangerZoneDiagnostic(d: DangerZoneDiagnostic): string {
   return `[DANGER_ZONE] symbol=${d.symbol} timestamp=${new Date(d.timestamp).toISOString()} atrPercentile5m=${d.atrPercentile5m}\n  volumeZScore5m=${d.volumeZScore5m}`;
 }
 
+// TICKET-042 — Entry Funnel Analytics. Observability only: these counters are derived purely from
+// events/state processCandle() already exposes (FunnelEvent via the optional onFunnelEvent callback,
+// SymbolState.regimeState, OrchestratorEvent) — nothing here feeds back into any decision.
+const STATE_PASS_REGIMES = [MarketRegime.TREND_RIDER, MarketRegime.SIDEWAY_SCALPER, MarketRegime.COMPRESSION, MarketRegime.NEUTRAL_TRANSITION] as const;
+const STATE_FAIL_REGIMES = [MarketRegime.DANGER_ZONE, MarketRegime.MANIPULATED, MarketRegime.LOW_LIQUIDITY, MarketRegime.VOLATILE_CHOP, MarketRegime.CORRELATED_RISK] as const;
+
+interface RegimeFunnelStats {
+  setupPass: number;
+  macroPass: number;
+  mssPass: number;
+  breakoutPass: number;
+  riskPoolSkip: number;
+  opens: number;
+}
+
+function emptyFunnelStats(): RegimeFunnelStats {
+  return { setupPass: 0, macroPass: 0, mssPass: 0, breakoutPass: 0, riskPoolSkip: 0, opens: 0 };
+}
+
+/** TREND_RIDER/SIDEWAY_SCALPER/COMPRESSION always use one fixed cascade; NEUTRAL_TRANSITION follows entryStyleForNeutral (config-driven, same rule as entryRouter.ts's routeEntry()). */
+function pathFor(regime: MarketRegime, entryStyleForNeutral: EntryStyleForNeutral): 'TREND_STYLE' | 'SIDEWAY_STYLE' {
+  if (regime === MarketRegime.TREND_RIDER) return 'TREND_STYLE';
+  if (regime === MarketRegime.NEUTRAL_TRANSITION) return entryStyleForNeutral;
+  return 'SIDEWAY_STYLE'; // SIDEWAY_SCALPER, COMPRESSION
+}
+
+function pct(numerator: number, denominator: number): string {
+  return denominator > 0 ? `${((numerator / denominator) * 100).toFixed(1)}%` : '—';
+}
+
+function fmtInt(n: number): string {
+  return n.toLocaleString('en-US');
+}
+
+function funnelReportMarkdown(
+  totalStepsEvaluated: number,
+  stateCounts: Record<string, number>,
+  funnelStats: Record<string, RegimeFunnelStats>,
+  neutralGateRejectedCount: number,
+  entryStyleForNeutral: EntryStyleForNeutral,
+): string {
+  const statePass = STATE_PASS_REGIMES.reduce((sum, r) => sum + (stateCounts[r] ?? 0), 0);
+
+  // Per-regime pre-gate/gate/risk-pool/entry counts, computed once and reused by both the aggregate
+  // and per-regime sections below (single source of truth, never re-derived differently twice).
+  const perRegime = STATE_PASS_REGIMES.map((regime) => {
+    const stats = funnelStats[regime] ?? emptyFunnelStats();
+    const path = pathFor(regime, entryStyleForNeutral);
+    const preGate = path === 'TREND_STYLE' ? stats.mssPass : stats.breakoutPass;
+    const gatePass = regime === MarketRegime.NEUTRAL_TRANSITION ? preGate - neutralGateRejectedCount : preGate;
+    const riskPoolPass = gatePass - stats.riskPoolSkip;
+    return { regime, path, stats, preGate, gatePass, riskPoolPass };
+  });
+
+  const setupPassTotal = perRegime.filter((r) => r.path === 'TREND_STYLE').reduce((sum, r) => sum + r.stats.setupPass, 0);
+  const macroOrBreakoutPassTotal = perRegime.reduce((sum, r) => sum + (r.path === 'TREND_STYLE' ? r.stats.macroPass : r.stats.breakoutPass), 0);
+  const mssPassTotal = perRegime.filter((r) => r.path === 'TREND_STYLE').reduce((sum, r) => sum + r.stats.mssPass, 0);
+  const aiGatePassTotal = perRegime.find((r) => r.regime === MarketRegime.NEUTRAL_TRANSITION)?.gatePass ?? 0;
+  const aiGatePreGate = perRegime.find((r) => r.regime === MarketRegime.NEUTRAL_TRANSITION)?.preGate ?? 0;
+  const riskPoolPassTotal = perRegime.reduce((sum, r) => sum + r.riskPoolPass, 0);
+  const entryTotal = perRegime.reduce((sum, r) => sum + r.stats.opens, 0);
+  // "Cửa trước" for RISK POOL PASS: everything that reached the risk-pool check this step —
+  // TREND_STYLE/SIDEWAY_STYLE regimes go straight from MSS/BREAKOUT, NEUTRAL_TRANSITION goes through
+  // the AI gate first. Mirrors exactly what orchestrator.ts checks immediately before the pool.
+  const reachedRiskPoolCheckTotal = perRegime.reduce((sum, r) => sum + (r.regime === MarketRegime.NEUTRAL_TRANSITION ? r.gatePass : r.preGate), 0);
+
+  const aggregateRows = [
+    `| Tổng bước đánh giá | ${fmtInt(totalStepsEvaluated)} | — |`,
+    `| STATE PASS | ${fmtInt(statePass)} | ${pct(statePass, totalStepsEvaluated)} |`,
+    `| SETUP PASS (nhánh TREND_STYLE) | ${fmtInt(setupPassTotal)} | ${pct(setupPassTotal, statePass)} |`,
+    `| MACRO/BREAKOUT PASS | ${fmtInt(macroOrBreakoutPassTotal)} | ${pct(macroOrBreakoutPassTotal, setupPassTotal)} |`,
+    `| MSS PASS (nhánh TREND_STYLE) | ${fmtInt(mssPassTotal)} | ${pct(mssPassTotal, macroOrBreakoutPassTotal)} |`,
+    `| AI GATE PASS (NEUTRAL_TRANSITION) | ${fmtInt(aiGatePassTotal)} | ${pct(aiGatePassTotal, aiGatePreGate)} |`,
+    `| RISK POOL PASS | ${fmtInt(riskPoolPassTotal)} | ${pct(riskPoolPassTotal, reachedRiskPoolCheckTotal)} |`,
+    `| ENTRY (mở lệnh thật) | ${fmtInt(entryTotal)} | ${pct(entryTotal, riskPoolPassTotal)} |`,
+  ];
+
+  const regimeSections = perRegime.map(({ regime, path, stats, preGate, gatePass, riskPoolPass }) => {
+    const state = stateCounts[regime] ?? 0;
+
+    const rows: string[] = [`| STATE PASS | ${fmtInt(state)} | — |`];
+    if (path === 'TREND_STYLE') {
+      rows.push(`| SETUP PASS | ${fmtInt(stats.setupPass)} | ${pct(stats.setupPass, state)} |`);
+      rows.push(`| MACRO PASS | ${fmtInt(stats.macroPass)} | ${pct(stats.macroPass, stats.setupPass)} |`);
+      rows.push(`| MSS PASS | ${fmtInt(stats.mssPass)} | ${pct(stats.mssPass, stats.macroPass)} |`);
+    } else {
+      rows.push(`| BREAKOUT PASS | ${fmtInt(stats.breakoutPass)} | ${pct(stats.breakoutPass, state)} |`);
+    }
+    if (regime === MarketRegime.NEUTRAL_TRANSITION) {
+      rows.push(`| AI GATE PASS | ${fmtInt(gatePass)} | ${pct(gatePass, preGate)} |`);
+    }
+    rows.push(`| RISK POOL PASS | ${fmtInt(riskPoolPass)} | ${pct(riskPoolPass, gatePass)} |`);
+    rows.push(`| ENTRY (mở lệnh thật) | ${fmtInt(stats.opens)} | ${pct(stats.opens, riskPoolPass)} |`);
+
+    return [`### ${regime} (nhánh ${path})`, '', '| Cửa | Số lượng | Tỷ lệ chuyển đổi từ cửa trước |', '|---|---|---|', ...rows, ''].join('\n');
+  });
+
+  return [
+    '# Entry Funnel Analytics — TICKET-042',
+    '',
+    'Công cụ quan sát (observability) — không đổi bất kỳ logic quyết định giao dịch nào. Số liệu nguyên văn, không tự kết luận.',
+    '',
+    '## Funnel tổng hợp (toàn bộ 4 coin, 180 ngày)',
+    '',
+    '| Cửa | Số lượng | Tỷ lệ chuyển đổi từ cửa trước |',
+    '|---|---|---|',
+    ...aggregateRows,
+    '',
+    '## Funnel theo từng regime',
+    '',
+    ...regimeSections,
+  ].join('\n');
+}
+
 function tradesCsv(trades: CloseTradeEvent[]): string {
   const header = 'symbol,side,regime,setupType,tpPlan,entryTimestamp,entryPrice,exitTimestamp,exitPrice,exitReason,pnlUsd,pnlPct,riskMultiplierApplied,accountBalanceAfter';
   const rows = trades.map((t) =>
@@ -272,6 +386,14 @@ async function main(): Promise<void> {
   let neutralGateRejectedCount = 0;
   const manipulatedLogLines: string[] = []; // TICKET-027
   const dangerZoneLogLines: string[] = []; // TICKET-033
+
+  // TICKET-042 — Entry Funnel Analytics accumulators. Pure counting, derived from data
+  // processCandle() already produces (regimeState + OrchestratorEvent + the optional
+  // onFunnelEvent callback) — never influences any decision above.
+  let totalStepsEvaluated = 0;
+  const stateCounts: Record<string, number> = {};
+  const funnelStats: Record<string, RegimeFunnelStats> = {};
+  for (const regime of STATE_PASS_REGIMES) funnelStats[regime] = emptyFunnelStats();
 
   const totalSteps = Math.min(...SYMBOLS.map((s) => symbolsData[s].candles5m.length));
   // startStep must guarantee enough REAL TIME has elapsed for every timeframe's window to be full,
@@ -342,15 +464,38 @@ async function main(): Promise<void> {
         otherOpenPositionsRisk,
       };
 
+      // TICKET-042: per-call buffer — processCandle() runs synchronously for this one symbol/step,
+      // so every event pushed here belongs to the single confirmed regime read off the result below.
+      const funnelEventsThisStep: FunnelEvent[] = [];
+
       const result = await processCandle(
         input,
         sd.state,
         config,
         (d) => manipulatedLogLines.push(formatManipulatedDiagnostic(d)),
         (d) => dangerZoneLogLines.push(formatDangerZoneDiagnostic(d)),
+        (_symbol, _timestamp, event) => funnelEventsThisStep.push(event),
       );
       sd.state = result.symbolState;
       accountBalance = result.accountBalance;
+
+      totalStepsEvaluated++;
+      const confirmedRegime = result.symbolState.regimeState.previousRegime;
+      if (confirmedRegime !== null) {
+        stateCounts[confirmedRegime] = (stateCounts[confirmedRegime] ?? 0) + 1;
+      }
+      const stats = confirmedRegime !== null ? funnelStats[confirmedRegime] : undefined;
+      if (stats) {
+        for (const event of funnelEventsThisStep) {
+          if (!event.passed) continue;
+          if (event.stage === 'SETUP') stats.setupPass++;
+          else if (event.stage === 'MACRO') stats.macroPass++;
+          else if (event.stage === 'MSS') stats.mssPass++;
+          else if (event.stage === 'BREAKOUT') stats.breakoutPass++;
+        }
+        if (result.event?.type === 'OPEN') stats.opens++;
+        else if (result.event?.type === 'SKIPPED' && result.event.reason === 'RISK_POOL_EXCEEDED') stats.riskPoolSkip++;
+      }
 
       if (result.event?.type === 'CLOSE') trades.push(result.event);
       else if (result.event?.type === 'SKIPPED') {
@@ -380,6 +525,11 @@ async function main(): Promise<void> {
   const dangerZoneLogPath = path.resolve(process.cwd(), 'data/danger-zone-log.txt');
   writeFileSync(dangerZoneLogPath, dangerZoneLogLines.join('\n\n') + '\n');
   console.log(`→ ${dangerZoneLogPath} (${dangerZoneLogLines.length} lần DANGER_ZONE được xác nhận mới)`);
+
+  // TICKET-042 — công cụ dùng lại được (không phải log điều tra 1 lần), ghi riêng file của nó.
+  const entryFunnelReportPath = path.resolve(process.cwd(), 'data/entry-funnel-report.md');
+  writeFileSync(entryFunnelReportPath, funnelReportMarkdown(totalStepsEvaluated, stateCounts, funnelStats, neutralGateRejectedCount, entryStyleForNeutral));
+  console.log(`→ ${entryFunnelReportPath}`);
 
   // TICKET-030: CORRELATED_RISK has no CLI on/off flag (unconditionally wired in, same pattern as
   // MANIPULATED/LOW_LIQUIDITY) — "-correlated" appended so this run's report/trades never overwrite

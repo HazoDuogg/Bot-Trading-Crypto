@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_ENTRY_ROUTER_CONFIG, routeEntry, type EntryRouterInput } from './entryRouter.js';
+import type { FunnelEvent } from './types.js';
 import { MarketRegime, type CandleData } from '../regime/types.js';
 import { RegimeConfig } from '../regime/config.js';
 import { lastDefined, wilderATRSeries } from '../regime/indicators.js';
@@ -477,5 +478,158 @@ describe('routeEntry — OB disabled per symbol (TICKET-017 Phần B)', () => {
     const input = baseInput({ regime: MarketRegime.TREND_RIDER, symbol: 'BTCUSDT', adxDirection1h: 'UP', candles5m: trendCandles5m, candlesMss: mssCandles });
     const result = routeEntry(input, { ...DEFAULT_ENTRY_ROUTER_CONFIG, obDisabledSymbols: ['XRPUSDT'] });
     expect(result?.setupType).toBe('OB'); // unaffected — BTCUSDT is not the disabled symbol
+  });
+});
+
+// TICKET-042 — Entry Funnel Analytics: pure observability, routeEntry()'s decision logic must be
+// byte-for-byte identical whether or not a caller passes onFunnelEvent.
+describe('routeEntry — Entry Funnel Analytics (TICKET-042)', () => {
+  function collect(): { events: FunnelEvent[]; onFunnelEvent: (symbol: string, timestamp: number, event: FunnelEvent) => void } {
+    const events: FunnelEvent[] = [];
+    return { events, onFunnelEvent: (_symbol, _timestamp, event) => events.push(event) };
+  }
+
+  it('fires SETUP(pass) -> MACRO(pass) -> MSS(pass) in that order for a fully successful TREND_STYLE setup', () => {
+    const { events, onFunnelEvent } = collect();
+    const input = baseInput({ regime: MarketRegime.TREND_RIDER, adxDirection1h: 'UP', candles5m: trendCandles5m, candlesMss: mssCandles });
+
+    const result = routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG, onFunnelEvent);
+
+    expect(result).not.toBeNull(); // sanity: this fixture really does produce a DraftSetup
+    expect(events).toEqual([
+      { stage: 'SETUP', passed: true, setupType: 'OB' },
+      { stage: 'MACRO', passed: true },
+      { stage: 'MSS', passed: true },
+    ]);
+  });
+
+  it('fires only SETUP(fail, NO_SETUP_FOUND) when no OB/FVG/Sweep exists', () => {
+    const { events, onFunnelEvent } = collect();
+    // `filler` alone: 14 identical flat candles, never produces a fractal (per its own doc comment) -> no OB/FVG/Sweep.
+    const input = baseInput({ regime: MarketRegime.TREND_RIDER, adxDirection1h: 'UP', candles5m: filler, candlesMss: mssCandles });
+
+    const result = routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG, onFunnelEvent);
+
+    expect(result).toBeNull();
+    expect(events).toEqual([{ stage: 'SETUP', passed: false, reason: 'NO_SETUP_FOUND' }]);
+  });
+
+  it('fires SETUP(pass) -> MACRO(fail, MACRO_TREND_OPPOSITE) and stops there when the macro filter blocks', () => {
+    const { events, onFunnelEvent } = collect();
+    const input = baseInput({ regime: MarketRegime.TREND_RIDER, adxDirection1h: 'UP', macroDirection: 'DOWN', candles5m: trendCandles5m, candlesMss: mssCandles });
+
+    const result = routeEntry(input, { ...DEFAULT_ENTRY_ROUTER_CONFIG, macroTrendFilterEnabled: true }, onFunnelEvent);
+
+    expect(result).toBeNull();
+    expect(events).toEqual([
+      { stage: 'SETUP', passed: true, setupType: 'OB' },
+      { stage: 'MACRO', passed: false, reason: 'MACRO_TREND_OPPOSITE' },
+    ]);
+  });
+
+  it('fires SETUP(pass) -> MACRO(pass) -> MSS(fail, MSS_NOT_CONFIRMED) when no reversal has confirmed yet', () => {
+    const { events, onFunnelEvent } = collect();
+    const input = baseInput({
+      regime: MarketRegime.TREND_RIDER,
+      adxDirection1h: 'UP',
+      candles5m: trendCandles5m,
+      candlesMss: mssCandles.slice(0, 11), // MSS confirmation candle not included yet
+    });
+
+    const result = routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG, onFunnelEvent);
+
+    expect(result).toBeNull();
+    expect(events).toEqual([
+      { stage: 'SETUP', passed: true, setupType: 'OB' },
+      { stage: 'MACRO', passed: true },
+      { stage: 'MSS', passed: false, reason: 'MSS_NOT_CONFIRMED' },
+    ]);
+  });
+
+  it('fires SETUP(pass) -> MACRO(pass) -> MSS(fail, MSS_TIMEOUT) when the confirmation is too stale', () => {
+    const { events, onFunnelEvent } = collect();
+    // mssCandles confirms at its own last index (candlesFromEnd=0) — append extra candles after it
+    // so the confirmation is candlesFromEnd=6 positions from the end, past the default tolerance (5).
+    const staleMssCandles = [...mssCandles, ...Array.from({ length: 6 }, () => c(9, 9, 9.5, 8.5))];
+    const input = baseInput({ regime: MarketRegime.TREND_RIDER, adxDirection1h: 'UP', candles5m: trendCandles5m, candlesMss: staleMssCandles });
+
+    const result = routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG, onFunnelEvent);
+
+    expect(result).toBeNull();
+    expect(events).toEqual([
+      { stage: 'SETUP', passed: true, setupType: 'OB' },
+      { stage: 'MACRO', passed: true },
+      { stage: 'MSS', passed: false, reason: 'MSS_TIMEOUT' },
+    ]);
+  });
+
+  it('fires BREAKOUT(pass) for a confirmed box breakout (SIDEWAY_SCALPER)', () => {
+    const { events, onFunnelEvent } = collect();
+    const input = baseInput({
+      regime: MarketRegime.SIDEWAY_SCALPER,
+      candles15m: box15m,
+      candles5m: [c(111, 115, 116, 110.5)],
+      bbWidthPercentile15m: 50,
+      volumeZScore5m: 1.5,
+    });
+
+    const result = routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG, onFunnelEvent);
+
+    expect(result).not.toBeNull();
+    expect(events).toEqual([{ stage: 'BREAKOUT', passed: true }]);
+  });
+
+  it('fires BREAKOUT(fail, NO_BREAKOUT_YET) when COMPRESSION is still "armed"', () => {
+    const { events, onFunnelEvent } = collect();
+    const input = baseInput({
+      regime: MarketRegime.COMPRESSION,
+      candles15m: box15m,
+      candles5m: [c(103, 105, 106, 102)], // inside the box, no breakout
+      bbWidthPercentile15m: 50,
+      volumeZScore5m: 1.5,
+    });
+
+    const result = routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG, onFunnelEvent);
+
+    expect(result).toBeNull();
+    expect(events).toEqual([{ stage: 'BREAKOUT', passed: false, reason: 'NO_BREAKOUT_YET' }]);
+  });
+
+  it('fires BREAKOUT(fail, MACRO_TREND_OPPOSITE) when the box-breakout macro filter blocks (TICKET-018)', () => {
+    const { events, onFunnelEvent } = collect();
+    const input = baseInput({
+      regime: MarketRegime.SIDEWAY_SCALPER,
+      candles15m: box15m,
+      candles5m: [c(111, 115, 116, 110.5)], // breaks UP -> LONG
+      bbWidthPercentile15m: 50,
+      volumeZScore5m: 1.5,
+      macroDirection: 'DOWN',
+    });
+
+    const result = routeEntry(input, { ...DEFAULT_ENTRY_ROUTER_CONFIG, macroTrendFilterEnabled: true, macroTrendFilterAppliesToBoxBreakout: true }, onFunnelEvent);
+
+    expect(result).toBeNull();
+    expect(events).toEqual([{ stage: 'BREAKOUT', passed: false, reason: 'MACRO_TREND_OPPOSITE' }]);
+  });
+
+  // The single most important test in this ticket: omitting onFunnelEvent must reproduce the exact
+  // pre-TICKET-042 result, byte-for-byte — proven by reusing the exact fixture/expectation from
+  // 'routeEntry — TREND_RIDER (OB + MSS)' above, unmodified, called with no callback argument at all.
+  it('produces the exact same result with onFunnelEvent omitted as every pre-existing test already relies on', () => {
+    const input = baseInput({ regime: MarketRegime.TREND_RIDER, adxDirection1h: 'UP', candles5m: trendCandles5m, candlesMss: mssCandles });
+
+    const withoutCallback = routeEntry(input);
+    const { onFunnelEvent } = collect();
+    const withCallback = routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG, onFunnelEvent);
+
+    expect(withoutCallback).toEqual(withCallback); // same DraftSetup regardless of observability
+    expect(withoutCallback).toEqual({
+      side: 'LONG',
+      entryPrice: 13,
+      slPrice: 9 - EntryConfig.SL_BUFFER_ATR_MULTIPLIER * (lastDefined(wilderATRSeries(trendCandles5m, RegimeConfig.ATR_PERIOD_5M)) as number),
+      setupType: 'OB',
+      regime: MarketRegime.TREND_RIDER,
+      riskMultiplier: 1.0,
+    });
   });
 });

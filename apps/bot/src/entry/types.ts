@@ -53,6 +53,28 @@ export interface DraftSetup {
 
 export type EntryStyleForNeutral = 'TREND_STYLE' | 'SIDEWAY_STYLE';
 
+/**
+ * TICKET-042 — Entry Funnel Analytics. Pure observability: routeEntry()'s decision logic is
+ * unchanged whether or not a caller passes a FunnelCallback. 'SETUP' = did the OB->FVG->Sweep
+ * cascade find anything; 'MACRO' = 1D macro-trend-filter (TREND path only); 'MSS' = market
+ * structure shift confirmation (TREND path only); 'BREAKOUT' = the box-breakout detector's 3
+ * conditions PLUS the macro-trend-filter-for-breakout check (TICKET-018), collapsed into one
+ * stage/event since SIDEWAY_STYLE has no separate MACRO stage of its own.
+ */
+export type FunnelStage = 'SETUP' | 'MACRO' | 'MSS' | 'BREAKOUT';
+
+export interface FunnelEvent {
+  stage: FunnelStage;
+  passed: boolean;
+  /** e.g. 'NO_SETUP_FOUND', 'MACRO_TREND_OPPOSITE', 'MSS_NOT_CONFIRMED', 'MSS_TIMEOUT', 'NO_BREAKOUT_YET'. Only set when passed=false. */
+  reason?: string;
+  /** Only set when stage='SETUP' and passed=true. */
+  setupType?: 'OB' | 'FVG' | 'SWEEP';
+}
+
+/** Return value is ignored by routeEntry() — reporting only, never influences the entry decision. */
+export type FunnelCallback = (symbol: string, timestamp: number, event: FunnelEvent) => void;
+
 export interface EntryRouterConfig {
   /**
    * TICKET-036: NEUTRAL_TRANSITION re-enabled (was disabled by TICKET-012) — routeEntry() picks
