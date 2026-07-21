@@ -46,6 +46,21 @@ export const DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG: NeutralTransitionGateConfig
   neutralTransitionMomentumGateThreshold: 0.55,
 };
 
+/**
+ * TICKET-047. Hard gate for BOX_BOUNCE only — same pattern as NeutralTransitionGateConfig above
+ * (binary reject, missing score never defaults to passing). No separate "enabled" flag here:
+ * detection itself is already gated by EntryRouterConfig.boxBounceEnabled (default false), so a
+ * BOX_BOUNCE DraftSetup only ever reaches this gate when the feature is already on.
+ */
+export interface BoxBounceGateConfig {
+  /** TODO_CONFIRM: PM suggested 0.55 (same as NEUTRAL_TRANSITION's). Momentum score (own-side model) must be >= this to allow the trade; missing/undetermined score always rejects, never defaults to passing. */
+  boxBounceMomentumGateThreshold: number;
+}
+
+export const DEFAULT_BOX_BOUNCE_GATE_CONFIG: BoxBounceGateConfig = {
+  boxBounceMomentumGateThreshold: 0.55,
+};
+
 // TICKET-023 model artifacts, read at runtime (path only — never hard-code feature order/categories,
 // those are always read fresh from the schema JSON by featureBuilder.ts).
 //

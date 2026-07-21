@@ -20,6 +20,12 @@ export interface SlTpManagerInput {
   positionSize: number;
   /** Decimal fraction, e.g. 0.0004 for 0.04%. Read from config — never hard-code at the call site. */
   takerFeeRate: number;
+  /**
+   * TICKET-047: BOX_BOUNCE only — overrides COUNTER_TREND's default entry±COUNTER_TREND_TP_R price
+   * with a custom target (the box midpoint). Ignored for scenario TREND. Optional: omit for
+   * unchanged COUNTER_TREND behavior (entry±1R, Mục 7).
+   */
+  counterTrendTpPriceOverride?: number;
 }
 
 export interface TpLevel {
@@ -82,20 +88,17 @@ function assertTrendScenario(state: ManagedPositionState, action: string): void 
 }
 
 export function computeTpLevels(
-  input: Pick<SlTpManagerInput, 'scenario' | 'entryPrice' | 'slPrice' | 'side' | 'tpPlan'>,
+  input: Pick<SlTpManagerInput, 'scenario' | 'entryPrice' | 'slPrice' | 'side' | 'tpPlan' | 'counterTrendTpPriceOverride'>,
 ): TpLevel[] {
   const r = Math.abs(input.entryPrice - input.slPrice);
 
   if (input.scenario === 'COUNTER_TREND') {
-    // Mục 7: single TP at 1R, chốt sạch 100%, no tiers.
-    return [
-      {
-        label: 'COUNTER_TREND_TP',
-        price: priceAtR(input.entryPrice, r, COUNTER_TREND_TP_R, input.side),
-        rMultiple: COUNTER_TREND_TP_R,
-        closePercent: 1,
-      },
-    ];
+    // Mục 7: single TP, chốt sạch 100%, no tiers. TICKET-047: counterTrendTpPriceOverride (BOX_BOUNCE's
+    // box midpoint) replaces the default entry±1R price when supplied — rMultiple recomputed from
+    // the override so downstream reporting still reflects the REAL R achieved, not a stale constant.
+    const price = input.counterTrendTpPriceOverride ?? priceAtR(input.entryPrice, r, COUNTER_TREND_TP_R, input.side);
+    const rMultiple = input.counterTrendTpPriceOverride !== undefined ? Math.abs(price - input.entryPrice) / r : COUNTER_TREND_TP_R;
+    return [{ label: 'COUNTER_TREND_TP', price, rMultiple, closePercent: 1 }];
   }
 
   const plan = TP_PLANS[input.tpPlan];

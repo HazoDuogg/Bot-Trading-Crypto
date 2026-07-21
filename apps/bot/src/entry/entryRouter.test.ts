@@ -195,6 +195,83 @@ describe('routeEntry — SIDEWAY_SCALPER / COMPRESSION (box breakout)', () => {
   });
 });
 
+// TICKET-047 — new setup type, off by default, SIDEWAY_SCALPER only. box15m fixture: box = [90, 110].
+describe('routeEntry — BOX_BOUNCE (TICKET-047)', () => {
+  const bounceCandle5m = [...filler, c(95, 96, 97, 91)]; // low=91 in the bottom edge zone (<=93), lowerWickRatio=(95-91)/6=0.67 > 0.65
+
+  it('boxBounceEnabled=false (default): SIDEWAY_SCALPER behaves EXACTLY as before this ticket — no breakout, no bounce, null', () => {
+    const input = baseInput({
+      regime: MarketRegime.SIDEWAY_SCALPER,
+      candles15m: box15m,
+      candles5m: bounceCandle5m,
+      bbWidthPercentile15m: 50,
+      volumeZScore5m: 1.5,
+    });
+    expect(routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG)).toBeNull();
+  });
+
+  it('produces a LONG DraftSetup via BOX_BOUNCE when no breakout and boxBounceEnabled=true', () => {
+    const input = baseInput({
+      regime: MarketRegime.SIDEWAY_SCALPER,
+      candles15m: box15m,
+      candles5m: bounceCandle5m,
+      bbWidthPercentile15m: 50,
+      volumeZScore5m: 1.5,
+    });
+    const result = routeEntry(input, { ...DEFAULT_ENTRY_ROUTER_CONFIG, boxBounceEnabled: true, boxBounceEdgeZonePercent: 0.15 });
+
+    const atr = lastDefined(wilderATRSeries(bounceCandle5m, RegimeConfig.ATR_PERIOD_5M));
+    expect(atr).toBeDefined();
+    const expectedSl = 91 - EntryConfig.SL_BUFFER_ATR_MULTIPLIER * (atr as number); // candle's own low (91)
+
+    expect(result).toEqual({
+      side: 'LONG',
+      entryPrice: 96, // bounce candle's close
+      slPrice: expectedSl,
+      setupType: 'BOX_BOUNCE',
+      regime: MarketRegime.SIDEWAY_SCALPER,
+      riskMultiplier: 1.0,
+      tpTarget: 100, // box midpoint: (110+90)/2
+    });
+  });
+
+  it('priority: a confirmed Box Breakout always wins over Bounce, even when boxBounceEnabled=true', () => {
+    const input = baseInput({
+      regime: MarketRegime.SIDEWAY_SCALPER,
+      candles15m: box15m,
+      candles5m: [c(111, 115, 116, 110.5)], // the existing BOX_BREAKOUT fixture from the describe block above
+      bbWidthPercentile15m: 50,
+      volumeZScore5m: 1.5,
+    });
+    const result = routeEntry(input, { ...DEFAULT_ENTRY_ROUTER_CONFIG, boxBounceEnabled: true });
+    expect(result).toMatchObject({ setupType: 'BOX_BREAKOUT' });
+  });
+
+  it('does NOT extend to COMPRESSION even when boxBounceEnabled=true (SIDEWAY_SCALPER only)', () => {
+    const input = baseInput({
+      regime: MarketRegime.COMPRESSION,
+      candles15m: box15m,
+      candles5m: bounceCandle5m,
+      bbWidthPercentile15m: 50,
+      volumeZScore5m: 1.5,
+    });
+    const result = routeEntry(input, { ...DEFAULT_ENTRY_ROUTER_CONFIG, boxBounceEnabled: true, boxBounceEdgeZonePercent: 0.15 });
+    expect(result).toBeNull(); // still "armed", not a BOX_BOUNCE DraftSetup
+  });
+
+  it('does NOT extend to NEUTRAL_TRANSITION (SIDEWAY_STYLE) even when boxBounceEnabled=true (SIDEWAY_SCALPER only)', () => {
+    const input = baseInput({
+      regime: MarketRegime.NEUTRAL_TRANSITION,
+      candles15m: box15m,
+      candles5m: bounceCandle5m,
+      bbWidthPercentile15m: 50,
+      volumeZScore5m: 1.5,
+    });
+    const result = routeEntry(input, { ...DEFAULT_ENTRY_ROUTER_CONFIG, entryStyleForNeutral: 'SIDEWAY_STYLE', boxBounceEnabled: true, boxBounceEdgeZonePercent: 0.15 });
+    expect(result).toBeNull();
+  });
+});
+
 // TICKET-018 — extends the TICKET-017 macro trend filter to Box Breakout, gated behind a SECOND,
 // independent flag (macroTrendFilterAppliesToBoxBreakout) on top of macroTrendFilterEnabled.
 describe('routeEntry — Macro Trend Filter applied to Box Breakout (TICKET-018)', () => {

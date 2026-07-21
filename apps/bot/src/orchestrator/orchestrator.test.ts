@@ -4,6 +4,7 @@ import { INITIAL_SYMBOL_STATE, type OrchestratorConfig, type SymbolState } from 
 import { MarketRegime, type CandleData } from '../regime/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../entry/entryRouter.js';
 import {
+  DEFAULT_BOX_BOUNCE_GATE_CONFIG,
   DEFAULT_MOMENTUM_FILTER_CONFIG,
   DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG,
   MOMENTUM_BEARISH_MODEL_PATH,
@@ -70,6 +71,7 @@ const baseConfig: OrchestratorConfig = {
   isLowConfidenceOrLowLiquidity: false,
   momentumFilterConfig: DEFAULT_MOMENTUM_FILTER_CONFIG,
   neutralTransitionGateConfig: DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG,
+  boxBounceGateConfig: DEFAULT_BOX_BOUNCE_GATE_CONFIG,
 };
 
 const trendLongInput: SlTpManagerInput = {
@@ -572,5 +574,104 @@ describe('processCandle — NEUTRAL_TRANSITION Momentum Gate (TICKET-036)', () =
     expect(result.symbolState.openPosition).toBeNull();
     expect(result.event).toBeNull(); // NOT a SKIPPED event — NEUTRAL_TRANSITION genuinely never entered before this ticket
     expect(result.accountBalance).toBe(400);
+  });
+});
+
+// TICKET-047 — new setup type, off by default, SIDEWAY_SCALPER only. Same "mandatory hard gate"
+// pattern as NEUTRAL_TRANSITION above, but scenario=COUNTER_TREND (single TP at the box midpoint,
+// no tiers/Runner) instead of TREND.
+describe('processCandle — BOX_BOUNCE (TICKET-047)', () => {
+  // 1h: pure sine oscillation (no drift) -> low adx1h, satisfies SIDEWAY_ADX_THRESHOLD (regime =
+  // SIDEWAY_SCALPER). 15m: 285 filler + 40 flat box candles [90, 110] (candles15m.slice(-40) is the
+  // box computeBox()/detectBoxBounce() reads). 5m: 319 low/moderate-range fillers (keeps
+  // atrPercentile5m well under VOLATILE_CHOP's 70 threshold) + 1 bounce-confirming candle: low=91 in
+  // the box's bottom edge zone (edgeZonePercent=0.15 -> lowerEdgeThreshold=90+3=93),
+  // lowerWickRatio=(95-91)/6=0.67 > LIQUIDITY_SWEEP_WICK_RATIO_THRESHOLD(0.65) -> LONG bounce,
+  // boxMidpoint=(110+90)/2=100. Verified against detectRegime()/routeEntry() directly before writing
+  // this test (regime lands on SIDEWAY_SCALPER, candidateRegime same, on the very first call).
+  function boxBounceFixture() {
+    const candles1h: CandleData[] = Array.from({ length: 40 }, (_, i) => {
+      const close = 100 + Math.sin(i * 0.9) * 3;
+      const prevClose = i === 0 ? close : 100 + Math.sin((i - 1) * 0.9) * 3;
+      const open = prevClose;
+      return { timestamp: i * 3_600_000, open, high: Math.max(open, close) + 0.3, low: Math.min(open, close) - 0.3, close, volume: 1000 };
+    });
+
+    const filler15m = Array.from({ length: 285 }, (_, i) => c(100, 100.5, 101, 99.5, i * 900_000));
+    const boxCandles15m = Array.from({ length: 40 }, (_, i) => c(95, 105, 110, 90, (285 + i) * 900_000));
+    const candles15m = [...filler15m, ...boxCandles15m];
+
+    const candles5m: CandleData[] = Array.from({ length: 319 }, (_, i) => {
+      const range = i < 290 ? 1 + (i % 10) * 0.5 : 1;
+      return c(100, 100 + range * 0.2, 100 + range / 2, 100 - range / 2, i * 300_000);
+    });
+    candles5m.push(c(95, 96, 97, 91, 319 * 300_000));
+
+    const candles1m = makeCandles(50, 60_000, () => 100, () => 0.5);
+    const candles1hMomentum = makeCandles(250, 3_600_000, (i) => 100 + i * 0.1, () => 1);
+
+    return { candles5m, candles15m, candles1h, candles1m, candles1hMomentum };
+  }
+
+  const boxBounceEntryRouterConfig = { ...DEFAULT_ENTRY_ROUTER_CONFIG, boxBounceEnabled: true, boxBounceEdgeZonePercent: 0.15 };
+
+  it('rejects the trade (SKIPPED/BOX_BOUNCE_GATE_REJECTED) when the momentum score is below the gate threshold', async () => {
+    const fixture = boxBounceFixture();
+    const config: OrchestratorConfig = {
+      ...baseConfig,
+      entryRouterConfig: boxBounceEntryRouterConfig,
+      boxBounceGateConfig: { boxBounceMomentumGateThreshold: 1.01 }, // impossible to clear — real score is always <= 1
+    };
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.symbolState.regimeState.previousRegime).toBe(MarketRegime.SIDEWAY_SCALPER); // sanity: fixture really is SIDEWAY_SCALPER
+    expect(result.symbolState.openPosition).toBeNull();
+    expect(result.event).toMatchObject({ type: 'SKIPPED', symbol: 'BTCUSDT', reason: 'BOX_BOUNCE_GATE_REJECTED' });
+    expect(result.accountBalance).toBe(400); // unchanged, no trade happened
+  });
+
+  it('opens a COUNTER_TREND position with a single TP at the box midpoint when the momentum score clears the gate', async () => {
+    const fixture = boxBounceFixture();
+    const config: OrchestratorConfig = {
+      ...baseConfig,
+      entryRouterConfig: boxBounceEntryRouterConfig,
+      boxBounceGateConfig: { boxBounceMomentumGateThreshold: 0 }, // always clears — real score is always >= 0
+    };
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.event).toMatchObject({ type: 'OPEN', symbol: 'BTCUSDT', side: 'LONG', setupType: 'BOX_BOUNCE', regime: MarketRegime.SIDEWAY_SCALPER });
+    // TICKET-047 Phần C: BOX_BOUNCE uses scenario COUNTER_TREND — single TP at the box midpoint (100),
+    // no tiers/Runner (Mục 7), NOT the default entry±1R price this scenario would otherwise use.
+    const pos = result.symbolState.openPosition;
+    expect(pos?.scenario).toBe('COUNTER_TREND');
+    expect(pos?.tpLevels).toEqual([{ label: 'COUNTER_TREND_TP', price: 100, rMultiple: expect.any(Number), closePercent: 1 }]);
+  });
+
+  it('rejects safely (never defaults to passing) when the momentum score cannot be computed at all', async () => {
+    const fixture = boxBounceFixture();
+    const { candles1hMomentum: _tooShort, ...fixtureWithoutMomentumWindow } = fixture;
+    const config: OrchestratorConfig = {
+      ...baseConfig,
+      entryRouterConfig: boxBounceEntryRouterConfig,
+      boxBounceGateConfig: { boxBounceMomentumGateThreshold: 0 }, // even the most lenient threshold must still reject
+    };
+
+    const result = await processCandle(baseInput(fixtureWithoutMomentumWindow), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.symbolState.openPosition).toBeNull();
+    expect(result.event).toMatchObject({ type: 'SKIPPED', reason: 'BOX_BOUNCE_GATE_REJECTED' });
+  });
+
+  it('boxBounceEnabled=false (default): no BOX_BOUNCE event ever fires, byte-for-byte the pre-TICKET-047 behavior', async () => {
+    const fixture = boxBounceFixture();
+    const config: OrchestratorConfig = { ...baseConfig }; // entryRouterConfig defaults to boxBounceEnabled=false
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.symbolState.regimeState.previousRegime).toBe(MarketRegime.SIDEWAY_SCALPER); // sanity: same fixture, same regime
+    expect(result.symbolState.openPosition).toBeNull();
+    expect(result.event).toBeNull(); // no breakout, bounce disabled -> routeEntry() returns null -> no event at all
   });
 });

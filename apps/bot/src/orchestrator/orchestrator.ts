@@ -345,6 +345,23 @@ export async function processCandle(
       // ADDITIONAL hard filter before entry, not a replacement for the existing soft one).
     }
 
+    // TICKET-047 — mandatory Momentum Gate, BOX_BOUNCE only. Same pattern as the NEUTRAL_TRANSITION
+    // gate above, but no separate "enabled" toggle: entryRouter.ts only ever produces a BOX_BOUNCE
+    // DraftSetup when config.entryRouterConfig.boxBounceEnabled is already true, so reaching this
+    // gate already implies the feature is on.
+    if (draftSetup.setupType === 'BOX_BOUNCE') {
+      const gateScore = await scoreMomentumForSide(draftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
+      // Missing score never defaults to passing (same "an toàn" requirement as NEUTRAL_TRANSITION's gate).
+      const gatePassed = gateScore !== undefined && gateScore >= config.boxBounceGateConfig.boxBounceMomentumGateThreshold;
+      if (!gatePassed) {
+        return {
+          symbolState: { ...state, regimeState },
+          accountBalance: input.accountBalance,
+          event: { type: 'SKIPPED', symbol: input.symbol, timestamp: currentCandle.timestamp, reason: 'BOX_BOUNCE_GATE_REJECTED' },
+        };
+      }
+    }
+
     // Account blown (balance <= 0): no new positions can be sized. Not a NOT_IMPLEMENTED-style
     // error — a real, expected end state for a backtest/live account, so it's just "no entry"
     // rather than an exception (PositionSizingInput itself throws on accountBalance <= 0).
@@ -388,16 +405,18 @@ export async function processCandle(
       };
     }
 
-    // scenario is always TREND — entryRouter has no COUNTER_TREND path (OB/FVG/Sweep are all
-    // direction-aligned with adxDirection1h; box breakout isn't a reversal play either).
+    // TICKET-047: BOX_BOUNCE is the only COUNTER_TREND path entryRouter.ts produces — single TP at
+    // the box midpoint (draftSetup.tpTarget), no tiers/Runner (Mục 7). Every other setupType
+    // (OB/FVG/Sweep/BOX_BREAKOUT) stays TREND, direction-aligned with adxDirection1h as before.
     const openInput: SlTpManagerInput = {
-      scenario: 'TREND',
+      scenario: draftSetup.setupType === 'BOX_BOUNCE' ? 'COUNTER_TREND' : 'TREND',
       entryPrice: draftSetup.entryPrice,
       slPrice: draftSetup.slPrice,
       side: draftSetup.side,
       tpPlan: config.tpPlan,
       positionSize: sizingOutput.positionSize,
       takerFeeRate: config.takerFeeRate,
+      counterTrendTpPriceOverride: draftSetup.tpTarget,
     };
     const newPosition = openPosition(openInput);
 
