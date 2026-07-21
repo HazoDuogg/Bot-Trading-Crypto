@@ -53,6 +53,7 @@ function parseArgs(): {
   momentumFilterEnabled: boolean;
   neutralTransitionEnabled: boolean;
   riskPoolMaxPct: number;
+  neutralGateThreshold: number;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -63,6 +64,7 @@ function parseArgs(): {
   const momentumArg = args.find((a) => a.startsWith('--momentum-filter='));
   const neutralArg = args.find((a) => a.startsWith('--neutral-transition-enabled='));
   const riskPoolArg = args.find((a) => a.startsWith('--risk-pool-max-pct='));
+  const neutralGateArg = args.find((a) => a.startsWith('--neutral-gate-threshold='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -76,6 +78,8 @@ function parseArgs(): {
     // TICKET-037: takes a plain percentage number (e.g. 10, 15), not a fraction — divided by 100
     // below. Defaults to 10 unchanged (matches risk/riskPool.ts's DEFAULT_RISK_POOL_CONFIG) when omitted.
     riskPoolMaxPct: (riskPoolArg ? Number(riskPoolArg.split('=')[1]) : 10) / 100,
+    // TICKET-039: defaults to 0.55 unchanged (matches DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG) when omitted.
+    neutralGateThreshold: neutralGateArg ? Number(neutralGateArg.split('=')[1]) : 0.55,
   };
 }
 
@@ -215,9 +219,10 @@ async function main(): Promise<void> {
     momentumFilterEnabled,
     neutralTransitionEnabled,
     riskPoolMaxPct,
+    neutralGateThreshold,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -234,7 +239,11 @@ async function main(): Promise<void> {
     riskPoolMaxPct, // TICKET-037: CLI-overridable A/B testing — default (10 -> 0.1) unchanged from before this ticket.
     isLowConfidenceOrLowLiquidity: false,
     momentumFilterConfig: { ...DEFAULT_MOMENTUM_FILTER_CONFIG, momentumFilterEnabled },
-    neutralTransitionGateConfig: { ...DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, neutralTransitionTradingEnabled: neutralTransitionEnabled },
+    neutralTransitionGateConfig: {
+      ...DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG,
+      neutralTransitionTradingEnabled: neutralTransitionEnabled,
+      neutralTransitionMomentumGateThreshold: neutralGateThreshold, // TICKET-039: CLI-overridable A/B testing — default (0.55) unchanged from before this ticket.
+    },
   };
 
   let accountBalance = START_BALANCE;
