@@ -21,7 +21,7 @@ import type { EntryStyleForNeutral, FunnelEvent } from '../dist/entry/types.js';
 import { DEFAULT_BOX_BOUNCE_GATE_CONFIG, DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG } from '../dist/xgbFilter/config.js';
 import type { OpenPositionRisk } from '../dist/risk/riskPool.js';
 import type { TpPlan } from '../dist/risk/slTpManager.js';
-import { emptyFunnelStats, funnelReportMarkdown, STATE_PASS_REGIMES, type RegimeFunnelStats } from './entryFunnelReport.js';
+import { emptyFunnelStats, funnelReportMarkdown, percentile, STATE_PASS_REGIMES, type RegimeFunnelStats } from './entryFunnelReport.js';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
 const OHLCV_DIR = path.resolve(process.cwd(), 'data/ohlcv');
@@ -285,6 +285,8 @@ async function main(): Promise<void> {
   let boxBounceGateRejectedCount = 0;
   const manipulatedLogLines: string[] = []; // TICKET-027
   const dangerZoneLogLines: string[] = []; // TICKET-033
+  const boxBounceGateScores: number[] = []; // TICKET-048 — only defined scores
+  let boxBounceGateScoreUndefinedCount = 0; // TICKET-048 — score couldn't be computed (insufficient EMA/ATR history)
 
   // TICKET-042 — Entry Funnel Analytics accumulators. Pure counting, derived from data
   // processCandle() already produces (regimeState + OrchestratorEvent + the optional
@@ -374,6 +376,11 @@ async function main(): Promise<void> {
         (d) => manipulatedLogLines.push(formatManipulatedDiagnostic(d)),
         (d) => dangerZoneLogLines.push(formatDangerZoneDiagnostic(d)),
         (_symbol, _timestamp, event) => funnelEventsThisStep.push(event),
+        (d) => {
+          // TICKET-048 — diagnostic only, does not affect anything else in this loop.
+          if (d.gateScore === undefined) boxBounceGateScoreUndefinedCount++;
+          else boxBounceGateScores.push(d.gateScore);
+        },
       );
       sd.state = result.symbolState;
       accountBalance = result.accountBalance;
@@ -438,6 +445,44 @@ async function main(): Promise<void> {
   const entryFunnelReportPath = path.resolve(process.cwd(), 'data/entry-funnel-report.md');
   writeFileSync(entryFunnelReportPath, funnelReportMarkdown(totalStepsEvaluated, stateCounts, funnelStats, neutralGateRejectedCount, entryStyleForNeutral));
   console.log(`→ ${entryFunnelReportPath}`);
+
+  // TICKET-048 — công cụ quan sát riêng: phân phối điểm Momentum của mọi tín hiệu BOX_BOUNCE đã đi
+  // qua cổng (không đổi ngưỡng/logic quyết định, chỉ ghi lại điểm số đã tính sẵn).
+  const boxBounceGateScoresReportPath = path.resolve(process.cwd(), 'data/box-bounce-gate-scores-report.md');
+  {
+    const sorted = [...boxBounceGateScores].sort((a, b) => a - b);
+    const n = sorted.length;
+    const near = sorted.filter((s) => s >= 0.45 && s <= 0.55).length;
+    const low = sorted.filter((s) => s < 0.3).length;
+    const rows =
+      n > 0
+        ? [
+            `| min | ${sorted[0].toFixed(4)} |`,
+            `| p25 | ${percentile(sorted, 25).toFixed(4)} |`,
+            `| p50 (median) | ${percentile(sorted, 50).toFixed(4)} |`,
+            `| p75 | ${percentile(sorted, 75).toFixed(4)} |`,
+            `| max | ${sorted[n - 1].toFixed(4)} |`,
+            `| Số tín hiệu có điểm trong khoảng 0.45-0.55 (sát ngưỡng) | ${near} |`,
+            `| Số tín hiệu có điểm dưới 0.3 | ${low} |`,
+          ]
+        : [`| (không có tín hiệu BOX_BOUNCE nào được đánh giá qua cổng) | — |`];
+    const boxBounceGateScoresReport = [
+      '# BOX_BOUNCE Momentum Gate — phân phối điểm số (TICKET-048)',
+      '',
+      'Công cụ quan sát — không đổi ngưỡng/logic quyết định. Số liệu nguyên văn, không tự kết luận.',
+      '',
+      `- Tổng số tín hiệu BOX_BOUNCE được đánh giá qua cổng: ${n + boxBounceGateScoreUndefinedCount}`,
+      `- Trong đó tính được điểm: ${n}, không tính được điểm (thiếu lịch sử EMA/ATR, luôn bị từ chối): ${boxBounceGateScoreUndefinedCount}`,
+      `- Ngưỡng hiện tại: ${config.boxBounceGateConfig.boxBounceMomentumGateThreshold}`,
+      '',
+      '| Thống kê | Giá trị |',
+      '|---|---|',
+      ...rows,
+      '',
+    ].join('\n');
+    writeFileSync(boxBounceGateScoresReportPath, boxBounceGateScoresReport);
+    console.log(`→ ${boxBounceGateScoresReportPath}`);
+  }
 
   // TICKET-030: CORRELATED_RISK has no CLI on/off flag (unconditionally wired in, same pattern as
   // MANIPULATED/LOW_LIQUIDITY) — "-correlated" appended so this run's report/trades never overwrite

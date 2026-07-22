@@ -107,6 +107,20 @@ export interface DangerZoneDiagnostic {
   volumeZScore5m: number;
 }
 
+/**
+ * TICKET-048 — diagnostic-only payload for EVERY BOX_BOUNCE Momentum Gate evaluation (not just
+ * confirmations like ManipulatedDiagnostic/DangerZoneDiagnostic above — every candidate that reaches
+ * the gate, pass or reject). Not part of normal orchestrator output, only built and delivered when
+ * the caller passes onBoxBounceGateScore to processCandle. gateScore undefined = the score couldn't
+ * be computed (insufficient EMA/ATR history) — same "always rejects" case the gate itself already handles.
+ */
+export interface BoxBounceGateScoreDiagnostic {
+  symbol: string;
+  timestamp: number;
+  side: 'LONG' | 'SHORT';
+  gateScore: number | undefined;
+}
+
 function touchesFavorable(side: 'LONG' | 'SHORT', candle: CandleData, price: number): boolean {
   return side === 'LONG' ? isTpHit(side, candle.high, price) : isTpHit(side, candle.low, price);
 }
@@ -239,6 +253,9 @@ export async function processCandle(
   // TICKET-042: pure pass-through to entryRouter.ts's routeEntry() — pure observability, never
   // read here, never affects any decision in this function.
   onFunnelEvent?: FunnelCallback,
+  // TICKET-048: diagnostic-only, fired right after gateScore is computed for BOX_BOUNCE, BEFORE the
+  // pass/fail comparison below — never read here, never affects the gate's decision.
+  onBoxBounceGateScore?: (diagnostic: BoxBounceGateScoreDiagnostic) => void,
 ): Promise<ProcessCandleResult> {
   // Step 1 — regime, always runs.
   const regimeOutput = detectRegime({
@@ -351,6 +368,9 @@ export async function processCandle(
     // gate already implies the feature is on.
     if (draftSetup.setupType === 'BOX_BOUNCE') {
       const gateScore = await scoreMomentumForSide(draftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
+      // TICKET-048 — diagnostic-only, fired BEFORE the pass/fail comparison below, on EVERY
+      // evaluation (not just rejections) — never read here, never affects gatePassed.
+      onBoxBounceGateScore?.({ symbol: input.symbol, timestamp: currentCandle.timestamp, side: draftSetup.side, gateScore });
       // Missing score never defaults to passing (same "an toàn" requirement as NEUTRAL_TRANSITION's gate).
       const gatePassed = gateScore !== undefined && gateScore >= config.boxBounceGateConfig.boxBounceMomentumGateThreshold;
       if (!gatePassed) {
