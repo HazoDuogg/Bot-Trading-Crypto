@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { processCandle, type ProcessCandleInput } from './orchestrator.js';
+import { processCandle, selectTpPlan, type ProcessCandleInput } from './orchestrator.js';
 import { INITIAL_SYMBOL_STATE, type OrchestratorConfig, type SymbolState } from './types.js';
 import { MarketRegime, type CandleData } from '../regime/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../entry/entryRouter.js';
 import {
   DEFAULT_MOMENTUM_FILTER_CONFIG,
   DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG,
+  DEFAULT_PLAN_AUTO_SELECTION_CONFIG,
   MOMENTUM_BEARISH_MODEL_PATH,
   MOMENTUM_BEARISH_SCHEMA_PATH,
   MOMENTUM_MODEL_PATH,
@@ -70,6 +71,7 @@ const baseConfig: OrchestratorConfig = {
   isLowConfidenceOrLowLiquidity: false,
   momentumFilterConfig: DEFAULT_MOMENTUM_FILTER_CONFIG,
   neutralTransitionGateConfig: DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG,
+  planAutoSelectionConfig: DEFAULT_PLAN_AUTO_SELECTION_CONFIG,
 };
 
 const trendLongInput: SlTpManagerInput = {
@@ -572,6 +574,141 @@ describe('processCandle — NEUTRAL_TRANSITION Momentum Gate (TICKET-036)', () =
     expect(result.symbolState.openPosition).toBeNull();
     expect(result.event).toBeNull(); // NOT a SKIPPED event — NEUTRAL_TRANSITION genuinely never entered before this ticket
     expect(result.accountBalance).toBe(400);
+  });
+});
+
+// TICKET-052 — AI-driven Plan A/B selection, TREND scenario only. Real ONNX model throughout, same
+// threshold-trick style as the NEUTRAL_TRANSITION gate tests above (threshold=0 always clears since
+// the real score is always >= 0; threshold=1.01 never clears since the real score is always <= 1).
+describe('processCandle — AI-driven Plan A/B selection (TICKET-052)', () => {
+  // Same OB+MSS LONG pattern as fullOpenFlowFixture() above, plus a 250-candle candles1hMomentum
+  // window (EMA_1H_SLOW_PERIOD(200) needs it) so scoreMomentumForSide() can actually produce a score —
+  // same technique as fullOpenFlowFixtureShort() in the momentum-filter describe block above.
+  function fullOpenFlowFixtureWithMomentum() {
+    const fullCandles1h = makeCandles(250, 3_600_000, (i) => 100 + i * 0.5, () => 1);
+    const candles1h = fullCandles1h.slice(-40);
+
+    const fillerCount = 310;
+    const filler5m = makeCandles(fillerCount, 300_000, () => 100, () => 0.5);
+    const obPattern5m: CandleData[] = [
+      c(99, 99, 100, 98),
+      c(100.5, 100.5, 102, 99),
+      c(103, 103, 105, 101), // swing high (105)
+      c(101, 101, 102, 100),
+      c(99, 99, 100, 98),
+      c(101, 99, 101, 99), // OB candidate (down), zone [99, 101]
+      c(99, 102, 102.5, 99),
+      c(102, 106, 106, 101.5), // BOS confirmed, close 106 > 105
+    ];
+    const lastFillerTs = filler5m[filler5m.length - 1].timestamp;
+    const obPatternWithTs = obPattern5m.map((candle, i) => ({ ...candle, timestamp: lastFillerTs + (i + 1) * 300_000 }));
+    const candles5m = [...filler5m, ...obPatternWithTs];
+    const obCandleIndex = fillerCount + 5;
+
+    const candles15m = makeCandles(325, 900_000, () => 100, () => 1);
+
+    const mssStartTs = candles5m[obCandleIndex].timestamp;
+    const mssPattern1m: CandleData[] = [
+      c(99.5, 99.5, 100, 99),
+      c(99.25, 99.25, 100, 98.5),
+      c(97.5, 97.5, 99.5, 96), // swing low (96)
+      c(99.25, 99.25, 100, 98.5),
+      c(99.5, 99.5, 100, 99),
+      c(100.5, 100.5, 102, 99), // swing high BETWEEN the two lows (102)
+      c(99.25, 99.25, 100, 98.5),
+      c(99.5, 99.5, 100, 99),
+      c(98.75, 98.75, 99.5, 98), // higher-low vs the first low
+      c(99.25, 99.25, 100, 98.5),
+      c(99.5, 99.5, 100, 99),
+      c(102.5, 103, 103.2, 102.3), // MSS confirmed here, close = 103
+    ].map((candle, i) => ({ ...candle, timestamp: mssStartTs + i * 60_000 }));
+
+    return { candles5m, candles15m, candles1h, candles1m: mssPattern1m, candles1hMomentum: fullCandles1h };
+  }
+
+  it('planAutoSelectionEnabled=false: OPEN event uses config.tpPlan unchanged, exactly like before this ticket', async () => {
+    const fixture = fullOpenFlowFixtureWithMomentum();
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, baseConfig); // baseConfig.tpPlan = 'PLAN_A', planAutoSelectionConfig disabled
+
+    expect(result.event).toMatchObject({ type: 'OPEN', side: 'LONG', tpPlan: 'PLAN_A' });
+    expect(result.symbolState.openPosition?.tpPlan).toBe('PLAN_A');
+  });
+
+  it('enabled + momentum score clears the threshold: selects PLAN_B for that entry', async () => {
+    const fixture = fullOpenFlowFixtureWithMomentum();
+    const config: OrchestratorConfig = {
+      ...baseConfig,
+      planAutoSelectionConfig: { planAutoSelectionEnabled: true, planAutoSelectionMomentumThreshold: 0 }, // always clears — real score is always >= 0
+    };
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.event).toMatchObject({ type: 'OPEN', side: 'LONG', tpPlan: 'PLAN_B' });
+    expect(result.symbolState.openPosition?.tpPlan).toBe('PLAN_B');
+  });
+
+  it('enabled + momentum score below threshold: falls back to config.tpPlan (PLAN_A), not PLAN_B', async () => {
+    const fixture = fullOpenFlowFixtureWithMomentum();
+    const config: OrchestratorConfig = {
+      ...baseConfig,
+      planAutoSelectionConfig: { planAutoSelectionEnabled: true, planAutoSelectionMomentumThreshold: 1.01 }, // impossible to clear — real score is always <= 1
+    };
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.event).toMatchObject({ type: 'OPEN', side: 'LONG', tpPlan: 'PLAN_A' });
+    expect(result.symbolState.openPosition?.tpPlan).toBe('PLAN_A');
+  });
+
+  it('enabled + momentum score cannot be computed (insufficient history): falls back to config.tpPlan, never defaults to PLAN_B', async () => {
+    const fixture = fullOpenFlowFixtureWithMomentum();
+    const { candles1hMomentum: _tooShort, ...fixtureWithoutMomentumWindow } = fixture;
+    const config: OrchestratorConfig = {
+      ...baseConfig,
+      planAutoSelectionConfig: { planAutoSelectionEnabled: true, planAutoSelectionMomentumThreshold: 0 }, // even the most lenient threshold must still fall back
+    };
+
+    const result = await processCandle(baseInput(fixtureWithoutMomentumWindow), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.event).toMatchObject({ type: 'OPEN', side: 'LONG', tpPlan: 'PLAN_A' });
+  });
+
+  describe('selectTpPlan() — pure function unit tests', () => {
+    it('returns defaultPlan unchanged when planAutoSelectionEnabled is false, regardless of score', () => {
+      expect(selectTpPlan('PLAN_A', 0.99, { planAutoSelectionEnabled: false, planAutoSelectionMomentumThreshold: 0.7 })).toBe('PLAN_A');
+    });
+
+    it('returns PLAN_B when enabled and score clears the threshold', () => {
+      expect(selectTpPlan('PLAN_A', 0.7, { planAutoSelectionEnabled: true, planAutoSelectionMomentumThreshold: 0.7 })).toBe('PLAN_B');
+    });
+
+    it('returns defaultPlan when enabled but score is below the threshold', () => {
+      expect(selectTpPlan('PLAN_A', 0.69, { planAutoSelectionEnabled: true, planAutoSelectionMomentumThreshold: 0.7 })).toBe('PLAN_A');
+    });
+
+    it('returns defaultPlan when enabled but score is undefined (never defaults to PLAN_B on missing data)', () => {
+      expect(selectTpPlan('PLAN_A', undefined, { planAutoSelectionEnabled: true, planAutoSelectionMomentumThreshold: 0.7 })).toBe('PLAN_A');
+    });
+  });
+
+  // Regression guard: selectTpPlan() is only ever called from the one TREND-only openInput
+  // construction site in orchestrator.ts — COUNTER_TREND's computeTpLevels() ignores tpPlan
+  // entirely regardless of value, so even a hypothetical future misuse can't affect it.
+  it('COUNTER_TREND ignores tpPlan entirely — PLAN_A vs PLAN_B produce identical tpLevels', () => {
+    const counterTrendInput = (tpPlan: 'PLAN_A' | 'PLAN_B'): SlTpManagerInput => ({
+      scenario: 'COUNTER_TREND',
+      entryPrice: 100,
+      slPrice: 99,
+      side: 'LONG',
+      tpPlan,
+      positionSize: 990,
+      takerFeeRate: 0.0004,
+    });
+
+    const positionA = openPosition(counterTrendInput('PLAN_A'));
+    const positionB = openPosition(counterTrendInput('PLAN_B'));
+
+    expect(positionA.tpLevels).toEqual(positionB.tpLevels);
   });
 });
 

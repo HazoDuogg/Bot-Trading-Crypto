@@ -46,7 +46,7 @@ import { INITIAL_SYMBOL_STATE, type ExitReason, type OrchestratorConfig, type Sy
 import { DEFAULT_ENTRY_ROUTER_CONFIG, routeEntry } from '../dist/entry/entryRouter.js';
 import { EntryConfig } from '../dist/entry/config.js';
 import type { EntryRouterConfig, FunnelEvent } from '../dist/entry/types.js';
-import { DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG } from '../dist/xgbFilter/config.js';
+import { DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, DEFAULT_PLAN_AUTO_SELECTION_CONFIG } from '../dist/xgbFilter/config.js';
 import type { OpenPositionRisk } from '../dist/risk/riskPool.js';
 import { computeRealizedPnl, openPosition, type ManagedPositionState, type SlTpManagerInput } from '../dist/risk/slTpManager.js';
 
@@ -220,6 +220,7 @@ async function main(): Promise<void> {
     isLowConfidenceOrLowLiquidity: false,
     momentumFilterConfig: { ...DEFAULT_MOMENTUM_FILTER_CONFIG, momentumFilterEnabled: true },
     neutralTransitionGateConfig: { ...DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, neutralTransitionTradingEnabled: true, neutralTransitionMomentumGateThreshold: 0.5 },
+    planAutoSelectionConfig: DEFAULT_PLAN_AUTO_SELECTION_CONFIG,
   };
 
   let accountBalance = START_BALANCE;

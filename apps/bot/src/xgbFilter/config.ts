@@ -46,6 +46,24 @@ export const DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG: NeutralTransitionGateConfig
   neutralTransitionMomentumGateThreshold: 0.55,
 };
 
+/**
+ * TICKET-052. AI-driven Plan A/B selection — TREND scenario only (Plan A/B has no meaning for
+ * COUNTER_TREND's single-exit Mục 7 design). Reuses scoreMomentumForSide() (TICKET-024/036), no new
+ * model/formula: a highly-confident entry uses PLAN_B (Runner-favoring, deeper), everything else
+ * (including an undetermined score) keeps whatever tpPlan the caller already chose.
+ */
+export interface PlanAutoSelectionConfig {
+  /** Off by default — baseline behavior (every entry uses the CLI-chosen tpPlan) unchanged unless a caller (backtest.ts CLI) opts in. */
+  planAutoSelectionEnabled: boolean;
+  /** TODO_CONFIRM: PM suggested 0.7. Momentum score (own-side model) must be >= this to pick PLAN_B; missing/undetermined score always falls back to the default tpPlan, never defaults to PLAN_B. */
+  planAutoSelectionMomentumThreshold: number;
+}
+
+export const DEFAULT_PLAN_AUTO_SELECTION_CONFIG: PlanAutoSelectionConfig = {
+  planAutoSelectionEnabled: false,
+  planAutoSelectionMomentumThreshold: 0.7,
+};
+
 // TICKET-023 model artifacts, read at runtime (path only — never hard-code feature order/categories,
 // those are always read fresh from the schema JSON by featureBuilder.ts).
 //

@@ -18,7 +18,7 @@ import { processCandle, type DangerZoneDiagnostic, type ManipulatedDiagnostic, t
 import { INITIAL_SYMBOL_STATE, type CloseTradeEvent, type OrchestratorConfig, type SymbolState } from '../dist/orchestrator/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import type { EntryStyleForNeutral, FunnelEvent } from '../dist/entry/types.js';
-import { DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG } from '../dist/xgbFilter/config.js';
+import { DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, DEFAULT_PLAN_AUTO_SELECTION_CONFIG } from '../dist/xgbFilter/config.js';
 import type { OpenPositionRisk } from '../dist/risk/riskPool.js';
 import type { TpPlan } from '../dist/risk/slTpManager.js';
 import { emptyFunnelStats, funnelReportMarkdown, STATE_PASS_REGIMES, type RegimeFunnelStats } from './entryFunnelReport.js';
@@ -57,6 +57,8 @@ function parseArgs(): {
   neutralGateThreshold: number;
   mssStalenessTolerance: number;
   obBosLookback: number;
+  planAutoSelectionEnabled: boolean;
+  planAutoSelectionThreshold: number;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -70,6 +72,8 @@ function parseArgs(): {
   const neutralGateArg = args.find((a) => a.startsWith('--neutral-gate-threshold='));
   const mssStalenessArg = args.find((a) => a.startsWith('--mss-staleness-tolerance='));
   const obBosLookbackArg = args.find((a) => a.startsWith('--ob-bos-lookback='));
+  const planAutoSelectionArg = args.find((a) => a.startsWith('--plan-auto-selection-enabled='));
+  const planAutoSelectionThresholdArg = args.find((a) => a.startsWith('--plan-auto-selection-threshold='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -89,16 +93,21 @@ function parseArgs(): {
     mssStalenessTolerance: mssStalenessArg ? Number(mssStalenessArg.split('=')[1]) : 5,
     // TICKET-041: defaults to 10 unchanged (matches EntryConfig.OB_BOS_LOOKFORWARD_K) when omitted.
     obBosLookback: obBosLookbackArg ? Number(obBosLookbackArg.split('=')[1]) : 10,
+    // TICKET-052: off by default — matches DEFAULT_PLAN_AUTO_SELECTION_CONFIG.
+    planAutoSelectionEnabled: planAutoSelectionArg ? planAutoSelectionArg.split('=')[1] === 'true' : false,
+    // TICKET-052: defaults to 0.7 unchanged (matches DEFAULT_PLAN_AUTO_SELECTION_CONFIG, TODO_CONFIRM) when omitted.
+    planAutoSelectionThreshold: planAutoSelectionThresholdArg ? Number(planAutoSelectionThresholdArg.split('=')[1]) : 0.7,
   };
 }
 
-/** TICKET-017/018/024/036 Phần C: output filenames auto-derived from which filters are active, so the A/B combinations never overwrite each other. */
+/** TICKET-017/018/024/036/052 Phần C: output filenames auto-derived from which filters are active, so the A/B combinations never overwrite each other. */
 function outputSuffix(
   macroTrendFilterEnabled: boolean,
   obDisabledSymbols: string[],
   macroTrendFilterAppliesToBoxBreakout: boolean,
   momentumFilterEnabled: boolean,
   neutralTransitionEnabled: boolean,
+  planAutoSelectionEnabled: boolean,
 ): string {
   const macro = macroTrendFilterEnabled;
   const ob = obDisabledSymbols.length > 0;
@@ -110,6 +119,7 @@ function outputSuffix(
   if (macroTrendFilterAppliesToBoxBreakout) base += '-with-boxfilter';
   if (momentumFilterEnabled) base += '-momentum';
   if (neutralTransitionEnabled) base += '-neutral';
+  if (planAutoSelectionEnabled) base += '-planauto';
   return base;
 }
 
@@ -231,9 +241,11 @@ async function main(): Promise<void> {
     neutralGateThreshold,
     mssStalenessTolerance,
     obBosLookback,
+    planAutoSelectionEnabled,
+    planAutoSelectionThreshold,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -262,6 +274,11 @@ async function main(): Promise<void> {
       ...DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG,
       neutralTransitionTradingEnabled: neutralTransitionEnabled,
       neutralTransitionMomentumGateThreshold: neutralGateThreshold, // TICKET-039: CLI-overridable A/B testing — default (0.55) unchanged from before this ticket.
+    },
+    planAutoSelectionConfig: {
+      ...DEFAULT_PLAN_AUTO_SELECTION_CONFIG,
+      planAutoSelectionEnabled, // TICKET-052: CLI-overridable A/B testing — default (false) unchanged from before this ticket.
+      planAutoSelectionMomentumThreshold: planAutoSelectionThreshold, // TICKET-052: TODO_CONFIRM, default 0.7 unchanged unless CLI overrides.
     },
   };
 
@@ -429,7 +446,7 @@ async function main(): Promise<void> {
   // TICKET-030: CORRELATED_RISK has no CLI on/off flag (unconditionally wired in, same pattern as
   // MANIPULATED/LOW_LIQUIDITY) — "-correlated" appended so this run's report/trades never overwrite
   // the pre-TICKET-030 both-momentum files (PM explicitly wants the $468.49 baseline preserved for comparison).
-  const suffix = outputSuffix(macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled, neutralTransitionEnabled) + '-correlated';
+  const suffix = outputSuffix(macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled, neutralTransitionEnabled, planAutoSelectionEnabled) + '-correlated';
   const tradesPath = path.resolve(process.cwd(), `data/backtest-trades-${suffix}.csv`);
   writeFileSync(tradesPath, tradesCsv(trades));
   console.log(`→ ${tradesPath}`);
@@ -448,6 +465,7 @@ async function main(): Promise<void> {
     `- Tổng số lệnh đóng: ${totalTrades}`,
     `- Winrate: ${winrate.toFixed(1)}%`,
     `- Tổng PNL: ${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)} USD`,
+    `- PNL trung bình/lệnh: ${totalTrades > 0 ? (totalPnl / totalTrades >= 0 ? '+' : '') + (totalPnl / totalTrades).toFixed(2) : '0.00'} USD (TICKET-052)`,
     `- Số lệnh bị bỏ qua vì risk pool đầy: ${riskPoolSkippedCount}`,
     `- Số lệnh bị Momentum Gate từ chối (NEUTRAL_TRANSITION, TICKET-036): ${neutralGateRejectedCount}`,
     '',
@@ -474,6 +492,7 @@ async function main(): Promise<void> {
     `- riskPoolMaxPct: ${(riskPoolMaxPct * 100).toFixed(0)}% (TICKET-037, CLI-overridable, default 10%)`,
     `- mssStalenessToleranceCandles: ${config.entryRouterConfig.mssStalenessToleranceCandles} (TICKET-040, CLI-overridable, default 5)`,
     `- obBosLookforwardK: ${config.entryRouterConfig.obBosLookforwardK} (TICKET-041, CLI-overridable, default 10)`,
+    `- planAutoSelectionEnabled: ${planAutoSelectionEnabled} (TICKET-052, AI-driven Plan A/B selection, TREND only, threshold=${config.planAutoSelectionConfig.planAutoSelectionMomentumThreshold})`,
     `- Runner trailing: ATR (2.5×ATR), không dùng Structure trailing`,
     `- takerFeeRate: 0.0004 (TODO_CONFIRM — Trader chưa cung cấp số thật)`,
     `- Quy tắc SL/TP cùng nến: SL chạm trước`,

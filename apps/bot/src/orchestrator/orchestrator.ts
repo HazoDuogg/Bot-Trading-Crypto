@@ -14,7 +14,7 @@ import type { FunnelCallback } from '../entry/types.js';
 import { buildFeatureVector, computeMomentumCrossFeatures, loadFeatureSchema, type FeatureSchema } from '../xgbFilter/featureBuilder.js';
 import { scoreMomentum } from '../xgbFilter/momentumScorer.js';
 import { computeMomentumMultiplier } from '../xgbFilter/momentumMultiplier.js';
-import { MOMENTUM_MODEL_PATH, MOMENTUM_SCHEMA_PATH, MOMENTUM_BEARISH_MODEL_PATH, MOMENTUM_BEARISH_SCHEMA_PATH } from '../xgbFilter/config.js';
+import { MOMENTUM_MODEL_PATH, MOMENTUM_SCHEMA_PATH, MOMENTUM_BEARISH_MODEL_PATH, MOMENTUM_BEARISH_SCHEMA_PATH, type PlanAutoSelectionConfig } from '../xgbFilter/config.js';
 import { DynamicRMarginSizer } from '../risk/dynamicRMarginSizer.js';
 import { wouldExceedRiskPool, type OpenPositionRisk } from '../risk/riskPool.js';
 import {
@@ -30,6 +30,7 @@ import {
   updateGivebackProtection,
   type ManagedPositionState,
   type SlTpManagerInput,
+  type TpPlan,
 } from '../risk/slTpManager.js';
 import type { CloseTradeEvent, ExitReason, OpenTradeEvent, OrchestratorConfig, OrchestratorEvent, SymbolState } from './types.js';
 
@@ -230,6 +231,22 @@ async function scoreMomentumForSide(
   return scoreMomentum(modelPath, featureVector);
 }
 
+/**
+ * TICKET-052 — AI-driven Plan A/B selection. Pure function, no formula changes to computeTpLevels()
+ * itself: a highly-confident entry (own-side momentum score >= threshold) uses PLAN_B, everything
+ * else — including an undetermined score (insufficient EMA/ATR history), same "an toàn" requirement
+ * as every other gate in this file — falls back to whatever tpPlan the caller already chose.
+ * Off by default: config.planAutoSelectionEnabled=false always returns defaultPlan unchanged.
+ * TREND scenario only by construction: only ever called from the one place that builds a TREND
+ * SlTpManagerInput (entryRouter.ts has had no COUNTER_TREND path since TICKET-051 removed BOX_BOUNCE
+ * — Plan A/B has no meaning for COUNTER_TREND's single-exit Mục 7 design regardless).
+ */
+export function selectTpPlan(defaultPlan: TpPlan, momentumScore: number | undefined, config: PlanAutoSelectionConfig): TpPlan {
+  if (!config.planAutoSelectionEnabled) return defaultPlan;
+  if (momentumScore !== undefined && momentumScore >= config.planAutoSelectionMomentumThreshold) return 'PLAN_B';
+  return defaultPlan;
+}
+
 export async function processCandle(
   input: ProcessCandleInput,
   state: SymbolState,
@@ -358,16 +375,22 @@ export async function processCandle(
     // Off by default: momentumMultiplier stays 1.0 and combinedRiskMultiplier === draftSetup.riskMultiplier
     // (itself always 1.0 for every regime that currently reaches this point), so behavior is
     // byte-for-byte unchanged from before this ticket unless momentumFilterConfig.momentumFilterEnabled.
-    let momentumMultiplier = 1.0;
-    if (config.momentumFilterConfig.momentumFilterEnabled) {
+    //
+    // TICKET-052: TREND-scenario Plan A/B selection (below, right before openInput) also needs this
+    // exact same own-side momentum score — computed ONCE here and reused, never re-scored twice for
+    // two purposes. Score is fetched whenever EITHER feature needs it, independent of each other
+    // (either can be on while the other stays off).
+    let momentumScore: number | undefined;
+    if (config.momentumFilterConfig.momentumFilterEnabled || config.planAutoSelectionConfig.planAutoSelectionEnabled) {
       // TICKET-036: reuses the same scoreMomentumForSide() helper the Gate above calls — no
       // re-derivation of the LONG/SHORT model split or feature vector construction.
-      const p = await scoreMomentumForSide(draftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
-      if (p !== undefined) {
-        momentumMultiplier = computeMomentumMultiplier(p, config.momentumFilterConfig);
-      }
-      // p undefined (insufficient EMA/ATR history) -> momentumMultiplier stays 1.0, same as disabled.
+      momentumScore = await scoreMomentumForSide(draftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
     }
+    let momentumMultiplier = 1.0;
+    if (config.momentumFilterConfig.momentumFilterEnabled && momentumScore !== undefined) {
+      momentumMultiplier = computeMomentumMultiplier(momentumScore, config.momentumFilterConfig);
+    }
+    // momentumScore undefined (insufficient EMA/ATR history) -> momentumMultiplier stays 1.0, same as disabled.
     const combinedRiskMultiplier = draftSetup.riskMultiplier * momentumMultiplier;
 
     const slDistancePercent = Math.abs(draftSetup.entryPrice - draftSetup.slPrice) / draftSetup.entryPrice;
@@ -388,6 +411,10 @@ export async function processCandle(
       };
     }
 
+    // TICKET-052: AI-driven Plan A/B selection — TREND scenario only, reuses momentumScore already
+    // computed above (never re-scored). Off by default: returns config.tpPlan unchanged.
+    const selectedTpPlan = selectTpPlan(config.tpPlan, momentumScore, config.planAutoSelectionConfig);
+
     // scenario is always TREND — entryRouter has no COUNTER_TREND path (OB/FVG/Sweep are all
     // direction-aligned with adxDirection1h; box breakout isn't a reversal play either).
     const openInput: SlTpManagerInput = {
@@ -395,7 +422,7 @@ export async function processCandle(
       entryPrice: draftSetup.entryPrice,
       slPrice: draftSetup.slPrice,
       side: draftSetup.side,
-      tpPlan: config.tpPlan,
+      tpPlan: selectedTpPlan,
       positionSize: sizingOutput.positionSize,
       takerFeeRate: config.takerFeeRate,
     };
@@ -407,7 +434,7 @@ export async function processCandle(
       side: draftSetup.side,
       regime: draftSetup.regime,
       setupType: draftSetup.setupType,
-      tpPlan: config.tpPlan,
+      tpPlan: selectedTpPlan,
       entryTimestamp: currentCandle.timestamp,
       entryPrice: draftSetup.entryPrice,
       riskMultiplier: combinedRiskMultiplier,

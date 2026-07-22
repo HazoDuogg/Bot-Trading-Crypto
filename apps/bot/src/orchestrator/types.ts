@@ -1,7 +1,7 @@
 import type { MarketRegime } from '../regime/types.js';
 import type { ManagedPositionState, TpPlan } from '../risk/slTpManager.js';
 import type { EntryRouterConfig } from '../entry/types.js';
-import type { MomentumFilterConfig, NeutralTransitionGateConfig } from '../xgbFilter/config.js';
+import type { MomentumFilterConfig, NeutralTransitionGateConfig, PlanAutoSelectionConfig } from '../xgbFilter/config.js';
 
 export interface RegimeHysteresisState {
   previousRegime: MarketRegime | null;
@@ -97,4 +97,6 @@ export interface OrchestratorConfig {
   momentumFilterConfig: MomentumFilterConfig;
   /** TICKET-036: hard Momentum Gate for NEUTRAL_TRANSITION only — backtest-only A/B testing, not wired into live. */
   neutralTransitionGateConfig: NeutralTransitionGateConfig;
+  /** TICKET-052: AI-driven Plan A/B selection, TREND scenario only — backtest-only A/B testing, not wired into live. */
+  planAutoSelectionConfig: PlanAutoSelectionConfig;
 }
