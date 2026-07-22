@@ -649,12 +649,14 @@ describe('routeEntry — Entry Funnel Analytics (TICKET-042)', () => {
     expect(events).toEqual([{ stage: 'BREAKOUT', passed: true }]);
   });
 
-  it('fires BREAKOUT(fail, NO_BREAKOUT_YET) when COMPRESSION is still "armed"', () => {
+  // TICKET-053: 'NO_BREAKOUT_YET' replaced by classifyBoxBreakoutFailReason()'s 3 granular reasons —
+  // only computed when a callback is listening, same opt-in pattern as classifyMssFailReason() (TICKET-043).
+  it('fires BREAKOUT(fail, NO_EDGE_TOUCH) when COMPRESSION is still "armed" (close stays inside the box)', () => {
     const { events, onFunnelEvent } = collect();
     const input = baseInput({
       regime: MarketRegime.COMPRESSION,
       candles15m: box15m,
-      candles5m: [c(103, 105, 106, 102)], // inside the box, no breakout
+      candles5m: [c(103, 105, 106, 102)], // close 105 stays inside [90, 110], no breakout
       bbWidthPercentile15m: 50,
       volumeZScore5m: 1.5,
     });
@@ -662,7 +664,39 @@ describe('routeEntry — Entry Funnel Analytics (TICKET-042)', () => {
     const result = routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG, onFunnelEvent);
 
     expect(result).toBeNull();
-    expect(events).toEqual([{ stage: 'BREAKOUT', passed: false, reason: 'NO_BREAKOUT_YET' }]);
+    expect(events).toEqual([{ stage: 'BREAKOUT', passed: false, reason: 'NO_EDGE_TOUCH' }]);
+  });
+
+  it('fires BREAKOUT(fail, BODY_TOO_SMALL) when close clears the box but the body is mostly wick', () => {
+    const { events, onFunnelEvent } = collect();
+    const input = baseInput({
+      regime: MarketRegime.SIDEWAY_SCALPER,
+      candles15m: box15m,
+      candles5m: [c(110.2, 110.8, 116, 110)], // close 110.8 > 110, but bodyRatio=0.6/6=0.1 < 0.5
+      bbWidthPercentile15m: 50,
+      volumeZScore5m: 1.5,
+    });
+
+    const result = routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG, onFunnelEvent);
+
+    expect(result).toBeNull();
+    expect(events).toEqual([{ stage: 'BREAKOUT', passed: false, reason: 'BODY_TOO_SMALL' }]);
+  });
+
+  it('fires BREAKOUT(fail, VOLUME_NOT_ELEVATED) when close clears the box + body is real but volume is not elevated', () => {
+    const { events, onFunnelEvent } = collect();
+    const input = baseInput({
+      regime: MarketRegime.SIDEWAY_SCALPER,
+      candles15m: box15m,
+      candles5m: [c(111, 115, 116, 110.5)], // close 115 > 110, bodyRatio=4/5.5=0.73 >= 0.5
+      bbWidthPercentile15m: 50,
+      volumeZScore5m: 0.5, // below EntryConfig.BOX_BREAKOUT_MIN_VOLUME_ZSCORE
+    });
+
+    const result = routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG, onFunnelEvent);
+
+    expect(result).toBeNull();
+    expect(events).toEqual([{ stage: 'BREAKOUT', passed: false, reason: 'VOLUME_NOT_ELEVATED' }]);
   });
 
   it('fires BREAKOUT(fail, MACRO_TREND_OPPOSITE) when the box-breakout macro filter blocks (TICKET-018)', () => {

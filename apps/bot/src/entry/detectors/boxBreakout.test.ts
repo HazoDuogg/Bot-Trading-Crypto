@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectBoxBreakout } from './boxBreakout.js';
+import { classifyBoxBreakoutFailReason, detectBoxBreakout } from './boxBreakout.js';
 import type { CandleData } from '../../regime/types.js';
 
 function c(open: number, close: number, high: number, low: number): CandleData {
@@ -47,5 +47,42 @@ describe('detectBoxBreakout', () => {
   it('returns null if there is not enough 15m history for the box lookback', () => {
     const candles5m = [c(111, 115, 116, 110.5)];
     expect(detectBoxBreakout(box15m.slice(0, 3), candles5m, 50, 1.5, config)).toBeNull();
+  });
+});
+
+// TICKET-053 — classifyBoxBreakoutFailReason() is a pure diagnostic that mirrors detectBoxBreakout()'s
+// own box/edge computation; never alters detectBoxBreakout() or any of its thresholds. Reuses the
+// exact same fixtures as the "does NOT confirm" cases above, since each one is a specific fail reason.
+describe('classifyBoxBreakoutFailReason', () => {
+  it('NO_EDGE_TOUCH: close stays inside the box (wick-only poke)', () => {
+    const candles5m = [c(105, 108, 112, 104)]; // high 112 pokes above 110, close 108 stays inside
+    expect(classifyBoxBreakoutFailReason(box15m, candles5m, 50, 1.5, config)).toBe('NO_EDGE_TOUCH');
+  });
+
+  it('NO_EDGE_TOUCH: box invalid because bbWidthPercentile15m is too high', () => {
+    const candles5m = [c(111, 115, 116, 110.5)];
+    expect(classifyBoxBreakoutFailReason(box15m, candles5m, 80, 1.5, config)).toBe('NO_EDGE_TOUCH');
+  });
+
+  it('NO_EDGE_TOUCH: not enough 15m history for the box lookback', () => {
+    const candles5m = [c(111, 115, 116, 110.5)];
+    expect(classifyBoxBreakoutFailReason(box15m.slice(0, 3), candles5m, 50, 1.5, config)).toBe('NO_EDGE_TOUCH');
+  });
+
+  it('BODY_TOO_SMALL: close clears the box, but body is mostly wick', () => {
+    const candles5m = [c(110.2, 110.8, 116, 110)]; // close clears box, but body tiny vs range
+    expect(classifyBoxBreakoutFailReason(box15m, candles5m, 50, 1.5, config)).toBe('BODY_TOO_SMALL');
+  });
+
+  it('VOLUME_NOT_ELEVATED: close clears the box, body is real, but volume is not elevated', () => {
+    const candles5m = [c(111, 115, 116, 110.5)];
+    expect(classifyBoxBreakoutFailReason(box15m, candles5m, 50, 0.5, config)).toBe('VOLUME_NOT_ELEVATED');
+  });
+
+  it('never classifies a fail reason for inputs where detectBoxBreakout() actually confirms', () => {
+    const upCandles5m = [c(111, 115, 116, 110.5)];
+    expect(detectBoxBreakout(box15m, upCandles5m, 50, 1.5, config)).not.toBeNull();
+    // Not asserting a specific value here (the function's contract is "only call when detectBoxBreakout
+    // returned null") — this just documents the precondition, mirroring classifyMssFailReason()'s test suite.
   });
 });

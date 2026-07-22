@@ -7,7 +7,7 @@ import { detectOrderBlock } from './detectors/orderBlock.js';
 import { detectFairValueGap } from './detectors/fairValueGap.js';
 import { detectLiquiditySweep } from './detectors/liquiditySweep.js';
 import { classifyMssFailReason, detectMarketStructureShift } from './detectors/marketStructureShift.js';
-import { detectBoxBreakout } from './detectors/boxBreakout.js';
+import { classifyBoxBreakoutFailReason, detectBoxBreakout } from './detectors/boxBreakout.js';
 
 export const DEFAULT_ENTRY_ROUTER_CONFIG: EntryRouterConfig = {
   // TICKET-036: re-enabled — picks the cascade routeEntry() runs for NEUTRAL_TRANSITION.
@@ -178,7 +178,17 @@ function runBoxBreakoutStyle(input: EntryRouterInput, config: EntryRouterConfig,
   if (!breakout) {
     // TICKET-042: single 'BREAKOUT' stage covers both the detector's 3 conditions and the
     // macro-trend-filter-for-breakout check below — SIDEWAY_STYLE has no separate MACRO stage.
-    onFunnelEvent?.(input.symbol, now, { stage: 'BREAKOUT', passed: false, reason: 'NO_BREAKOUT_YET' });
+    // TICKET-053: granular reason only computed when a callback is listening — classifyBoxBreakoutFailReason()
+    // never called otherwise, same opt-in pattern as classifyMssFailReason() (TICKET-043).
+    if (onFunnelEvent) {
+      const reason = classifyBoxBreakoutFailReason(input.candles15m, input.candles5m, input.bbWidthPercentile15m, input.volumeZScore5m, {
+        boxLookbackM: EntryConfig.BOX_LOOKBACK_M,
+        maxBbwPercentile: EntryConfig.BOX_MAX_BBW_PERCENTILE,
+        minBodyRatio: EntryConfig.BOX_BREAKOUT_MIN_BODY_RATIO,
+        minVolumeZScore: EntryConfig.BOX_BREAKOUT_MIN_VOLUME_ZSCORE,
+      });
+      onFunnelEvent(input.symbol, now, { stage: 'BREAKOUT', passed: false, reason });
+    }
     return null; // SIDEWAY_SCALPER: no breakout yet; COMPRESSION: still "armed"
   }
 

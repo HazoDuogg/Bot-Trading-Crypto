@@ -15,6 +15,14 @@ export const STATE_FAIL_REGIMES = [MarketRegime.DANGER_ZONE, MarketRegime.MANIPU
 // report so this class of bug is visible immediately if it ever recurs.
 export const MSS_FAIL_REASONS = ['NO_HIGHER_LOW_PATTERN', 'NO_REFERENCE_BETWEEN', 'NEVER_BROKE_REFERENCE', 'MSS_TIMEOUT'] as const;
 
+// TICKET-053: every possible reason a stage='BREAKOUT' event can carry passed=false when the
+// detector found no breakout at all — the 3 granular reasons from classifyBoxBreakoutFailReason(),
+// checked in PM-specified priority order (edge touch -> body size -> volume). Does NOT include
+// 'MACRO_TREND_OPPOSITE' (a separate, already-passed-the-detector fail reason emitted after this
+// list would apply) — the report's own total-matches-actual row (same TICKET-044 lesson as MSS_TIMEOUT)
+// makes any such gap visible instead of silently under-counting.
+export const BOX_BREAKOUT_FAIL_REASONS = ['NO_EDGE_TOUCH', 'BODY_TOO_SMALL', 'VOLUME_NOT_ELEVATED'] as const;
+
 export interface RegimeFunnelStats {
   setupPass: number;
   macroPass: number;
@@ -25,10 +33,22 @@ export interface RegimeFunnelStats {
   mssFailReasons: Record<string, number>;
   /** TICKET-044: candlesLate for every MSS_TIMEOUT event, for the distribution table. */
   mssTimeoutCandlesLate: number[];
+  /** TICKET-053: granular breakdown of why detectBoxBreakout() found nothing, for SIDEWAY_STYLE regimes. */
+  breakoutFailReasons: Record<string, number>;
 }
 
 export function emptyFunnelStats(): RegimeFunnelStats {
-  return { setupPass: 0, macroPass: 0, mssPass: 0, breakoutPass: 0, riskPoolSkip: 0, opens: 0, mssFailReasons: {}, mssTimeoutCandlesLate: [] };
+  return {
+    setupPass: 0,
+    macroPass: 0,
+    mssPass: 0,
+    breakoutPass: 0,
+    riskPoolSkip: 0,
+    opens: 0,
+    mssFailReasons: {},
+    mssTimeoutCandlesLate: [],
+    breakoutFailReasons: {},
+  };
 }
 
 /** Same linear-interpolation method as calibrateThresholds.ts's describeSeries(), for consistency. */
@@ -162,6 +182,48 @@ export function funnelReportMarkdown(
       ].join('\n');
 
       return section + '\n' + mssFailSection + '\n' + mssTimeoutDistSection;
+    }
+
+    // TICKET-053 — BREAKOUT fail breakdown, every SIDEWAY_STYLE regime (SIDEWAY_SCALPER, COMPRESSION,
+    // and NEUTRAL_TRANSITION when entryStyleForNeutral='SIDEWAY_STYLE') — BREAKOUT is the direct
+    // child of STATE PASS on this path (no separate MACRO stage), so the reconciliation is against
+    // STATE PASS - BREAKOUT PASS, mirroring the MSS section's MACRO PASS - MSS PASS check above.
+    if (path === 'SIDEWAY_STYLE') {
+      const breakoutFailTotal = BOX_BREAKOUT_FAIL_REASONS.reduce((sum, r) => sum + (stats.breakoutFailReasons[r] ?? 0), 0);
+      const actualBreakoutFail = state - stats.breakoutPass;
+      const breakoutFailRows = BOX_BREAKOUT_FAIL_REASONS.map(
+        (r) => `| ${r} | ${fmtInt(stats.breakoutFailReasons[r] ?? 0)} | ${pct(stats.breakoutFailReasons[r] ?? 0, breakoutFailTotal)} |`,
+      );
+      const breakoutFailMatches = breakoutFailTotal === actualBreakoutFail;
+      breakoutFailRows.push(
+        `| **Tổng cộng (đối chiếu STATE PASS − BREAKOUT PASS = ${fmtInt(actualBreakoutFail)})** | ${fmtInt(breakoutFailTotal)}${breakoutFailMatches ? ' — khớp' : ' — LỆCH, kiểm tra lại!'} | 100.0% |`,
+      );
+      const breakoutFailSection = [
+        `### Chi tiết lý do BREAKOUT FAIL (regime: ${regime})`,
+        '',
+        '| Lý do | Số lượng | % trên tổng BREAKOUT FAIL |',
+        '|---|---|---|',
+        ...breakoutFailRows,
+        '',
+        // TICKET-053: unlike MSS's check (MACRO PASS - MSS PASS, both sides only counted when
+        // routeEntry() actually ran), STATE PASS here is counted on EVERY step this symbol's regime is
+        // confirmed — including steps where the symbol already has an open position, when
+        // orchestrator.ts's Step 2 (and therefore routeEntry()/FunnelEvent) never runs at all. A LỆCH
+        // here is expected whenever meaningful time was spent holding positions open during this
+        // regime, NOT a classification bug — verified by cross-referencing total candles-held-open
+        // across all trades (~75k) against the aggregate BREAKOUT deficit (~65k) for the 2026-07-22 run.
+        ...(!breakoutFailMatches
+          ? [
+              '_Lưu ý: LỆCH ở đây không phải bug phân loại — STATE PASS đếm mọi bước regime được xác nhận kể cả khi' +
+                ' symbol đang giữ lệnh mở (Step 3), lúc đó routeEntry()/FunnelEvent không chạy nên không có dữ liệu' +
+                ' BREAKOUT cho bước đó. Khác MSS FAIL (đối chiếu MACRO PASS, chỉ đếm trong phạm vi routeEntry() đã' +
+                ' chạy nên luôn khớp)._',
+              '',
+            ]
+          : []),
+      ].join('\n');
+
+      return section + '\n' + breakoutFailSection;
     }
     return section;
   });

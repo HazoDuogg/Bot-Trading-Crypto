@@ -41,3 +41,41 @@ export function detectBoxBreakout(
   if (candle.close < boxLow) return { direction: 'DOWN', boxHigh, boxLow, breakoutCandleIndex };
   return null;
 }
+
+/** TICKET-053 — granular reason detectBoxBreakout() found no confirmation, for funnel reporting only. */
+export type BoxBreakoutFailReason = 'NO_EDGE_TOUCH' | 'BODY_TOO_SMALL' | 'VOLUME_NOT_ELEVATED';
+
+/**
+ * TICKET-053 — read-only diagnostic mirroring detectBoxBreakout()'s own box/edge computation, called
+ * ONLY for funnel reporting when that function has already returned null. Never used to decide
+ * anything; never alters detectBoxBreakout() itself or any of its thresholds.
+ *
+ * Classifies in the PM-specified priority order (edge touch -> body size -> volume), which is a
+ * reporting-only convention distinct from detectBoxBreakout()'s own (equivalent, order-independent
+ * since it's a conjunction) short-circuit evaluation order.
+ */
+export function classifyBoxBreakoutFailReason(
+  candles15m: CandleData[],
+  candles5m: CandleData[],
+  bbWidthPercentile15m: number,
+  volumeZScore5m: number,
+  config: BoxBreakoutConfig,
+): BoxBreakoutFailReason {
+  // Box itself never formed/valid (not enough 15m history, or too wide to trade) -> no edge to touch.
+  if (candles15m.length < config.boxLookbackM || candles5m.length === 0 || bbWidthPercentile15m > config.maxBbwPercentile) {
+    return 'NO_EDGE_TOUCH';
+  }
+
+  const window = candles15m.slice(-config.boxLookbackM);
+  const boxHigh = Math.max(...window.map((c) => c.high));
+  const boxLow = Math.min(...window.map((c) => c.low));
+
+  const candle = candles5m[candles5m.length - 1];
+  if (!(candle.close > boxHigh || candle.close < boxLow)) return 'NO_EDGE_TOUCH';
+
+  const range = candle.high - candle.low;
+  const bodyRatio = range > 0 ? Math.abs(candle.close - candle.open) / range : 0; // range===0 -> no real push possible
+  if (bodyRatio < config.minBodyRatio) return 'BODY_TOO_SMALL';
+
+  return 'VOLUME_NOT_ELEVATED'; // edge cleared + body real -> the only remaining reason detectBoxBreakout() returned null
+}

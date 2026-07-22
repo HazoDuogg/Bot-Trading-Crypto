@@ -399,6 +399,13 @@ async function main(): Promise<void> {
               stats.mssTimeoutCandlesLate.push(event.candlesLate);
             }
           }
+          // TICKET-053: BREAKOUT-fail breakdown — counted regardless of the passed/continue branch
+          // below, same as the MSS block above. Includes every reason (e.g. MACRO_TREND_OPPOSITE),
+          // not just the 3 detector reasons — the report's own total-matches-actual row flags it if
+          // any reason outside the known 3 ever contributes a nonzero count.
+          if (event.stage === 'BREAKOUT' && !event.passed && event.reason) {
+            stats.breakoutFailReasons[event.reason] = (stats.breakoutFailReasons[event.reason] ?? 0) + 1;
+          }
           if (!event.passed) continue;
           if (event.stage === 'SETUP') stats.setupPass++;
           else if (event.stage === 'MACRO') stats.macroPass++;

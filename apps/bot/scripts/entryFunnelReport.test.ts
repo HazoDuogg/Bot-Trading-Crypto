@@ -57,6 +57,74 @@ describe('funnelReportMarkdown — MSS FAIL total must match MACRO PASS - MSS PA
   });
 });
 
+// TICKET-053 — same "tổng khớp" discipline as TICKET-044's MSS_TIMEOUT lesson, applied to the new
+// BREAKOUT FAIL breakdown. BREAKOUT is the direct child of STATE PASS on SIDEWAY_STYLE regimes (no
+// separate MACRO stage), so the reconciliation target is STATE PASS - BREAKOUT PASS.
+describe('funnelReportMarkdown — BREAKOUT FAIL total must match STATE PASS - BREAKOUT PASS (TICKET-053)', () => {
+  it('sums all 3 reasons to exactly the actual BREAKOUT FAIL count, and reports "khớp"', () => {
+    const sidewayStats: RegimeFunnelStats = {
+      ...emptyFunnelStats(),
+      breakoutPass: 3,
+      breakoutFailReasons: {
+        NO_EDGE_TOUCH: 10,
+        BODY_TOO_SMALL: 4,
+        VOLUME_NOT_ELEVATED: 3, // 10+4+3 = 17 = state(20) - breakoutPass(3)
+      },
+      riskPoolSkip: 0,
+      opens: 3,
+    };
+    const stateCounts = { [MarketRegime.SIDEWAY_SCALPER]: 20 };
+    const funnelStats = { [MarketRegime.SIDEWAY_SCALPER]: sidewayStats };
+
+    const report = funnelReportMarkdown(20, stateCounts, funnelStats, 0, 'SIDEWAY_STYLE');
+
+    expect(report).toContain('| NO_EDGE_TOUCH | 10 |');
+    expect(report).toContain('| BODY_TOO_SMALL | 4 |');
+    expect(report).toContain('| VOLUME_NOT_ELEVATED | 3 |');
+    expect(report).toContain('Tổng cộng (đối chiếu STATE PASS − BREAKOUT PASS = 17)');
+    expect(report).toContain('17 — khớp');
+    expect(report).not.toContain('LỆCH');
+  });
+
+  it('would report LỆCH if a reason were ever missing from the tally (e.g. a future MACRO_TREND_OPPOSITE-like omission)', () => {
+    const sidewayStats: RegimeFunnelStats = {
+      ...emptyFunnelStats(),
+      breakoutPass: 3,
+      breakoutFailReasons: { NO_EDGE_TOUCH: 10, BODY_TOO_SMALL: 4 }, // VOLUME_NOT_ELEVATED missing -> sums to 14, not 17
+    };
+    const stateCounts = { [MarketRegime.SIDEWAY_SCALPER]: 20 };
+    const funnelStats = { [MarketRegime.SIDEWAY_SCALPER]: sidewayStats };
+
+    const report = funnelReportMarkdown(20, stateCounts, funnelStats, 0, 'SIDEWAY_STYLE');
+
+    expect(report).toContain('14 — LỆCH, kiểm tra lại!');
+  });
+
+  it('renders a separate breakdown section per SIDEWAY_STYLE regime (SIDEWAY_SCALPER, COMPRESSION, NEUTRAL_TRANSITION)', () => {
+    const stats = (breakoutPass: number): RegimeFunnelStats => ({
+      ...emptyFunnelStats(),
+      breakoutPass,
+      breakoutFailReasons: { NO_EDGE_TOUCH: 1 },
+    });
+    const stateCounts = {
+      [MarketRegime.SIDEWAY_SCALPER]: 2,
+      [MarketRegime.COMPRESSION]: 2,
+      [MarketRegime.NEUTRAL_TRANSITION]: 2,
+    };
+    const funnelStats = {
+      [MarketRegime.SIDEWAY_SCALPER]: stats(1),
+      [MarketRegime.COMPRESSION]: stats(1),
+      [MarketRegime.NEUTRAL_TRANSITION]: stats(1),
+    };
+
+    const report = funnelReportMarkdown(6, stateCounts, funnelStats, 0, 'SIDEWAY_STYLE');
+
+    expect(report).toContain(`### Chi tiết lý do BREAKOUT FAIL (regime: ${MarketRegime.SIDEWAY_SCALPER})`);
+    expect(report).toContain(`### Chi tiết lý do BREAKOUT FAIL (regime: ${MarketRegime.COMPRESSION})`);
+    expect(report).toContain(`### Chi tiết lý do BREAKOUT FAIL (regime: ${MarketRegime.NEUTRAL_TRANSITION})`);
+  });
+});
+
 describe('percentile — linear interpolation, same method as calibrateThresholds.ts (TICKET-044)', () => {
   it('matches known values for a simple sorted series', () => {
     const sorted = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];

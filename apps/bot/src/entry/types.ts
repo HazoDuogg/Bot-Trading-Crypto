@@ -67,9 +67,11 @@ export interface FunnelEvent {
   stage: FunnelStage;
   passed: boolean;
   /**
-   * e.g. 'NO_SETUP_FOUND', 'MACRO_TREND_OPPOSITE', 'MSS_TIMEOUT', 'NO_BREAKOUT_YET'. Only set when
-   * passed=false. For stage='MSS' with no confirmation at all (TICKET-043), one of
-   * MssFailReason's 'NO_HIGHER_LOW_PATTERN' | 'NO_REFERENCE_BETWEEN' | 'NEVER_BROKE_REFERENCE'.
+   * e.g. 'NO_SETUP_FOUND', 'MACRO_TREND_OPPOSITE', 'MSS_TIMEOUT'. Only set when passed=false. For
+   * stage='MSS' with no confirmation at all (TICKET-043), one of MssFailReason's
+   * 'NO_HIGHER_LOW_PATTERN' | 'NO_REFERENCE_BETWEEN' | 'NEVER_BROKE_REFERENCE'. For stage='BREAKOUT'
+   * with no breakout detected at all (TICKET-053), one of BoxBreakoutFailReason's
+   * 'NO_EDGE_TOUCH' | 'BODY_TOO_SMALL' | 'VOLUME_NOT_ELEVATED'.
    */
   reason?: string;
   /** Only set when stage='SETUP' and passed=true. */
