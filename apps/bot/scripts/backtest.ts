@@ -58,6 +58,7 @@ function parseArgs(): {
   mssStalenessTolerance: number;
   obBosLookback: number;
   boxBounceEnabled: boolean;
+  boxBounceGateBypassDiagnosticOnly: boolean;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -72,6 +73,7 @@ function parseArgs(): {
   const mssStalenessArg = args.find((a) => a.startsWith('--mss-staleness-tolerance='));
   const obBosLookbackArg = args.find((a) => a.startsWith('--ob-bos-lookback='));
   const boxBounceArg = args.find((a) => a.startsWith('--box-bounce-enabled='));
+  const boxBounceGateBypassArg = args.find((a) => a.startsWith('--box-bounce-gate-bypass-diagnostic-only='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -93,10 +95,13 @@ function parseArgs(): {
     obBosLookback: obBosLookbackArg ? Number(obBosLookbackArg.split('=')[1]) : 10,
     // TICKET-047: off by default — matches DEFAULT_ENTRY_ROUTER_CONFIG.boxBounceEnabled.
     boxBounceEnabled: boxBounceArg ? boxBounceArg.split('=')[1] === 'true' : false,
+    // TICKET-049 — DIAGNOSTIC ONLY, never for production. Off by default. Deliberately long/explicit
+    // flag name (not just "--box-bounce-gate-bypass") so it can never be mistaken for a real flag.
+    boxBounceGateBypassDiagnosticOnly: boxBounceGateBypassArg ? boxBounceGateBypassArg.split('=')[1] === 'true' : false,
   };
 }
 
-/** TICKET-017/018/024/036/047 Phần C: output filenames auto-derived from which filters are active, so the A/B combinations never overwrite each other. */
+/** TICKET-017/018/024/036/047/049 Phần C: output filenames auto-derived from which filters are active, so the A/B combinations never overwrite each other. */
 function outputSuffix(
   macroTrendFilterEnabled: boolean,
   obDisabledSymbols: string[],
@@ -104,6 +109,7 @@ function outputSuffix(
   momentumFilterEnabled: boolean,
   neutralTransitionEnabled: boolean,
   boxBounceEnabled: boolean,
+  boxBounceGateBypassDiagnosticOnly: boolean,
 ): string {
   const macro = macroTrendFilterEnabled;
   const ob = obDisabledSymbols.length > 0;
@@ -116,6 +122,7 @@ function outputSuffix(
   if (momentumFilterEnabled) base += '-momentum';
   if (neutralTransitionEnabled) base += '-neutral';
   if (boxBounceEnabled) base += '-boxbounce';
+  if (boxBounceGateBypassDiagnosticOnly) base += '-gatebypass-diagnostic';
   return base;
 }
 
@@ -238,9 +245,13 @@ async function main(): Promise<void> {
     mssStalenessTolerance,
     obBosLookback,
     boxBounceEnabled,
+    boxBounceGateBypassDiagnosticOnly,
   } = parseArgs();
+  if (boxBounceGateBypassDiagnosticOnly) {
+    console.log('*** CẢNH BÁO: --box-bounce-gate-bypass-diagnostic-only=true — CHỈ DÙNG CHẨN ĐOÁN (TICKET-049), KHÔNG PHẢI CẤU HÌNH PRODUCTION. ***');
+  }
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, boxBounceEnabled=${boxBounceEnabled}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, boxBounceEnabled=${boxBounceEnabled}, boxBounceGateBypassDiagnosticOnly=${boxBounceGateBypassDiagnosticOnly}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -272,6 +283,7 @@ async function main(): Promise<void> {
       neutralTransitionMomentumGateThreshold: neutralGateThreshold, // TICKET-039: CLI-overridable A/B testing — default (0.55) unchanged from before this ticket.
     },
     boxBounceGateConfig: DEFAULT_BOX_BOUNCE_GATE_CONFIG, // TICKET-047: no CLI flag yet — PM only asked for boxBounceEnabled/edgeZonePercent A/B testing this ticket.
+    boxBounceGateBypassDiagnosticOnly, // TICKET-049 — DIAGNOSTIC ONLY, off by default. Never for production.
   };
 
   let accountBalance = START_BALANCE;
@@ -487,7 +499,7 @@ async function main(): Promise<void> {
   // TICKET-030: CORRELATED_RISK has no CLI on/off flag (unconditionally wired in, same pattern as
   // MANIPULATED/LOW_LIQUIDITY) — "-correlated" appended so this run's report/trades never overwrite
   // the pre-TICKET-030 both-momentum files (PM explicitly wants the $468.49 baseline preserved for comparison).
-  const suffix = outputSuffix(macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled, neutralTransitionEnabled, boxBounceEnabled) + '-correlated';
+  const suffix = outputSuffix(macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled, neutralTransitionEnabled, boxBounceEnabled, boxBounceGateBypassDiagnosticOnly) + '-correlated';
   const tradesPath = path.resolve(process.cwd(), `data/backtest-trades-${suffix}.csv`);
   writeFileSync(tradesPath, tradesCsv(trades));
   console.log(`→ ${tradesPath}`);
@@ -496,6 +508,37 @@ async function main(): Promise<void> {
   const wins = trades.filter((t) => t.pnlUsd > 0).length;
   const winrate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
   const totalPnl = trades.reduce((sum, t) => sum + t.pnlUsd, 0);
+
+  // TICKET-049 — diagnostic-only: BOX_BOUNCE trades split out from the rest, ONLY meaningful when
+  // boxBounceGateBypassDiagnosticOnly is on (otherwise BOX_BOUNCE never opens a real trade at all —
+  // TICKET-047/048 already showed 0/36 clearing the real gate).
+  const boxBounceTrades = trades.filter((t) => t.setupType === 'BOX_BOUNCE');
+  const nonBoxBounceTrades = trades.filter((t) => t.setupType !== 'BOX_BOUNCE');
+  const boxBounceWins = boxBounceTrades.filter((t) => t.pnlUsd > 0).length;
+  const boxBounceWinrate = boxBounceTrades.length > 0 ? (boxBounceWins / boxBounceTrades.length) * 100 : 0;
+  const boxBouncePnl = boxBounceTrades.reduce((sum, t) => sum + t.pnlUsd, 0);
+  const nonBoxBounceWins = nonBoxBounceTrades.filter((t) => t.pnlUsd > 0).length;
+  const nonBoxBounceWinrate = nonBoxBounceTrades.length > 0 ? (nonBoxBounceWins / nonBoxBounceTrades.length) * 100 : 0;
+  const nonBoxBouncePnl = nonBoxBounceTrades.reduce((sum, t) => sum + t.pnlUsd, 0);
+
+  const diagnosticSection = boxBounceGateBypassDiagnosticOnly
+    ? [
+        '## TICKET-049 — CHẨN ĐOÁN: BOX_BOUNCE bỏ qua Momentum Gate',
+        '',
+        '**CẢNH BÁO: cấu hình này CHỈ dùng để chẩn đoán bản chất setup BOX_BOUNCE (wick-ratio + vùng biên hộp,',
+        'KHÔNG qua AI) — KHÔNG dùng để quyết định đưa BOX_BOUNCE lên live/paper trading. Baseline chính thức',
+        '($548.58, TICKET-047 với đầy đủ Momentum Gate) không đổi.**',
+        '',
+        '| | Số lệnh | Winrate | PNL ($) |',
+        '|---|---|---|---|',
+        `| BOX_BOUNCE (bỏ qua gate) | ${boxBounceTrades.length} | ${boxBounceWinrate.toFixed(1)}% | ${boxBouncePnl >= 0 ? '+' : ''}${boxBouncePnl.toFixed(2)} |`,
+        `| Các setupType khác (OB/FVG/SWEEP/BOX_BREAKOUT) | ${nonBoxBounceTrades.length} | ${nonBoxBounceWinrate.toFixed(1)}% | ${nonBoxBouncePnl >= 0 ? '+' : ''}${nonBoxBouncePnl.toFixed(2)} |`,
+        `| **Tổng thể cả backtest** | ${totalTrades} | ${winrate.toFixed(1)}% | ${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)} |`,
+        '',
+        'Không tự kết luận nên train AI riêng (Mean Reversion) hay dừng — chỉ trình bày số liệu để PM quyết định.',
+        '',
+      ]
+    : [];
 
   const report = [
     '# Backtest Report — TICKET-010',
@@ -510,6 +553,7 @@ async function main(): Promise<void> {
     `- Số lệnh bị Momentum Gate từ chối (NEUTRAL_TRANSITION, TICKET-036): ${neutralGateRejectedCount}`,
     `- Số lệnh bị Momentum Gate từ chối (BOX_BOUNCE, TICKET-047): ${boxBounceGateRejectedCount}`,
     '',
+    ...diagnosticSection,
     statsTable('PNL theo symbol', groupBy(trades, (t) => t.symbol)),
     statsTable('PNL theo regime', groupBy(trades, (t) => t.regime)),
     statsTable('PNL theo setupType', groupBy(trades, (t) => t.setupType)),
@@ -534,6 +578,7 @@ async function main(): Promise<void> {
     `- mssStalenessToleranceCandles: ${config.entryRouterConfig.mssStalenessToleranceCandles} (TICKET-040, CLI-overridable, default 5)`,
     `- obBosLookforwardK: ${config.entryRouterConfig.obBosLookforwardK} (TICKET-041, CLI-overridable, default 10)`,
     `- boxBounceEnabled: ${boxBounceEnabled} (TICKET-047, SIDEWAY_SCALPER only, edgeZonePercent=${config.entryRouterConfig.boxBounceEdgeZonePercent}, hard Momentum Gate threshold=${config.boxBounceGateConfig.boxBounceMomentumGateThreshold})`,
+    `- boxBounceGateBypassDiagnosticOnly: ${boxBounceGateBypassDiagnosticOnly} (TICKET-049 — CHẨN ĐOÁN, không phải cấu hình production)`,
     `- Runner trailing: ATR (2.5×ATR), không dùng Structure trailing`,
     `- takerFeeRate: 0.0004 (TODO_CONFIRM — Trader chưa cung cấp số thật)`,
     `- Quy tắc SL/TP cùng nến: SL chạm trước`,

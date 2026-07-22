@@ -72,6 +72,7 @@ const baseConfig: OrchestratorConfig = {
   momentumFilterConfig: DEFAULT_MOMENTUM_FILTER_CONFIG,
   neutralTransitionGateConfig: DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG,
   boxBounceGateConfig: DEFAULT_BOX_BOUNCE_GATE_CONFIG,
+  boxBounceGateBypassDiagnosticOnly: false,
 };
 
 const trendLongInput: SlTpManagerInput = {
@@ -673,5 +674,22 @@ describe('processCandle — BOX_BOUNCE (TICKET-047)', () => {
     expect(result.symbolState.regimeState.previousRegime).toBe(MarketRegime.SIDEWAY_SCALPER); // sanity: same fixture, same regime
     expect(result.symbolState.openPosition).toBeNull();
     expect(result.event).toBeNull(); // no breakout, bounce disabled -> routeEntry() returns null -> no event at all
+  });
+
+  // TICKET-049 — diagnostic-only bypass, off by default (baseConfig already sets it false, proven by
+  // every test above still rejecting at threshold=1.01). This test proves the bypass, when explicitly
+  // turned on, lets an otherwise-impossible-to-clear threshold through anyway.
+  it('boxBounceGateBypassDiagnosticOnly=true: opens the trade even though the score can never clear the threshold', async () => {
+    const fixture = boxBounceFixture();
+    const config: OrchestratorConfig = {
+      ...baseConfig,
+      entryRouterConfig: boxBounceEntryRouterConfig,
+      boxBounceGateConfig: { boxBounceMomentumGateThreshold: 1.01 }, // impossible to clear — real score is always <= 1
+      boxBounceGateBypassDiagnosticOnly: true,
+    };
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.event).toMatchObject({ type: 'OPEN', symbol: 'BTCUSDT', side: 'LONG', setupType: 'BOX_BOUNCE', regime: MarketRegime.SIDEWAY_SCALPER });
   });
 });

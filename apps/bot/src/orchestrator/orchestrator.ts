@@ -371,8 +371,10 @@ export async function processCandle(
       // TICKET-048 — diagnostic-only, fired BEFORE the pass/fail comparison below, on EVERY
       // evaluation (not just rejections) — never read here, never affects gatePassed.
       onBoxBounceGateScore?.({ symbol: input.symbol, timestamp: currentCandle.timestamp, side: draftSetup.side, gateScore });
-      // Missing score never defaults to passing (same "an toàn" requirement as NEUTRAL_TRANSITION's gate).
-      const gatePassed = gateScore !== undefined && gateScore >= config.boxBounceGateConfig.boxBounceMomentumGateThreshold;
+      // Missing score never defaults to passing (same "an toàn" requirement as NEUTRAL_TRANSITION's gate) —
+      // UNLESS TICKET-049's diagnostic-only bypass is explicitly on, in which case the comparison is
+      // skipped entirely (score still computed/reported above, just not used to gate). Default false: unchanged behavior.
+      const gatePassed = config.boxBounceGateBypassDiagnosticOnly || (gateScore !== undefined && gateScore >= config.boxBounceGateConfig.boxBounceMomentumGateThreshold);
       if (!gatePassed) {
         return {
           symbolState: { ...state, regimeState },

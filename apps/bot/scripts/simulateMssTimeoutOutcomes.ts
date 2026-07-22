@@ -221,6 +221,7 @@ async function main(): Promise<void> {
     momentumFilterConfig: { ...DEFAULT_MOMENTUM_FILTER_CONFIG, momentumFilterEnabled: true },
     neutralTransitionGateConfig: { ...DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, neutralTransitionTradingEnabled: true, neutralTransitionMomentumGateThreshold: 0.5 },
     boxBounceGateConfig: DEFAULT_BOX_BOUNCE_GATE_CONFIG, // TICKET-047: BOX_BOUNCE didn't exist for the confirmed baseline this script reproduces — boxBounceEnabled stays false via CONFIRMED_ENTRY_ROUTER_CONFIG, so this gate is unreachable here regardless.
+    boxBounceGateBypassDiagnosticOnly: false, // TICKET-049: diagnostic-only flag, irrelevant here (gate unreachable regardless, see above) — always false.
   };
 
   let accountBalance = START_BALANCE;

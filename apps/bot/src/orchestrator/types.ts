@@ -103,4 +103,14 @@ export interface OrchestratorConfig {
   neutralTransitionGateConfig: NeutralTransitionGateConfig;
   /** TICKET-047: hard Momentum Gate for BOX_BOUNCE only — same pattern as neutralTransitionGateConfig above. */
   boxBounceGateConfig: BoxBounceGateConfig;
+  /**
+   * TICKET-049 — DIAGNOSTIC ONLY, never for production/live/paper trading. Off by default (false).
+   * When true, BOX_BOUNCE still requires entryRouterConfig.boxBounceEnabled=true to produce a
+   * DraftSetup at all, but skips the boxBounceGateConfig.boxBounceMomentumGateThreshold comparison
+   * entirely (treated as always passing) — used ONLY to backtest whether the raw wick-ratio/
+   * edge-zone setup itself has edge, independent of whether the (Momentum-trained, not
+   * Mean-Reversion-trained) gate model can score it. Named deliberately long/explicit so it can
+   * never be mistaken for a real config flag.
+   */
+  boxBounceGateBypassDiagnosticOnly: boolean;
 }
