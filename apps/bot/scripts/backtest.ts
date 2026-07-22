@@ -65,6 +65,7 @@ function parseArgs(): {
   obBosLookback: number;
   planAutoSelectionEnabled: boolean;
   planAutoSelectionThreshold: number;
+  maxConcurrentPositionsPerSymbol: number;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -80,6 +81,7 @@ function parseArgs(): {
   const obBosLookbackArg = args.find((a) => a.startsWith('--ob-bos-lookback='));
   const planAutoSelectionArg = args.find((a) => a.startsWith('--plan-auto-selection-enabled='));
   const planAutoSelectionThresholdArg = args.find((a) => a.startsWith('--plan-auto-selection-threshold='));
+  const maxConcurrentPositionsArg = args.find((a) => a.startsWith('--max-concurrent-positions-per-symbol='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -103,6 +105,9 @@ function parseArgs(): {
     planAutoSelectionEnabled: planAutoSelectionArg ? planAutoSelectionArg.split('=')[1] === 'true' : false,
     // TICKET-052: defaults to 0.7 unchanged (matches DEFAULT_PLAN_AUTO_SELECTION_CONFIG, TODO_CONFIRM) when omitted.
     planAutoSelectionThreshold: planAutoSelectionThresholdArg ? Number(planAutoSelectionThresholdArg.split('=')[1]) : 0.7,
+    // TICKET-056: defaults to 1 unchanged (matches every ticket before this one — a symbol could
+    // never hold more than 1 open position) — only the CLI may override, per PM's explicit instruction.
+    maxConcurrentPositionsPerSymbol: maxConcurrentPositionsArg ? Number(maxConcurrentPositionsArg.split('=')[1]) : 1,
   };
 }
 
@@ -114,6 +119,7 @@ function outputSuffix(
   momentumFilterEnabled: boolean,
   neutralTransitionEnabled: boolean,
   planAutoSelectionEnabled: boolean,
+  maxConcurrentPositionsPerSymbol: number,
 ): string {
   const macro = macroTrendFilterEnabled;
   const ob = obDisabledSymbols.length > 0;
@@ -126,6 +132,8 @@ function outputSuffix(
   if (momentumFilterEnabled) base += '-momentum';
   if (neutralTransitionEnabled) base += '-neutral';
   if (planAutoSelectionEnabled) base += '-planauto';
+  // TICKET-056: default (1) unchanged from before this ticket — only append when CLI overrides it.
+  if (maxConcurrentPositionsPerSymbol !== 1) base += `-maxpos${maxConcurrentPositionsPerSymbol}`;
   return base;
 }
 
@@ -249,9 +257,10 @@ async function main(): Promise<void> {
     obBosLookback,
     planAutoSelectionEnabled,
     planAutoSelectionThreshold,
+    maxConcurrentPositionsPerSymbol,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -286,9 +295,15 @@ async function main(): Promise<void> {
       planAutoSelectionEnabled, // TICKET-052: CLI-overridable A/B testing — default (false) unchanged from before this ticket.
       planAutoSelectionMomentumThreshold: planAutoSelectionThreshold, // TICKET-052: TODO_CONFIRM, default 0.7 unchanged unless CLI overrides.
     },
+    maxConcurrentPositionsPerSymbol, // TICKET-056: CLI-overridable A/B testing — default (1) unchanged from before this ticket.
   };
 
   let accountBalance = START_BALANCE;
+  // TICKET-056: Max Drawdown — the "cost" of allowing concentrated multi-position risk, tracked
+  // alongside PNL/winrate so a PNL increase can't hide a bigger drawdown behind it.
+  let peakBalance = START_BALANCE;
+  let maxDrawdownPct = 0;
+  let maxDrawdownUsd = 0;
   const trades: CloseTradeEvent[] = [];
   // TICKET-036: SKIPPED events now have 2 distinct reasons — kept separate so this summary line
   // never falsely blames "risk pool" for what's actually the Momentum Gate rejecting NEUTRAL_TRANSITION.
@@ -321,10 +336,13 @@ async function main(): Promise<void> {
   console.log(`Chạy ${totalSteps - startStep} bước x ${SYMBOLS.length} coin (từ nến 5m #${startStep})...`);
 
   for (let step = startStep; step < totalSteps; step++) {
+    // TICKET-056 Phần C: sum ALL of a symbol's currently open positions (was a single value assuming
+    // at most 1) — the risk pool check below now needs the total across every open position, not
+    // just "whichever one" a symbol happened to have.
     const openRiskBySymbol: Record<string, number> = {};
     for (const symbol of SYMBOLS) {
-      const meta = symbolsData[symbol].state.openMeta;
-      if (meta) openRiskBySymbol[symbol] = meta.actualRiskDollar;
+      const totalRisk = symbolsData[symbol].state.openPositions.reduce((sum, entry) => sum + entry.meta.actualRiskDollar, 0);
+      if (totalRisk > 0) openRiskBySymbol[symbol] = totalRisk;
     }
 
     // TICKET-030: cross-symbol correlation needs all 4 symbols' aligned 1H windows BEFORE any
@@ -362,7 +380,10 @@ async function main(): Promise<void> {
       const w1d = closedWindow(sd.candles1d, sd.ptr1d, 24 * 60 * 60_000, decisionTime, WINDOW_1D);
       sd.ptr1d = w1d.ptr;
 
-      const otherOpenPositionsRisk: OpenPositionRisk[] = SYMBOLS.filter((s) => s !== symbol && openRiskBySymbol[s] !== undefined).map((s) => ({
+      // TICKET-056 Phần C: was filtered to `s !== symbol` (this symbol could never have an open
+      // position of its own when tried before this ticket) — now includes THIS symbol's own
+      // already-open position(s) too, so the risk pool check never under-counts concentrated risk.
+      const allOpenPositionsRisk: OpenPositionRisk[] = SYMBOLS.filter((s) => openRiskBySymbol[s] !== undefined).map((s) => ({
         id: s,
         actualRiskDollar: openRiskBySymbol[s],
       }));
@@ -378,7 +399,7 @@ async function main(): Promise<void> {
         candles5mSessionVolume: windowSessionVolume5m,
         correlatedRiskRatio,
         accountBalance,
-        otherOpenPositionsRisk,
+        allOpenPositionsRisk,
       };
 
       // TICKET-042: per-call buffer — processCandle() runs synchronously for this one symbol/step,
@@ -439,14 +460,31 @@ async function main(): Promise<void> {
           else if (event.stage === 'MSS') stats.mssPass++;
           else if (event.stage === 'BREAKOUT') stats.breakoutPass++;
         }
-        if (result.event?.type === 'OPEN') stats.opens++;
-        else if (result.event?.type === 'SKIPPED' && result.event.reason === 'RISK_POOL_EXCEEDED') stats.riskPoolSkip++;
+        for (const event of result.events) {
+          if (event.type === 'OPEN') stats.opens++;
+          else if (event.type === 'SKIPPED' && event.reason === 'RISK_POOL_EXCEEDED') stats.riskPoolSkip++;
+        }
       }
 
-      if (result.event?.type === 'CLOSE') trades.push(result.event);
-      else if (result.event?.type === 'SKIPPED') {
-        if (result.event.reason === 'RISK_POOL_EXCEEDED') riskPoolSkippedCount++;
-        else neutralGateRejectedCount++;
+      // TICKET-056: was a single nullable `result.event` — now a list, since one candle can produce
+      // multiple events (e.g. one or more CLOSEs plus an OPEN/SKIPPED) when a symbol holds more than
+      // one concurrent position.
+      for (const event of result.events) {
+        if (event.type === 'CLOSE') trades.push(event);
+        else if (event.type === 'SKIPPED') {
+          if (event.reason === 'RISK_POOL_EXCEEDED') riskPoolSkippedCount++;
+          else neutralGateRejectedCount++;
+        }
+      }
+
+      // TICKET-056: Max Drawdown — tracked on the shared equity curve (accountBalance updates
+      // sequentially across all 4 symbols within a step, same as everywhere else in this loop).
+      if (accountBalance > peakBalance) peakBalance = accountBalance;
+      const drawdownUsd = peakBalance - accountBalance;
+      const drawdownPct = peakBalance > 0 ? (drawdownUsd / peakBalance) * 100 : 0;
+      if (drawdownPct > maxDrawdownPct) {
+        maxDrawdownPct = drawdownPct;
+        maxDrawdownUsd = drawdownUsd;
       }
     }
 
@@ -492,7 +530,16 @@ async function main(): Promise<void> {
   // TICKET-030: CORRELATED_RISK has no CLI on/off flag (unconditionally wired in, same pattern as
   // MANIPULATED/LOW_LIQUIDITY) — "-correlated" appended so this run's report/trades never overwrite
   // the pre-TICKET-030 both-momentum files (PM explicitly wants the $468.49 baseline preserved for comparison).
-  const suffix = outputSuffix(macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled, neutralTransitionEnabled, planAutoSelectionEnabled) + '-correlated';
+  const suffix =
+    outputSuffix(
+      macroTrendFilterEnabled,
+      obDisabledSymbols,
+      macroTrendFilterAppliesToBoxBreakout,
+      momentumFilterEnabled,
+      neutralTransitionEnabled,
+      planAutoSelectionEnabled,
+      maxConcurrentPositionsPerSymbol,
+    ) + '-correlated';
   const tradesPath = path.resolve(process.cwd(), `data/backtest-trades-${suffix}.csv`);
   writeFileSync(tradesPath, tradesCsv(trades));
   console.log(`→ ${tradesPath}`);
@@ -512,6 +559,7 @@ async function main(): Promise<void> {
     `- Winrate: ${winrate.toFixed(1)}%`,
     `- Tổng PNL: ${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)} USD`,
     `- PNL trung bình/lệnh: ${totalTrades > 0 ? (totalPnl / totalTrades >= 0 ? '+' : '') + (totalPnl / totalTrades).toFixed(2) : '0.00'} USD (TICKET-052)`,
+    `- Max Drawdown: -${maxDrawdownPct.toFixed(2)}% (-$${maxDrawdownUsd.toFixed(2)}) (TICKET-056)`,
     `- Số lệnh bị bỏ qua vì risk pool đầy: ${riskPoolSkippedCount}`,
     `- Số lệnh bị Momentum Gate từ chối (NEUTRAL_TRANSITION, TICKET-036): ${neutralGateRejectedCount}`,
     '',
@@ -538,6 +586,7 @@ async function main(): Promise<void> {
     `- riskPoolMaxPct: ${(riskPoolMaxPct * 100).toFixed(0)}% (TICKET-037, CLI-overridable, default 10%)`,
     `- mssStalenessToleranceCandles: ${config.entryRouterConfig.mssStalenessToleranceCandles} (TICKET-040, CLI-overridable, default 5)`,
     `- obBosLookforwardK: ${config.entryRouterConfig.obBosLookforwardK} (TICKET-041, CLI-overridable, default 10)`,
+    `- maxConcurrentPositionsPerSymbol: ${config.maxConcurrentPositionsPerSymbol} (TICKET-056, CLI-overridable, default 1)`,
     `- planAutoSelectionEnabled: ${planAutoSelectionEnabled} (TICKET-052, AI-driven Plan A/B selection, TREND only, threshold=${config.planAutoSelectionConfig.planAutoSelectionMomentumThreshold})`,
     `- Runner trailing: ATR (2.5×ATR), không dùng Structure trailing`,
     `- takerFeeRate: 0.0004 (TODO_CONFIRM — Trader chưa cung cấp số thật)`,

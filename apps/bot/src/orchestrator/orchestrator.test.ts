@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { processCandle, selectTpPlan, type ProcessCandleInput } from './orchestrator.js';
-import { INITIAL_SYMBOL_STATE, type OrchestratorConfig, type SymbolState } from './types.js';
+import { INITIAL_SYMBOL_STATE, type OpenTradeMeta, type OrchestratorConfig, type SymbolState } from './types.js';
 import { MarketRegime, type CandleData } from '../regime/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../entry/entryRouter.js';
+import type { FunnelEvent } from '../entry/types.js';
 import {
   DEFAULT_MOMENTUM_FILTER_CONFIG,
   DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG,
@@ -72,6 +73,8 @@ const baseConfig: OrchestratorConfig = {
   momentumFilterConfig: DEFAULT_MOMENTUM_FILTER_CONFIG,
   neutralTransitionGateConfig: DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG,
   planAutoSelectionConfig: DEFAULT_PLAN_AUTO_SELECTION_CONFIG,
+  // TICKET-056: default 1 — matches every ticket before this one (a symbol could never hold more than 1 open position).
+  maxConcurrentPositionsPerSymbol: 1,
 };
 
 const trendLongInput: SlTpManagerInput = {
@@ -84,18 +87,35 @@ const trendLongInput: SlTpManagerInput = {
   takerFeeRate: 0.0004,
 };
 
-function stateWithOpenPosition(position: ReturnType<typeof openPosition>): SymbolState {
+// TICKET-056: entry far below fullOpenFlowFixture()'s ~94-106 price range, so a position opened here
+// is guaranteed untouched (no tier fill, no close) by any candle from that fixture — used in the
+// multi-position tests below to isolate "does the 2nd entry succeed" from "did the 1st also react".
+const farAwayLongInput: SlTpManagerInput = {
+  scenario: 'TREND',
+  entryPrice: 50,
+  slPrice: 49,
+  side: 'LONG',
+  tpPlan: 'PLAN_A',
+  positionSize: 495,
+  takerFeeRate: 0.0004,
+};
+
+function makeMeta(overrides: Partial<OpenTradeMeta> = {}): OpenTradeMeta {
+  return {
+    regime: MarketRegime.TREND_RIDER,
+    setupType: 'OB',
+    entryTimestamp: 0,
+    actualRiskDollar: 10,
+    marginRequired: 33.33,
+    riskMultiplier: 1.0,
+    ...overrides,
+  };
+}
+
+function stateWithOpenPosition(position: ReturnType<typeof openPosition>, metaOverrides: Partial<OpenTradeMeta> = {}): SymbolState {
   return {
     regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
-    openPosition: position,
-    openMeta: {
-      regime: MarketRegime.TREND_RIDER,
-      setupType: 'OB',
-      entryTimestamp: 0,
-      actualRiskDollar: 10,
-      marginRequired: 33.33,
-      riskMultiplier: 1.0,
-    },
+    openPositions: [{ position, meta: makeMeta(metaOverrides) }],
   };
 }
 
@@ -104,7 +124,7 @@ function baseInput(overrides: Partial<ProcessCandleInput> = {}): ProcessCandleIn
     symbol: 'BTCUSDT',
     ...sufficientDummyCandles(),
     accountBalance: 400,
-    otherOpenPositionsRisk: [],
+    allOpenPositionsRisk: [],
     ...overrides,
   };
 }
@@ -118,8 +138,9 @@ describe('processCandle — Step 3: managing an already-open TREND position', ()
 
     const result = await processCandle(baseInput({ candles5m }), state, baseConfig);
 
-    expect(result.symbolState.openPosition).toBeNull();
-    expect(result.event).toMatchObject({ type: 'CLOSE', exitReason: 'SL' });
+    expect(result.symbolState.openPositions).toHaveLength(0);
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({ type: 'CLOSE', exitReason: 'SL' });
   });
 
   it('fills TP1 (moves SL to breakeven+fee) when only TP1 is touched, position stays open', async () => {
@@ -129,10 +150,11 @@ describe('processCandle — Step 3: managing an already-open TREND position', ()
 
     const result = await processCandle(baseInput({ candles5m }), state, baseConfig);
 
-    expect(result.symbolState.openPosition?.closed).toBe(false);
-    expect(result.symbolState.openPosition?.filledTiers).toContain('TP1');
-    expect(result.symbolState.openPosition?.currentSlPrice).toBeGreaterThan(99); // moved to breakeven+fee
-    expect(result.event).toBeNull();
+    expect(result.symbolState.openPositions).toHaveLength(1);
+    expect(result.symbolState.openPositions[0].position.closed).toBe(false);
+    expect(result.symbolState.openPositions[0].position.filledTiers).toContain('TP1');
+    expect(result.symbolState.openPositions[0].position.currentSlPrice).toBeGreaterThan(99); // moved to breakeven+fee
+    expect(result.events).toHaveLength(0);
   });
 
   it('fills TP2 (moves SL to TP1 price) once TP1 already filled and TP2 is touched', async () => {
@@ -143,10 +165,11 @@ describe('processCandle — Step 3: managing an already-open TREND position', ()
 
     const result = await processCandle(baseInput({ candles5m }), state, baseConfig);
 
-    expect(result.symbolState.openPosition?.closed).toBe(false);
-    expect(result.symbolState.openPosition?.filledTiers).toContain('TP2');
-    expect(result.symbolState.openPosition?.currentSlPrice).toBe(101.2); // TP1 price
-    expect(result.event).toBeNull();
+    expect(result.symbolState.openPositions).toHaveLength(1);
+    expect(result.symbolState.openPositions[0].position.closed).toBe(false);
+    expect(result.symbolState.openPositions[0].position.filledTiers).toContain('TP2');
+    expect(result.symbolState.openPositions[0].position.currentSlPrice).toBe(101.2); // TP1 price
+    expect(result.events).toHaveLength(0);
   });
 
   // TICKET-016: this SL is the post-TP1 breakeven+fee stop (TP1 already realized), not a raw loss
@@ -159,8 +182,9 @@ describe('processCandle — Step 3: managing an already-open TREND position', ()
 
     const result = await processCandle(baseInput({ candles5m }), state, baseConfig);
 
-    expect(result.symbolState.openPosition).toBeNull();
-    expect(result.event).toMatchObject({ type: 'CLOSE', exitReason: 'BREAKEVEN_SL' });
+    expect(result.symbolState.openPositions).toHaveLength(0);
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({ type: 'CLOSE', exitReason: 'BREAKEVEN_SL' });
   });
 
   it('SL-first rule after TP1 filled: candle touching BOTH TP2 and SL closes at BREAKEVEN_SL, not TP2', async () => {
@@ -171,8 +195,9 @@ describe('processCandle — Step 3: managing an already-open TREND position', ()
 
     const result = await processCandle(baseInput({ candles5m }), state, baseConfig);
 
-    expect(result.symbolState.openPosition).toBeNull();
-    expect(result.event).toMatchObject({ type: 'CLOSE', exitReason: 'BREAKEVEN_SL' });
+    expect(result.symbolState.openPositions).toHaveLength(0);
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({ type: 'CLOSE', exitReason: 'BREAKEVEN_SL' });
   });
 
   it('Runner phase: trails SL up on a favorable candle without closing', async () => {
@@ -183,9 +208,10 @@ describe('processCandle — Step 3: managing an already-open TREND position', ()
 
     const result = await processCandle(baseInput({ candles5m }), state, baseConfig);
 
-    expect(result.symbolState.openPosition?.closed).toBe(false);
-    expect(result.symbolState.openPosition?.currentSlPrice).toBeGreaterThanOrEqual(101.2); // ratchet, never loosens
-    expect(result.event).toBeNull();
+    expect(result.symbolState.openPositions).toHaveLength(1);
+    expect(result.symbolState.openPositions[0].position.closed).toBe(false);
+    expect(result.symbolState.openPositions[0].position.currentSlPrice).toBeGreaterThanOrEqual(101.2); // ratchet, never loosens
+    expect(result.events).toHaveLength(0);
   });
 
   it('Runner phase: closes with exitReason RUNNER_SL when the (trailed) SL is touched', async () => {
@@ -197,9 +223,10 @@ describe('processCandle — Step 3: managing an already-open TREND position', ()
 
     const result = await processCandle(baseInput({ candles5m }), state, baseConfig);
 
-    expect(result.symbolState.openPosition).toBeNull();
-    expect(result.event).toMatchObject({ type: 'CLOSE', exitReason: 'RUNNER_SL' });
-    expect((result.event as { accountBalanceAfter: number }).accountBalanceAfter).not.toBe(400); // balance updated by realized PNL
+    expect(result.symbolState.openPositions).toHaveLength(0);
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({ type: 'CLOSE', exitReason: 'RUNNER_SL' });
+    expect((result.events[0] as { accountBalanceAfter: number }).accountBalanceAfter).not.toBe(400); // balance updated by realized PNL
   });
 });
 
@@ -213,7 +240,7 @@ describe('processCandle — Step 3: COUNTER_TREND position', () => {
 
     const result = await processCandle(baseInput({ candles5m }), state, baseConfig);
 
-    expect(result.event).toMatchObject({ type: 'CLOSE', exitReason: 'SL' });
+    expect(result.events[0]).toMatchObject({ type: 'CLOSE', exitReason: 'SL' });
   });
 
   it('closes at COUNTER_TREND_TP (100% close, no tiers) when only the TP is touched', async () => {
@@ -223,15 +250,15 @@ describe('processCandle — Step 3: COUNTER_TREND position', () => {
 
     const result = await processCandle(baseInput({ candles5m }), state, baseConfig);
 
-    expect(result.event).toMatchObject({ type: 'CLOSE', exitReason: 'COUNTER_TREND_TP' });
+    expect(result.events[0]).toMatchObject({ type: 'CLOSE', exitReason: 'COUNTER_TREND_TP' });
   });
 });
 
 describe('processCandle — no open position, entry pipeline wiring', () => {
   it('returns no event and stays flat when routeEntry finds nothing (regime/entry produce no setup)', async () => {
     const result = await processCandle(baseInput(), INITIAL_SYMBOL_STATE, baseConfig);
-    expect(result.symbolState.openPosition).toBeNull();
-    expect(result.event).toBeNull();
+    expect(result.symbolState.openPositions).toHaveLength(0);
+    expect(result.events).toHaveLength(0);
     expect(result.accountBalance).toBe(400); // unchanged, no trade happened
   });
 
@@ -286,23 +313,23 @@ describe('processCandle — no open position, entry pipeline wiring', () => {
     const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, baseConfig);
 
     expect(result.symbolState.regimeState.previousRegime).toBe(MarketRegime.TREND_RIDER);
-    expect(result.event).toMatchObject({ type: 'OPEN', symbol: 'BTCUSDT', side: 'LONG', setupType: 'OB', regime: MarketRegime.TREND_RIDER });
-    expect(result.symbolState.openPosition).not.toBeNull();
-    expect(result.symbolState.openPosition?.side).toBe('LONG');
-    expect(result.symbolState.openMeta?.actualRiskDollar).toBeGreaterThan(0);
-    expect(result.symbolState.openMeta?.marginRequired).toBeLessThanOrEqual(baseConfig.maxMarginCap);
+    expect(result.events[0]).toMatchObject({ type: 'OPEN', symbol: 'BTCUSDT', side: 'LONG', setupType: 'OB', regime: MarketRegime.TREND_RIDER });
+    expect(result.symbolState.openPositions).toHaveLength(1);
+    expect(result.symbolState.openPositions[0].position.side).toBe('LONG');
+    expect(result.symbolState.openPositions[0].meta.actualRiskDollar).toBeGreaterThan(0);
+    expect(result.symbolState.openPositions[0].meta.marginRequired).toBeLessThanOrEqual(baseConfig.maxMarginCap);
   });
 
   it('skips the entry (SKIPPED event, no position) when the risk pool is already full for other symbols', async () => {
     const fixture = fullOpenFlowFixture();
     const result = await processCandle(
-      baseInput({ ...fixture, otherOpenPositionsRisk: [{ id: 'ETHUSDT', actualRiskDollar: 39 }] }), // pool cap = 10% * 400 = 40
+      baseInput({ ...fixture, allOpenPositionsRisk: [{ id: 'ETHUSDT', actualRiskDollar: 39 }] }), // pool cap = 10% * 400 = 40
       INITIAL_SYMBOL_STATE,
       baseConfig,
     );
 
-    expect(result.symbolState.openPosition).toBeNull();
-    expect(result.event).toMatchObject({ type: 'SKIPPED', reason: 'RISK_POOL_EXCEEDED' });
+    expect(result.symbolState.openPositions).toHaveLength(0);
+    expect(result.events[0]).toMatchObject({ type: 'SKIPPED', reason: 'RISK_POOL_EXCEEDED' });
     expect(result.accountBalance).toBe(400);
   });
 });
@@ -369,7 +396,7 @@ describe('processCandle — momentum filter on SHORT uses the bearish model dire
     const result = await processCandle(input, INITIAL_SYMBOL_STATE, momentumConfig);
 
     expect(result.symbolState.regimeState.previousRegime).toBe(MarketRegime.TREND_RIDER);
-    expect(result.event).toMatchObject({ type: 'OPEN', symbol: 'BTCUSDT', side: 'SHORT', setupType: 'OB', regime: MarketRegime.TREND_RIDER });
+    expect(result.events[0]).toMatchObject({ type: 'OPEN', symbol: 'BTCUSDT', side: 'SHORT', setupType: 'OB', regime: MarketRegime.TREND_RIDER });
 
     // Independently recompute the EXACT feature vector orchestrator.ts itself would have built for
     // this candle (same detectRegime()/macroDirection calls it makes internally, on the SAME `input`
@@ -410,7 +437,7 @@ describe('processCandle — momentum filter on SHORT uses the bearish model dire
     // draftSetup.riskMultiplier is 1.0 for TREND_RIDER (DEFAULT_ENTRY_ROUTER_CONFIG), so combined == momentumMultiplier alone.
     const expectedCombinedRiskMultiplier = 1.0 * expectedMomentumMultiplier;
 
-    const eventRiskMultiplier = (result.event as { riskMultiplier: number }).riskMultiplier;
+    const eventRiskMultiplier = (result.events[0] as { riskMultiplier: number }).riskMultiplier;
     expect(eventRiskMultiplier).toBeCloseTo(expectedCombinedRiskMultiplier, 6);
   });
 });
@@ -488,8 +515,8 @@ describe('processCandle — NEUTRAL_TRANSITION Momentum Gate (TICKET-036)', () =
     const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
 
     expect(result.symbolState.regimeState.previousRegime).toBe(MarketRegime.NEUTRAL_TRANSITION);
-    expect(result.symbolState.openPosition).toBeNull();
-    expect(result.event).toMatchObject({ type: 'SKIPPED', symbol: 'BTCUSDT', reason: 'NEUTRAL_GATE_REJECTED' });
+    expect(result.symbolState.openPositions).toHaveLength(0);
+    expect(result.events[0]).toMatchObject({ type: 'SKIPPED', symbol: 'BTCUSDT', reason: 'NEUTRAL_GATE_REJECTED' });
     expect(result.accountBalance).toBe(400); // unchanged, no trade happened
   });
 
@@ -506,7 +533,7 @@ describe('processCandle — NEUTRAL_TRANSITION Momentum Gate (TICKET-036)', () =
     const result = await processCandle(input, INITIAL_SYMBOL_STATE, config);
 
     expect(result.symbolState.regimeState.previousRegime).toBe(MarketRegime.NEUTRAL_TRANSITION);
-    expect(result.event).toMatchObject({ type: 'OPEN', symbol: 'BTCUSDT', side: 'LONG', setupType: 'OB', regime: MarketRegime.NEUTRAL_TRANSITION });
+    expect(result.events[0]).toMatchObject({ type: 'OPEN', symbol: 'BTCUSDT', side: 'LONG', setupType: 'OB', regime: MarketRegime.NEUTRAL_TRANSITION });
 
     // Independently recompute the bullish momentum score the soft multiplier should have used —
     // proves the gate passing doesn't replace the existing soft multiplier, both run.
@@ -544,7 +571,7 @@ describe('processCandle — NEUTRAL_TRANSITION Momentum Gate (TICKET-036)', () =
     const expectedMomentumMultiplier = computeMomentumMultiplier(bullishP, config.momentumFilterConfig);
     const expectedCombinedRiskMultiplier = 1.0 * expectedMomentumMultiplier; // draftSetup.riskMultiplier is 1.0 (TICKET-036 retired the fixed 0.5)
 
-    const eventRiskMultiplier = (result.event as { riskMultiplier: number }).riskMultiplier;
+    const eventRiskMultiplier = (result.events[0] as { riskMultiplier: number }).riskMultiplier;
     expect(eventRiskMultiplier).toBeCloseTo(expectedCombinedRiskMultiplier, 6);
   });
 
@@ -561,8 +588,8 @@ describe('processCandle — NEUTRAL_TRANSITION Momentum Gate (TICKET-036)', () =
 
     const result = await processCandle(baseInput(fixtureWithoutMomentumWindow), INITIAL_SYMBOL_STATE, config);
 
-    expect(result.symbolState.openPosition).toBeNull();
-    expect(result.event).toMatchObject({ type: 'SKIPPED', reason: 'NEUTRAL_GATE_REJECTED' });
+    expect(result.symbolState.openPositions).toHaveLength(0);
+    expect(result.events[0]).toMatchObject({ type: 'SKIPPED', reason: 'NEUTRAL_GATE_REJECTED' });
   });
 
   it('reproduces the exact pre-TICKET-036 behavior (no event at all, not even SKIPPED) when neutralTransitionTradingEnabled=false', async () => {
@@ -571,8 +598,8 @@ describe('processCandle — NEUTRAL_TRANSITION Momentum Gate (TICKET-036)', () =
 
     const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
 
-    expect(result.symbolState.openPosition).toBeNull();
-    expect(result.event).toBeNull(); // NOT a SKIPPED event — NEUTRAL_TRANSITION genuinely never entered before this ticket
+    expect(result.symbolState.openPositions).toHaveLength(0);
+    expect(result.events).toHaveLength(0); // NOT a SKIPPED event — NEUTRAL_TRANSITION genuinely never entered before this ticket
     expect(result.accountBalance).toBe(400);
   });
 });
@@ -630,8 +657,8 @@ describe('processCandle — AI-driven Plan A/B selection (TICKET-052)', () => {
     const fixture = fullOpenFlowFixtureWithMomentum();
     const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, baseConfig); // baseConfig.tpPlan = 'PLAN_A', planAutoSelectionConfig disabled
 
-    expect(result.event).toMatchObject({ type: 'OPEN', side: 'LONG', tpPlan: 'PLAN_A' });
-    expect(result.symbolState.openPosition?.tpPlan).toBe('PLAN_A');
+    expect(result.events[0]).toMatchObject({ type: 'OPEN', side: 'LONG', tpPlan: 'PLAN_A' });
+    expect(result.symbolState.openPositions[0].position.tpPlan).toBe('PLAN_A');
   });
 
   it('enabled + momentum score clears the threshold: selects PLAN_B for that entry', async () => {
@@ -643,8 +670,8 @@ describe('processCandle — AI-driven Plan A/B selection (TICKET-052)', () => {
 
     const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
 
-    expect(result.event).toMatchObject({ type: 'OPEN', side: 'LONG', tpPlan: 'PLAN_B' });
-    expect(result.symbolState.openPosition?.tpPlan).toBe('PLAN_B');
+    expect(result.events[0]).toMatchObject({ type: 'OPEN', side: 'LONG', tpPlan: 'PLAN_B' });
+    expect(result.symbolState.openPositions[0].position.tpPlan).toBe('PLAN_B');
   });
 
   it('enabled + momentum score below threshold: falls back to config.tpPlan (PLAN_A), not PLAN_B', async () => {
@@ -656,8 +683,8 @@ describe('processCandle — AI-driven Plan A/B selection (TICKET-052)', () => {
 
     const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
 
-    expect(result.event).toMatchObject({ type: 'OPEN', side: 'LONG', tpPlan: 'PLAN_A' });
-    expect(result.symbolState.openPosition?.tpPlan).toBe('PLAN_A');
+    expect(result.events[0]).toMatchObject({ type: 'OPEN', side: 'LONG', tpPlan: 'PLAN_A' });
+    expect(result.symbolState.openPositions[0].position.tpPlan).toBe('PLAN_A');
   });
 
   it('enabled + momentum score cannot be computed (insufficient history): falls back to config.tpPlan, never defaults to PLAN_B', async () => {
@@ -670,7 +697,7 @@ describe('processCandle — AI-driven Plan A/B selection (TICKET-052)', () => {
 
     const result = await processCandle(baseInput(fixtureWithoutMomentumWindow), INITIAL_SYMBOL_STATE, config);
 
-    expect(result.event).toMatchObject({ type: 'OPEN', side: 'LONG', tpPlan: 'PLAN_A' });
+    expect(result.events[0]).toMatchObject({ type: 'OPEN', side: 'LONG', tpPlan: 'PLAN_A' });
   });
 
   describe('selectTpPlan() — pure function unit tests', () => {
@@ -709,6 +736,155 @@ describe('processCandle — AI-driven Plan A/B selection (TICKET-052)', () => {
     const positionB = openPosition(counterTrendInput('PLAN_B'));
 
     expect(positionA.tpLevels).toEqual(positionB.tpLevels);
+  });
+});
+
+// TICKET-056 — allow up to config.maxConcurrentPositionsPerSymbol concurrent positions on the same
+// symbol. Pure architecture change: no signal-detection condition (Regime/OB/FVG/Sweep/MSS/Momentum
+// Gate) is touched — only WHEN routeEntry() gets called (Step 2, based on the INCOMING position
+// count) and the Risk Pool's own risk aggregation (Phần C).
+describe('processCandle — multi-position per symbol (TICKET-056)', () => {
+  // Same OB+MSS LONG pattern as the other describe blocks' fullOpenFlowFixture() above — a real
+  // setup that WOULD open a position if routeEntry() is even attempted.
+  function fullOpenFlowFixture() {
+    const candles1h = makeCandles(40, 3_600_000, (i) => 100 + i * 2, () => 1);
+
+    const fillerCount = 310;
+    const filler5m = makeCandles(fillerCount, 300_000, () => 100, () => 0.5);
+    const obPattern5m: CandleData[] = [
+      c(99, 99, 100, 98),
+      c(100.5, 100.5, 102, 99),
+      c(103, 103, 105, 101), // swing high (105)
+      c(101, 101, 102, 100),
+      c(99, 99, 100, 98),
+      c(101, 99, 101, 99), // OB candidate (down), zone [99, 101]
+      c(99, 102, 102.5, 99),
+      c(102, 106, 106, 101.5), // BOS confirmed, close 106 > 105
+    ];
+    const lastFillerTs = filler5m[filler5m.length - 1].timestamp;
+    const obPatternWithTs = obPattern5m.map((candle, i) => ({ ...candle, timestamp: lastFillerTs + (i + 1) * 300_000 }));
+    const candles5m = [...filler5m, ...obPatternWithTs];
+    const obCandleIndex = fillerCount + 5;
+
+    const candles15m = makeCandles(325, 900_000, () => 100, () => 1);
+
+    const mssStartTs = candles5m[obCandleIndex].timestamp;
+    const mssPattern1m: CandleData[] = [
+      c(99.5, 99.5, 100, 99),
+      c(99.25, 99.25, 100, 98.5),
+      c(97.5, 97.5, 99.5, 96), // swing low (96)
+      c(99.25, 99.25, 100, 98.5),
+      c(99.5, 99.5, 100, 99),
+      c(100.5, 100.5, 102, 99), // swing high BETWEEN the two lows (102)
+      c(99.25, 99.25, 100, 98.5),
+      c(99.5, 99.5, 100, 99),
+      c(98.75, 98.75, 99.5, 98), // higher-low vs the first low
+      c(99.25, 99.25, 100, 98.5),
+      c(99.5, 99.5, 100, 99),
+      c(102.5, 103, 103.2, 102.3), // MSS confirmed here, close = 103
+    ].map((candle, i) => ({ ...candle, timestamp: mssStartTs + i * 60_000 }));
+
+    return { candles5m, candles15m, candles1h, candles1m: mssPattern1m };
+  }
+
+  it('maxConcurrentPositionsPerSymbol=1 (default): a valid new-entry signal is ignored while a position is already open — identical to every ticket before this one', async () => {
+    const existingPos = openPosition(farAwayLongInput); // entry=50, far from this fixture's ~94-106 range
+    const state = stateWithOpenPosition(existingPos);
+    const fixture = fullOpenFlowFixture(); // has a real OB+MSS setup that WOULD open a 2nd position if allowed
+
+    const funnelEvents: FunnelEvent[] = [];
+    const result = await processCandle(baseInput(fixture), state, baseConfig, undefined, undefined, (_s, _t, e) => funnelEvents.push(e));
+
+    // Step 2 never even attempted — routeEntry() (and therefore any SETUP funnel event) never runs.
+    expect(funnelEvents).toHaveLength(0);
+    expect(result.symbolState.openPositions).toHaveLength(1); // still just the original
+    expect(result.symbolState.openPositions[0].position.entryPrice).toBe(50);
+    expect(result.events).toHaveLength(0); // no OPEN/SKIPPED event at all
+  });
+
+  it('maxConcurrentPositionsPerSymbol=2: opens a 2nd position on the same symbol while the 1st stays open', async () => {
+    const existingPos = openPosition(farAwayLongInput);
+    const state: SymbolState = {
+      regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
+      openPositions: [{ position: existingPos, meta: makeMeta({ actualRiskDollar: 25 }) }],
+    };
+    const fixture = fullOpenFlowFixture();
+    const config: OrchestratorConfig = { ...baseConfig, maxConcurrentPositionsPerSymbol: 2, riskPoolMaxPct: 0.5 }; // generous pool so the 2nd position isn't skipped for unrelated reasons
+
+    const result = await processCandle(
+      baseInput({ ...fixture, allOpenPositionsRisk: [{ id: 'BTCUSDT', actualRiskDollar: 25 }] }),
+      state,
+      config,
+    );
+
+    expect(result.symbolState.openPositions).toHaveLength(2);
+    expect(result.events.some((e) => e.type === 'OPEN')).toBe(true);
+    // The 1st position (far from this candle's price range) is untouched — still open, still at its own entry.
+    expect(result.symbolState.openPositions.find((p) => p.position.entryPrice === 50)).toBeDefined();
+  });
+
+  it('maxConcurrentPositionsPerSymbol=2: Risk Pool correctly REJECTS the 2nd entry when adding it to the EXISTING same-coin risk would exceed the pool', async () => {
+    const existingPos = openPosition(farAwayLongInput);
+    const state: SymbolState = {
+      regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
+      openPositions: [{ position: existingPos, meta: makeMeta({ actualRiskDollar: 35 }) }],
+    };
+    const fixture = fullOpenFlowFixture();
+    const config: OrchestratorConfig = { ...baseConfig, maxConcurrentPositionsPerSymbol: 2 }; // riskPoolMaxPct stays default 0.1 -> cap = 40 (10% of 400)
+
+    // TICKET-056 Phần C: allOpenPositionsRisk correctly includes THIS SAME symbol's own
+    // already-open risk (35) — if that were still excluded (the pre-TICKET-056 bug this ticket
+    // fixes), 35 would never be counted against the pool and this would wrongly open instead.
+    const result = await processCandle(
+      baseInput({ ...fixture, allOpenPositionsRisk: [{ id: 'BTCUSDT', actualRiskDollar: 35 }] }),
+      state,
+      config,
+    );
+
+    expect(result.events).toContainEqual(expect.objectContaining({ type: 'SKIPPED', reason: 'RISK_POOL_EXCEEDED' }));
+    expect(result.symbolState.openPositions).toHaveLength(1); // still just the original — 2nd entry correctly blocked
+  });
+
+  it('maxConcurrentPositionsPerSymbol=2, already at the limit: routeEntry() is not attempted again (no 3rd position, no SETUP funnel event)', async () => {
+    const posA = openPosition(farAwayLongInput);
+    const posB = openPosition({ ...farAwayLongInput, entryPrice: 60, slPrice: 59 });
+    const state: SymbolState = {
+      regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
+      openPositions: [
+        { position: posA, meta: makeMeta() },
+        { position: posB, meta: makeMeta() },
+      ],
+    };
+    const fixture = fullOpenFlowFixture();
+    const config: OrchestratorConfig = { ...baseConfig, maxConcurrentPositionsPerSymbol: 2 };
+
+    const funnelEvents: FunnelEvent[] = [];
+    const result = await processCandle(baseInput(fixture), state, config, undefined, undefined, (_s, _t, e) => funnelEvents.push(e));
+
+    expect(funnelEvents).toHaveLength(0); // routeEntry() never called — already at the limit
+    expect(result.symbolState.openPositions).toHaveLength(2); // unchanged (neither position touched by this candle range)
+  });
+
+  it('closing one of two open positions leaves the other tracked independently, unaffected', async () => {
+    const posA = openPosition(trendLongInput); // TP1=101.2, SL=99 — WILL be touched by the candle below
+    const posB = openPosition(farAwayLongInput); // entry=50 — untouched by the candle below
+    const state: SymbolState = {
+      regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
+      openPositions: [
+        { position: posA, meta: makeMeta({ actualRiskDollar: 10 }) },
+        { position: posB, meta: makeMeta({ actualRiskDollar: 5 }) },
+      ],
+    };
+    const candles5m = [...sufficientDummyCandles().candles5m.slice(0, -1), c(100, 100, 102, 98)]; // touches posA's SL(99), irrelevant to posB
+    const config: OrchestratorConfig = { ...baseConfig, maxConcurrentPositionsPerSymbol: 2 };
+
+    const result = await processCandle(baseInput({ candles5m }), state, config);
+
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({ type: 'CLOSE', exitReason: 'SL' });
+    expect(result.symbolState.openPositions).toHaveLength(1); // posB still tracked
+    expect(result.symbolState.openPositions[0].position.entryPrice).toBe(50);
+    expect(result.symbolState.openPositions[0].position.closed).toBe(false);
   });
 });
 

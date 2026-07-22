@@ -221,6 +221,7 @@ async function main(): Promise<void> {
     momentumFilterConfig: { ...DEFAULT_MOMENTUM_FILTER_CONFIG, momentumFilterEnabled: true },
     neutralTransitionGateConfig: { ...DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, neutralTransitionTradingEnabled: true, neutralTransitionMomentumGateThreshold: 0.5 },
     planAutoSelectionConfig: DEFAULT_PLAN_AUTO_SELECTION_CONFIG,
+    maxConcurrentPositionsPerSymbol: 1, // TICKET-056: confirmed baseline default — unchanged behavior.
   };
 
   let accountBalance = START_BALANCE;
@@ -235,10 +236,11 @@ async function main(): Promise<void> {
   console.log(`Chạy ${totalSteps - startStep} bước x ${SYMBOLS.length} coin (từ nến 5m #${startStep})...`);
 
   for (let step = startStep; step < totalSteps; step++) {
+    // TICKET-056: sum ALL of a symbol's currently open positions (was a single value assuming at most 1).
     const openRiskBySymbol: Record<string, number> = {};
     for (const symbol of SYMBOLS) {
-      const meta = symbolsData[symbol].state.openMeta;
-      if (meta) openRiskBySymbol[symbol] = meta.actualRiskDollar;
+      const totalRisk = symbolsData[symbol].state.openPositions.reduce((sum, entry) => sum + entry.meta.actualRiskDollar, 0);
+      if (totalRisk > 0) openRiskBySymbol[symbol] = totalRisk;
     }
 
     // Same TICKET-030 cross-symbol correlation pre-pass as backtest.ts — needed for byte-identical
@@ -272,7 +274,8 @@ async function main(): Promise<void> {
       const w1d = closedWindow(sd.candles1d, sd.ptr1d, 24 * 60 * 60_000, decisionTime, WINDOW_1D);
       sd.ptr1d = w1d.ptr;
 
-      const otherOpenPositionsRisk: OpenPositionRisk[] = SYMBOLS.filter((s) => s !== symbol && openRiskBySymbol[s] !== undefined).map((s) => ({
+      // TICKET-056: no longer excludes `symbol` itself — must include this symbol's own already-open position(s) too.
+      const allOpenPositionsRisk: OpenPositionRisk[] = SYMBOLS.filter((s) => openRiskBySymbol[s] !== undefined).map((s) => ({
         id: s,
         actualRiskDollar: openRiskBySymbol[s],
       }));
@@ -308,7 +311,7 @@ async function main(): Promise<void> {
         candles5mSessionVolume: windowSessionVolume5m,
         correlatedRiskRatio,
         accountBalance,
-        otherOpenPositionsRisk,
+        allOpenPositionsRisk,
       };
 
       const funnelEventsThisStep: FunnelEvent[] = [];

@@ -25,17 +25,24 @@ export interface OpenTradeMeta {
   riskMultiplier: number;
 }
 
+/**
+ * TICKET-056: position + its trade-log metadata always created/removed together — paired into one
+ * entry (rather than two parallel arrays) so there is no possibility of an index-sync bug between them.
+ */
+export interface OpenPositionEntry {
+  position: ManagedPositionState;
+  meta: OpenTradeMeta;
+}
+
 export interface SymbolState {
   regimeState: RegimeHysteresisState;
-  openPosition: ManagedPositionState | null;
-  /** Null iff openPosition is null. */
-  openMeta: OpenTradeMeta | null;
+  /** TICKET-056: was `openPosition: ManagedPositionState | null` + `openMeta` — up to config.maxConcurrentPositionsPerSymbol entries now, each tracked fully independently (its own TP/SL/trailing). */
+  openPositions: OpenPositionEntry[];
 }
 
 export const INITIAL_SYMBOL_STATE: SymbolState = {
   regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
-  openPosition: null,
-  openMeta: null,
+  openPositions: [],
 };
 
 export type ExitReason = 'TP1' | 'TP2' | 'RUNNER_SL' | 'SL' | 'BREAKEVEN_SL' | 'COUNTER_TREND_TP';
@@ -99,4 +106,11 @@ export interface OrchestratorConfig {
   neutralTransitionGateConfig: NeutralTransitionGateConfig;
   /** TICKET-052: AI-driven Plan A/B selection, TREND scenario only — backtest-only A/B testing, not wired into live. */
   planAutoSelectionConfig: PlanAutoSelectionConfig;
+  /**
+   * TICKET-056: max simultaneously-open positions per symbol. Default 1 — matches every behavior
+   * before this ticket exactly (routeEntry() only ever tried when the symbol had zero open positions).
+   * Does NOT loosen any signal-detection condition — each additional slot still goes through the
+   * exact same Regime/OB/FVG/Sweep/Breakout/MSS/Momentum Gate pipeline independently.
+   */
+  maxConcurrentPositionsPerSymbol: number;
 }

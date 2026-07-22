@@ -32,7 +32,7 @@ import {
   type SlTpManagerInput,
   type TpPlan,
 } from '../risk/slTpManager.js';
-import type { CloseTradeEvent, ExitReason, OpenTradeEvent, OrchestratorConfig, OrchestratorEvent, SymbolState } from './types.js';
+import type { ExitReason, OpenPositionEntry, OpenTradeEvent, OrchestratorConfig, OrchestratorEvent, SkippedEntryEvent, SymbolState } from './types.js';
 
 export interface ProcessCandleInput {
   symbol: string;
@@ -71,14 +71,20 @@ export interface ProcessCandleInput {
    */
   correlatedRiskRatio?: number;
   accountBalance: number;
-  /** Other symbols' currently open positions — THIS symbol's own position must not be included (checked separately by construction: only called when this symbol has none open). */
-  otherOpenPositionsRisk: OpenPositionRisk[];
+  /**
+   * TICKET-056: renamed from `otherOpenPositionsRisk` — MUST now include THIS symbol's own
+   * already-open position(s) too (previously excluded by construction, since a symbol could never
+   * have an open position when routeEntry() was tried). Caller (backtest.ts) is responsible for
+   * summing/listing every currently open position across every symbol, including this one.
+   */
+  allOpenPositionsRisk: OpenPositionRisk[];
 }
 
 export interface ProcessCandleResult {
   symbolState: SymbolState;
   accountBalance: number;
-  event: OrchestratorEvent | null;
+  /** TICKET-056: was `event: OrchestratorEvent | null` — a single candle can now produce multiple events (e.g. one or more CLOSEs plus an OPEN/SKIPPED) since a symbol may hold multiple concurrent positions. Empty array = no events this candle. */
+  events: OrchestratorEvent[];
 }
 
 /**
@@ -263,6 +269,188 @@ export function selectTpPlan(defaultPlan: TpPlan, momentumScore: number | undefi
   return defaultPlan;
 }
 
+interface EntryAttemptResult {
+  event: OpenTradeEvent | SkippedEntryEvent | null;
+  newEntry: OpenPositionEntry | null;
+}
+
+/**
+ * TICKET-056 — extracted verbatim from the old single-position Step 2 (no behavior change, only
+ * restructured to RETURN its outcome instead of early-returning from processCandle() directly) so
+ * a symbol that already has an open position can still attempt another one, up to
+ * config.maxConcurrentPositionsPerSymbol. Does NOT loosen any signal-detection condition — the same
+ * Regime/OB/FVG/Sweep/Breakout/MSS/Momentum Gate pipeline runs independently for this attempt,
+ * exactly as it did for the very first position on this symbol.
+ */
+async function tryOpenNewPosition(
+  input: ProcessCandleInput,
+  config: OrchestratorConfig,
+  regimeOutput: RegimeOutput,
+  currentCandle: CandleData,
+  accountBalance: number,
+  onFunnelEvent: FunnelCallback | undefined,
+  onSetupNotFiredDiagnostic: ((diagnostic: SetupNotFiredDiagnostic) => void) | undefined,
+): Promise<EntryAttemptResult> {
+  // TICKET-017 Phần A: same direction function as adxDirection1h, applied to 1D candles instead.
+  const macroDirectionSeries = wilderDIDirectionSeries(input.candles1d, EntryConfig.MACRO_TREND_ADX_PERIOD_1D);
+  const macroDirection = macroDirectionSeries.length > 0 ? macroDirectionSeries[macroDirectionSeries.length - 1] : undefined;
+
+  // TICKET-055: TEMPORARY verification wrapper — tracks whether routeEntry() ever fired a
+  // stage='SETUP' event this call, without changing what onFunnelEvent itself receives or how
+  // routeEntry() decides anything. Only wraps when onSetupNotFiredDiagnostic is actually passed
+  // (opt-in, same as every other diagnostic in this file).
+  let setupEventFired = false;
+  const funnelEventWrapper: FunnelCallback | undefined = onSetupNotFiredDiagnostic
+    ? (symbol, timestamp, event) => {
+        if (event.stage === 'SETUP') setupEventFired = true;
+        onFunnelEvent?.(symbol, timestamp, event);
+      }
+    : onFunnelEvent;
+
+  const draftSetup = routeEntry(
+    {
+      regime: regimeOutput.regime,
+      symbol: input.symbol,
+      adxDirection1h: regimeOutput.adxDirection1h,
+      macroDirection,
+      candles5m: input.candles5m,
+      candles15m: input.candles15m,
+      candlesMss: input.candles1m,
+      bbWidthPercentile15m: regimeOutput.computedMetrics.bbWidthPercentile15m,
+      volumeZScore5m: regimeOutput.computedMetrics.volumeZScore5m,
+    },
+    config.entryRouterConfig,
+    funnelEventWrapper,
+  );
+
+  if (onSetupNotFiredDiagnostic && regimeOutput.regime === MarketRegime.TREND_RIDER && !setupEventFired) {
+    onSetupNotFiredDiagnostic({ symbol: input.symbol, timestamp: currentCandle.timestamp, adxDirection1h: regimeOutput.adxDirection1h });
+  }
+
+  if (draftSetup === null) return { event: null, newEntry: null };
+
+  // TICKET-036 — mandatory Momentum Gate, NEUTRAL_TRANSITION only. Runs BEFORE anything else
+  // (account-balance check, soft momentumMultiplier below) since it can outright discard the
+  // DraftSetup rather than just scale it. entryRouter.ts's routeEntry() always builds a real
+  // DraftSetup for NEUTRAL_TRANSITION now (Phần A) — neutralTransitionTradingEnabled=false must
+  // still reproduce the exact pre-TICKET-036 behavior (no event at all, same as draftSetup===null
+  // above), NOT a SKIPPED event, since NEUTRAL_TRANSITION genuinely never entered before this ticket.
+  if (draftSetup.regime === MarketRegime.NEUTRAL_TRANSITION) {
+    if (!config.neutralTransitionGateConfig.neutralTransitionTradingEnabled) {
+      return { event: null, newEntry: null };
+    }
+    const gateScore = await scoreMomentumForSide(draftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
+    // Missing score (insufficient EMA/ATR history) -> gateScore undefined -> comparison is false ->
+    // rejected, same as an explicit low score. Never defaults to passing (PM's explicit "an toàn" requirement).
+    const gatePassed = gateScore !== undefined && gateScore >= config.neutralTransitionGateConfig.neutralTransitionMomentumGateThreshold;
+    if (!gatePassed) {
+      return {
+        event: { type: 'SKIPPED', symbol: input.symbol, timestamp: currentCandle.timestamp, reason: 'NEUTRAL_GATE_REJECTED' },
+        newEntry: null,
+      };
+    }
+    // Gate passed — falls through to the normal pipeline below (account-balance check, sizing,
+    // riskPool, AND the soft momentumMultiplier below still applies on top — this gate is an
+    // ADDITIONAL hard filter before entry, not a replacement for the existing soft one).
+  }
+
+  // Account blown (balance <= 0): no new positions can be sized. Not a NOT_IMPLEMENTED-style
+  // error — a real, expected end state for a backtest/live account, so it's just "no entry"
+  // rather than an exception (PositionSizingInput itself throws on accountBalance <= 0).
+  // TICKET-056: `accountBalance` here already reflects any same-candle close on this same symbol
+  // (PM-confirmed sequencing — see processCandle's Step 3, which runs before this is called).
+  if (accountBalance <= 0) return { event: null, newEntry: null };
+
+  // TICKET-024 Phần C/D — soft risk-multiplier from the momentum model, applied to the sizer's
+  // REQUESTED risk (riskDollarOrPercent) so it flows through maxMarginCap capping the same way a
+  // smaller riskDollarOrPercent naturally would. Never gates entry outright — only scales size.
+  // Off by default: momentumMultiplier stays 1.0 and combinedRiskMultiplier === draftSetup.riskMultiplier
+  // (itself always 1.0 for every regime that currently reaches this point), so behavior is
+  // byte-for-byte unchanged from before this ticket unless momentumFilterConfig.momentumFilterEnabled.
+  //
+  // TICKET-052: TREND-scenario Plan A/B selection (below, right before openInput) also needs this
+  // exact same own-side momentum score — computed ONCE here and reused, never re-scored twice for
+  // two purposes. Score is fetched whenever EITHER feature needs it, independent of each other
+  // (either can be on while the other stays off).
+  let momentumScore: number | undefined;
+  if (config.momentumFilterConfig.momentumFilterEnabled || config.planAutoSelectionConfig.planAutoSelectionEnabled) {
+    // TICKET-036: reuses the same scoreMomentumForSide() helper the Gate above calls — no
+    // re-derivation of the LONG/SHORT model split or feature vector construction.
+    momentumScore = await scoreMomentumForSide(draftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
+  }
+  let momentumMultiplier = 1.0;
+  if (config.momentumFilterConfig.momentumFilterEnabled && momentumScore !== undefined) {
+    momentumMultiplier = computeMomentumMultiplier(momentumScore, config.momentumFilterConfig);
+  }
+  // momentumScore undefined (insufficient EMA/ATR history) -> momentumMultiplier stays 1.0, same as disabled.
+  const combinedRiskMultiplier = draftSetup.riskMultiplier * momentumMultiplier;
+
+  const slDistancePercent = Math.abs(draftSetup.entryPrice - draftSetup.slPrice) / draftSetup.entryPrice;
+  const sizingOutput = new DynamicRMarginSizer().calculate({
+    accountBalance,
+    riskDollarOrPercent: config.riskDollarOrPercent * combinedRiskMultiplier,
+    entryPrice: draftSetup.entryPrice,
+    slDistancePercent,
+    leverage: config.leverage,
+    maxMarginCap: config.maxMarginCap,
+  });
+
+  // TICKET-056 Phần C: `input.allOpenPositionsRisk` must now include this symbol's own already-open
+  // position(s) too (caller's responsibility) — no longer excludes "this symbol" by construction.
+  if (wouldExceedRiskPool(input.allOpenPositionsRisk, sizingOutput.actualRiskDollar, accountBalance, { riskPoolMaxPct: config.riskPoolMaxPct })) {
+    return {
+      event: { type: 'SKIPPED', symbol: input.symbol, timestamp: currentCandle.timestamp, reason: 'RISK_POOL_EXCEEDED' },
+      newEntry: null,
+    };
+  }
+
+  // TICKET-052: AI-driven Plan A/B selection — TREND scenario only, reuses momentumScore already
+  // computed above (never re-scored). Off by default: returns config.tpPlan unchanged.
+  const selectedTpPlan = selectTpPlan(config.tpPlan, momentumScore, config.planAutoSelectionConfig);
+
+  // scenario is always TREND — entryRouter has no COUNTER_TREND path (OB/FVG/Sweep are all
+  // direction-aligned with adxDirection1h; box breakout isn't a reversal play either).
+  const openInput: SlTpManagerInput = {
+    scenario: 'TREND',
+    entryPrice: draftSetup.entryPrice,
+    slPrice: draftSetup.slPrice,
+    side: draftSetup.side,
+    tpPlan: selectedTpPlan,
+    positionSize: sizingOutput.positionSize,
+    takerFeeRate: config.takerFeeRate,
+  };
+  const newPosition = openPosition(openInput);
+
+  const event: OpenTradeEvent = {
+    type: 'OPEN',
+    symbol: input.symbol,
+    side: draftSetup.side,
+    regime: draftSetup.regime,
+    setupType: draftSetup.setupType,
+    tpPlan: selectedTpPlan,
+    entryTimestamp: currentCandle.timestamp,
+    entryPrice: draftSetup.entryPrice,
+    riskMultiplier: combinedRiskMultiplier,
+    actualRiskDollar: sizingOutput.actualRiskDollar,
+    marginRequired: sizingOutput.marginRequired,
+  };
+
+  return {
+    event,
+    newEntry: {
+      position: newPosition,
+      meta: {
+        regime: draftSetup.regime,
+        setupType: draftSetup.setupType,
+        entryTimestamp: currentCandle.timestamp,
+        actualRiskDollar: sizingOutput.actualRiskDollar,
+        marginRequired: sizingOutput.marginRequired,
+        riskMultiplier: combinedRiskMultiplier,
+      },
+    },
+  };
+}
+
 export async function processCandle(
   input: ProcessCandleInput,
   state: SymbolState,
@@ -328,206 +516,59 @@ export async function processCandle(
     });
   }
 
-  // Step 2 — no open position: try to enter.
-  if (state.openPosition === null) {
-    // TICKET-017 Phần A: same direction function as adxDirection1h, applied to 1D candles instead.
-    const macroDirectionSeries = wilderDIDirectionSeries(input.candles1d, EntryConfig.MACRO_TREND_ADX_PERIOD_1D);
-    const macroDirection = macroDirectionSeries.length > 0 ? macroDirectionSeries[macroDirectionSeries.length - 1] : undefined;
+  const events: OrchestratorEvent[] = [];
+  let accountBalance = input.accountBalance;
+  const remainingPositions: OpenPositionEntry[] = [];
 
-    // TICKET-055: TEMPORARY verification wrapper — tracks whether routeEntry() ever fired a
-    // stage='SETUP' event this call, without changing what onFunnelEvent itself receives or how
-    // routeEntry() decides anything. Only wraps when onSetupNotFiredDiagnostic is actually passed
-    // (opt-in, same as every other diagnostic in this file).
-    let setupEventFired = false;
-    const funnelEventWrapper: FunnelCallback | undefined = onSetupNotFiredDiagnostic
-      ? (symbol, timestamp, event) => {
-          if (event.stage === 'SETUP') setupEventFired = true;
-          onFunnelEvent?.(symbol, timestamp, event);
-        }
-      : onFunnelEvent;
+  // Step 3 — advance every currently open position for this symbol, independently. TICKET-056: was
+  // "the one open position, if any" — now a loop, since a symbol can hold more than one. A same-candle
+  // close of one position never affects any other still-open position's own SL/TP/trailing state.
+  for (const entry of state.openPositions) {
+    const { position, exitReason, exitPrice } = advancePosition(entry.position, currentCandle, input.candles5m, config.isLowConfidenceOrLowLiquidity);
 
-    const draftSetup = routeEntry(
-      {
-        regime: regimeOutput.regime,
-        symbol: input.symbol,
-        adxDirection1h: regimeOutput.adxDirection1h,
-        macroDirection,
-        candles5m: input.candles5m,
-        candles15m: input.candles15m,
-        candlesMss: input.candles1m,
-        bbWidthPercentile15m: regimeOutput.computedMetrics.bbWidthPercentile15m,
-        volumeZScore5m: regimeOutput.computedMetrics.volumeZScore5m,
-      },
-      config.entryRouterConfig,
-      funnelEventWrapper,
-    );
-
-    if (onSetupNotFiredDiagnostic && regimeOutput.regime === MarketRegime.TREND_RIDER && !setupEventFired) {
-      onSetupNotFiredDiagnostic({ symbol: input.symbol, timestamp: currentCandle.timestamp, adxDirection1h: regimeOutput.adxDirection1h });
+    if (!position.closed) {
+      remainingPositions.push({ position, meta: entry.meta });
+      continue;
     }
 
-    if (draftSetup === null) {
-      return { symbolState: { ...state, regimeState }, accountBalance: input.accountBalance, event: null };
-    }
-
-    // TICKET-036 — mandatory Momentum Gate, NEUTRAL_TRANSITION only. Runs BEFORE anything else
-    // (account-balance check, soft momentumMultiplier below) since it can outright discard the
-    // DraftSetup rather than just scale it. entryRouter.ts's routeEntry() always builds a real
-    // DraftSetup for NEUTRAL_TRANSITION now (Phần A) — neutralTransitionTradingEnabled=false must
-    // still reproduce the exact pre-TICKET-036 behavior (no event at all, same as draftSetup===null
-    // above), NOT a SKIPPED event, since NEUTRAL_TRANSITION genuinely never entered before this ticket.
-    if (draftSetup.regime === MarketRegime.NEUTRAL_TRANSITION) {
-      if (!config.neutralTransitionGateConfig.neutralTransitionTradingEnabled) {
-        return { symbolState: { ...state, regimeState }, accountBalance: input.accountBalance, event: null };
-      }
-      const gateScore = await scoreMomentumForSide(draftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
-      // Missing score (insufficient EMA/ATR history) -> gateScore undefined -> comparison is false ->
-      // rejected, same as an explicit low score. Never defaults to passing (PM's explicit "an toàn" requirement).
-      const gatePassed = gateScore !== undefined && gateScore >= config.neutralTransitionGateConfig.neutralTransitionMomentumGateThreshold;
-      if (!gatePassed) {
-        return {
-          symbolState: { ...state, regimeState },
-          accountBalance: input.accountBalance,
-          event: { type: 'SKIPPED', symbol: input.symbol, timestamp: currentCandle.timestamp, reason: 'NEUTRAL_GATE_REJECTED' },
-        };
-      }
-      // Gate passed — falls through to the normal pipeline below (account-balance check, sizing,
-      // riskPool, AND the soft momentumMultiplier below still applies on top — this gate is an
-      // ADDITIONAL hard filter before entry, not a replacement for the existing soft one).
-    }
-
-    // Account blown (balance <= 0): no new positions can be sized. Not a NOT_IMPLEMENTED-style
-    // error — a real, expected end state for a backtest/live account, so it's just "no entry"
-    // rather than an exception (PositionSizingInput itself throws on accountBalance <= 0).
-    if (input.accountBalance <= 0) {
-      return { symbolState: { ...state, regimeState }, accountBalance: input.accountBalance, event: null };
-    }
-
-    // TICKET-024 Phần C/D — soft risk-multiplier from the momentum model, applied to the sizer's
-    // REQUESTED risk (riskDollarOrPercent) so it flows through maxMarginCap capping the same way a
-    // smaller riskDollarOrPercent naturally would. Never gates entry outright — only scales size.
-    // Off by default: momentumMultiplier stays 1.0 and combinedRiskMultiplier === draftSetup.riskMultiplier
-    // (itself always 1.0 for every regime that currently reaches this point), so behavior is
-    // byte-for-byte unchanged from before this ticket unless momentumFilterConfig.momentumFilterEnabled.
-    //
-    // TICKET-052: TREND-scenario Plan A/B selection (below, right before openInput) also needs this
-    // exact same own-side momentum score — computed ONCE here and reused, never re-scored twice for
-    // two purposes. Score is fetched whenever EITHER feature needs it, independent of each other
-    // (either can be on while the other stays off).
-    let momentumScore: number | undefined;
-    if (config.momentumFilterConfig.momentumFilterEnabled || config.planAutoSelectionConfig.planAutoSelectionEnabled) {
-      // TICKET-036: reuses the same scoreMomentumForSide() helper the Gate above calls — no
-      // re-derivation of the LONG/SHORT model split or feature vector construction.
-      momentumScore = await scoreMomentumForSide(draftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
-    }
-    let momentumMultiplier = 1.0;
-    if (config.momentumFilterConfig.momentumFilterEnabled && momentumScore !== undefined) {
-      momentumMultiplier = computeMomentumMultiplier(momentumScore, config.momentumFilterConfig);
-    }
-    // momentumScore undefined (insufficient EMA/ATR history) -> momentumMultiplier stays 1.0, same as disabled.
-    const combinedRiskMultiplier = draftSetup.riskMultiplier * momentumMultiplier;
-
-    const slDistancePercent = Math.abs(draftSetup.entryPrice - draftSetup.slPrice) / draftSetup.entryPrice;
-    const sizingOutput = new DynamicRMarginSizer().calculate({
-      accountBalance: input.accountBalance,
-      riskDollarOrPercent: config.riskDollarOrPercent * combinedRiskMultiplier,
-      entryPrice: draftSetup.entryPrice,
-      slDistancePercent,
-      leverage: config.leverage,
-      maxMarginCap: config.maxMarginCap,
-    });
-
-    if (wouldExceedRiskPool(input.otherOpenPositionsRisk, sizingOutput.actualRiskDollar, input.accountBalance, { riskPoolMaxPct: config.riskPoolMaxPct })) {
-      return {
-        symbolState: { ...state, regimeState },
-        accountBalance: input.accountBalance,
-        event: { type: 'SKIPPED', symbol: input.symbol, timestamp: currentCandle.timestamp, reason: 'RISK_POOL_EXCEEDED' },
-      };
-    }
-
-    // TICKET-052: AI-driven Plan A/B selection — TREND scenario only, reuses momentumScore already
-    // computed above (never re-scored). Off by default: returns config.tpPlan unchanged.
-    const selectedTpPlan = selectTpPlan(config.tpPlan, momentumScore, config.planAutoSelectionConfig);
-
-    // scenario is always TREND — entryRouter has no COUNTER_TREND path (OB/FVG/Sweep are all
-    // direction-aligned with adxDirection1h; box breakout isn't a reversal play either).
-    const openInput: SlTpManagerInput = {
-      scenario: 'TREND',
-      entryPrice: draftSetup.entryPrice,
-      slPrice: draftSetup.slPrice,
-      side: draftSetup.side,
-      tpPlan: selectedTpPlan,
-      positionSize: sizingOutput.positionSize,
-      takerFeeRate: config.takerFeeRate,
-    };
-    const newPosition = openPosition(openInput);
-
-    const event: OpenTradeEvent = {
-      type: 'OPEN',
+    // Closed this candle: log + free up this slot.
+    const pnlUsd = computeRealizedPnl(position, exitPrice as number);
+    accountBalance += pnlUsd;
+    const pnlPct = (pnlUsd / entry.meta.marginRequired) * 100;
+    events.push({
+      type: 'CLOSE',
       symbol: input.symbol,
-      side: draftSetup.side,
-      regime: draftSetup.regime,
-      setupType: draftSetup.setupType,
-      tpPlan: selectedTpPlan,
-      entryTimestamp: currentCandle.timestamp,
-      entryPrice: draftSetup.entryPrice,
-      riskMultiplier: combinedRiskMultiplier,
-      actualRiskDollar: sizingOutput.actualRiskDollar,
-      marginRequired: sizingOutput.marginRequired,
-    };
-
-    return {
-      symbolState: {
-        regimeState,
-        openPosition: newPosition,
-        openMeta: {
-          regime: draftSetup.regime,
-          setupType: draftSetup.setupType,
-          entryTimestamp: currentCandle.timestamp,
-          actualRiskDollar: sizingOutput.actualRiskDollar,
-          marginRequired: sizingOutput.marginRequired,
-          riskMultiplier: combinedRiskMultiplier,
-        },
-      },
-      accountBalance: input.accountBalance,
-      event,
-    };
+      side: position.side,
+      regime: entry.meta.regime,
+      setupType: entry.meta.setupType,
+      tpPlan: position.tpPlan,
+      entryTimestamp: entry.meta.entryTimestamp,
+      entryPrice: position.entryPrice,
+      exitTimestamp: currentCandle.timestamp,
+      exitPrice: exitPrice as number,
+      exitReason: exitReason as ExitReason,
+      pnlUsd,
+      pnlPct,
+      riskMultiplier: entry.meta.riskMultiplier,
+      accountBalanceAfter: accountBalance,
+    });
   }
 
-  // Step 3 — already have an open position: advance it.
-  const { position, exitReason, exitPrice } = advancePosition(state.openPosition, currentCandle, input.candles5m, config.isLowConfidenceOrLowLiquidity);
-
-  if (!position.closed) {
-    return { symbolState: { regimeState, openPosition: position, openMeta: state.openMeta }, accountBalance: input.accountBalance, event: null };
+  // Step 2 — try a new entry iff still under the per-symbol concurrency limit. TICKET-056: gated on
+  // the INCOMING position count (state.openPositions.length), NOT `remainingPositions.length` — a
+  // same-candle close must not unlock a same-candle re-entry, so behavior at the default limit of 1
+  // stays byte-for-byte identical to every ticket before this one (close now, re-enter next candle).
+  // PM-confirmed (2026-07-22): `accountBalance` passed to the sizer here already reflects this same
+  // candle's own close(s) above, same sequencing already used across symbols within one backtest step.
+  if (state.openPositions.length < config.maxConcurrentPositionsPerSymbol) {
+    const { event, newEntry } = await tryOpenNewPosition(input, config, regimeOutput, currentCandle, accountBalance, onFunnelEvent, onSetupNotFiredDiagnostic);
+    if (event) events.push(event);
+    if (newEntry) remainingPositions.push(newEntry);
   }
-
-  // Step 4 — closed this candle: log + free up the symbol for a new entry next candle.
-  const meta = state.openMeta as NonNullable<SymbolState['openMeta']>;
-  const pnlUsd = computeRealizedPnl(position, exitPrice as number);
-  const accountBalance = input.accountBalance + pnlUsd;
-  const pnlPct = (pnlUsd / meta.marginRequired) * 100;
-
-  const event: CloseTradeEvent = {
-    type: 'CLOSE',
-    symbol: input.symbol,
-    side: position.side,
-    regime: meta.regime,
-    setupType: meta.setupType,
-    tpPlan: position.tpPlan,
-    entryTimestamp: meta.entryTimestamp,
-    entryPrice: position.entryPrice,
-    exitTimestamp: currentCandle.timestamp,
-    exitPrice: exitPrice as number,
-    exitReason: exitReason as ExitReason,
-    pnlUsd,
-    pnlPct,
-    riskMultiplier: meta.riskMultiplier,
-    accountBalanceAfter: accountBalance,
-  };
 
   return {
-    symbolState: { regimeState, openPosition: null, openMeta: null },
+    symbolState: { regimeState, openPositions: remainingPositions },
     accountBalance,
-    event,
+    events,
   };
 }
