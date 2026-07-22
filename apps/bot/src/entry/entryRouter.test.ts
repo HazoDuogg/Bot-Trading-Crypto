@@ -503,18 +503,54 @@ describe('routeEntry — Entry Funnel Analytics (TICKET-042)', () => {
     ]);
   });
 
-  it('fires only SETUP(fail, NO_SETUP_FOUND) when no OB/FVG/Sweep exists', () => {
+  // TICKET-054: 'NO_SETUP_FOUND' replaced by classifySetupFailReason()'s 4 granular reasons — only
+  // computed when a callback is listening, same opt-in pattern as classifyMssFailReason() (TICKET-043).
+  it('fires SETUP(fail, NO_OB_CANDIDATE) when no OB/FVG/Sweep exists at all (no candidate candle either)', () => {
     const { events, onFunnelEvent } = collect();
-    // `filler` alone: 14 identical flat candles, never produces a fractal (per its own doc comment) -> no OB/FVG/Sweep.
+    // `filler` alone: 14 identical flat candles (open===close always) -> never a down-close (or
+    // up-close) candidate candle for OB, never a fractal for Sweep, never a 3-candle gap for FVG.
     const input = baseInput({ regime: MarketRegime.TREND_RIDER, adxDirection1h: 'UP', candles5m: filler, candlesMss: mssCandles });
 
     const result = routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG, onFunnelEvent);
 
     expect(result).toBeNull();
-    expect(events).toEqual([{ stage: 'SETUP', passed: false, reason: 'NO_SETUP_FOUND' }]);
+    expect(events).toEqual([{ stage: 'SETUP', passed: false, reason: 'NO_OB_CANDIDATE' }]);
   });
 
-  it('fires SETUP(pass) -> MACRO(fail, MACRO_TREND_OPPOSITE) and stops there when the macro filter blocks', () => {
+  it('fires SETUP(fail, OB_FOUND_NO_BOS) when an OB candidate exists but BOS never confirms within lookforwardK', () => {
+    const { events, onFunnelEvent } = collect();
+    // BULLISH: swing high (111) confirmed at index 2 (lower highs at 0,1,3,4), down-close OB
+    // candidate at index 5 (open 103 > close 98), then 10 flat filler candles (lookforwardK=10)
+    // that stay inside [95, 111] — never close above the reference swing high (no BOS) and never
+    // break below the candidate's own low of 95 (no invalidation either) — same overlapping-range
+    // technique as sweepOnlyCandles5m avoids accidentally also forming an FVG gap or a Sweep wick.
+    const obCandidateNoBos5m: CandleData[] = [
+      c(100, 100, 101, 99),
+      c(100, 100, 101, 99),
+      c(100, 110, 111, 100), // swing high (111)
+      c(105, 102, 106, 101),
+      c(102, 103, 105, 101),
+      c(103, 98, 104, 95), // OB candidate (down-close), own low = 95
+      c(100, 101, 102, 99),
+      c(101, 100, 102, 99),
+      c(100, 101, 102, 99),
+      c(101, 100, 102, 99),
+      c(100, 101, 102, 99),
+      c(101, 100, 102, 99),
+      c(100, 101, 102, 99),
+      c(101, 100, 102, 99),
+      c(100, 101, 102, 99),
+      c(101, 100, 102, 99),
+    ];
+    const input = baseInput({ regime: MarketRegime.TREND_RIDER, adxDirection1h: 'UP', candles5m: obCandidateNoBos5m, candlesMss: mssCandles });
+
+    const result = routeEntry(input, DEFAULT_ENTRY_ROUTER_CONFIG, onFunnelEvent);
+
+    expect(result).toBeNull();
+    expect(events).toEqual([{ stage: 'SETUP', passed: false, reason: 'OB_FOUND_NO_BOS' }]);
+  });
+
+  it('fires SETUP(pass) -> MACRO(fail, MACRO_TREND_OPPOSITE, side=LONG) and stops there when the macro filter blocks a LONG', () => {
     const { events, onFunnelEvent } = collect();
     const input = baseInput({ regime: MarketRegime.TREND_RIDER, adxDirection1h: 'UP', macroDirection: 'DOWN', candles5m: trendCandles5m, candlesMss: mssCandles });
 
@@ -523,7 +559,20 @@ describe('routeEntry — Entry Funnel Analytics (TICKET-042)', () => {
     expect(result).toBeNull();
     expect(events).toEqual([
       { stage: 'SETUP', passed: true, setupType: 'OB' },
-      { stage: 'MACRO', passed: false, reason: 'MACRO_TREND_OPPOSITE' },
+      { stage: 'MACRO', passed: false, reason: 'MACRO_TREND_OPPOSITE', side: 'LONG' },
+    ]);
+  });
+
+  it('fires SETUP(pass) -> MACRO(fail, MACRO_TREND_OPPOSITE, side=SHORT) and stops there when the macro filter blocks a SHORT', () => {
+    const { events, onFunnelEvent } = collect();
+    const input = baseInput({ regime: MarketRegime.TREND_RIDER, adxDirection1h: 'DOWN', macroDirection: 'UP', candles5m: bearishTrendCandles5m, candlesMss: bearishMssCandles });
+
+    const result = routeEntry(input, { ...DEFAULT_ENTRY_ROUTER_CONFIG, macroTrendFilterEnabled: true }, onFunnelEvent);
+
+    expect(result).toBeNull();
+    expect(events).toEqual([
+      { stage: 'SETUP', passed: true, setupType: 'OB' },
+      { stage: 'MACRO', passed: false, reason: 'MACRO_TREND_OPPOSITE', side: 'SHORT' },
     ]);
   });
 

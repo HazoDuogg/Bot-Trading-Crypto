@@ -57,6 +57,90 @@ describe('funnelReportMarkdown — MSS FAIL total must match MACRO PASS - MSS PA
   });
 });
 
+// TICKET-054 Phần A — same "tổng khớp" discipline, applied to the new SETUP FAIL breakdown.
+// SETUP is the direct child of STATE PASS on TREND_RIDER's TREND_STYLE cascade, so the
+// reconciliation target is STATE PASS - SETUP PASS.
+describe('funnelReportMarkdown — SETUP FAIL total must match STATE PASS - SETUP PASS (TICKET-054)', () => {
+  it('sums NO_OB_CANDIDATE + OB_FOUND_NO_BOS to exactly the actual SETUP FAIL count, and reports "khớp"', () => {
+    const trendRiderStats: RegimeFunnelStats = {
+      ...emptyFunnelStats(),
+      setupPass: 3,
+      macroPass: 3, // no MACRO fail in this fixture — keeps the unrelated MACRO FAIL section at "khớp"
+      mssPass: 3, // no MSS fail either — keeps the unrelated MSS FAIL section at "khớp"
+      setupFailReasons: {
+        NO_OB_CANDIDATE: 12,
+        OB_FOUND_NO_BOS: 5, // 12+5 = 17 = state(20) - setupPass(3)
+      },
+    };
+    const stateCounts = { [MarketRegime.TREND_RIDER]: 20 };
+    const funnelStats = { [MarketRegime.TREND_RIDER]: trendRiderStats };
+
+    const report = funnelReportMarkdown(20, stateCounts, funnelStats, 0, 'SIDEWAY_STYLE');
+
+    expect(report).toContain('| NO_OB_CANDIDATE | 12 |');
+    expect(report).toContain('| OB_FOUND_NO_BOS | 5 |');
+    expect(report).toContain('| NO_FVG_CANDIDATE | 0 |');
+    expect(report).toContain('| NO_SWEEP_CANDIDATE | 0 |');
+    expect(report).toContain('Tổng cộng (đối chiếu STATE PASS − SETUP PASS = 17)');
+    expect(report).toContain('17 — khớp');
+    expect(report).not.toContain('LỆCH');
+  });
+
+  it('would report LỆCH if a reason were ever missing from the tally', () => {
+    const trendRiderStats: RegimeFunnelStats = {
+      ...emptyFunnelStats(),
+      setupPass: 3,
+      macroPass: 3,
+      setupFailReasons: { NO_OB_CANDIDATE: 12 }, // OB_FOUND_NO_BOS missing -> sums to 12, not 17
+    };
+    const stateCounts = { [MarketRegime.TREND_RIDER]: 20 };
+    const funnelStats = { [MarketRegime.TREND_RIDER]: trendRiderStats };
+
+    const report = funnelReportMarkdown(20, stateCounts, funnelStats, 0, 'SIDEWAY_STYLE');
+
+    expect(report).toContain('12 — LỆCH, kiểm tra lại!');
+  });
+});
+
+// TICKET-054 Phần B — MACRO FAIL split by side (not a new reason — still MACRO_TREND_OPPOSITE only).
+// MACRO is the direct child of SETUP PASS on TREND_RIDER's TREND_STYLE cascade, so the
+// reconciliation target is SETUP PASS - MACRO PASS.
+describe('funnelReportMarkdown — MACRO FAIL by side total must match SETUP PASS - MACRO PASS (TICKET-054)', () => {
+  it('sums LONG + SHORT to exactly the actual MACRO FAIL count, and reports "khớp"', () => {
+    const trendRiderStats: RegimeFunnelStats = {
+      ...emptyFunnelStats(),
+      setupPass: 20,
+      setupFailReasons: { NO_OB_CANDIDATE: 10 }, // matches state(30) - setupPass(20), keeps the unrelated SETUP FAIL section at "khớp"
+      macroPass: 5,
+      macroFailBySide: { LONG: 9, SHORT: 6 }, // 9+6 = 15 = setupPass(20) - macroPass(5)
+    };
+    const stateCounts = { [MarketRegime.TREND_RIDER]: 30 };
+    const funnelStats = { [MarketRegime.TREND_RIDER]: trendRiderStats };
+
+    const report = funnelReportMarkdown(30, stateCounts, funnelStats, 0, 'SIDEWAY_STYLE');
+
+    expect(report).toContain('| LONG (macroDirection=DOWN) | 9 |');
+    expect(report).toContain('| SHORT (macroDirection=UP) | 6 |');
+    expect(report).toContain('Tổng cộng (đối chiếu SETUP PASS − MACRO PASS = 15)');
+    expect(report).toContain('15 — khớp');
+  });
+
+  it('would report LỆCH if the side split under/over-counts relative to actual MACRO FAIL', () => {
+    const trendRiderStats: RegimeFunnelStats = {
+      ...emptyFunnelStats(),
+      setupPass: 20,
+      macroPass: 5,
+      macroFailBySide: { LONG: 9, SHORT: 0 }, // sums to 9, not 15
+    };
+    const stateCounts = { [MarketRegime.TREND_RIDER]: 30 };
+    const funnelStats = { [MarketRegime.TREND_RIDER]: trendRiderStats };
+
+    const report = funnelReportMarkdown(30, stateCounts, funnelStats, 0, 'SIDEWAY_STYLE');
+
+    expect(report).toContain('9 — LỆCH, kiểm tra lại!');
+  });
+});
+
 // TICKET-053 — same "tổng khớp" discipline as TICKET-044's MSS_TIMEOUT lesson, applied to the new
 // BREAKOUT FAIL breakdown. BREAKOUT is the direct child of STATE PASS on SIDEWAY_STYLE regimes (no
 // separate MACRO stage), so the reconciliation target is STATE PASS - BREAKOUT PASS.

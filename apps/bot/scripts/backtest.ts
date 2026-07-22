@@ -406,6 +406,14 @@ async function main(): Promise<void> {
           if (event.stage === 'BREAKOUT' && !event.passed && event.reason) {
             stats.breakoutFailReasons[event.reason] = (stats.breakoutFailReasons[event.reason] ?? 0) + 1;
           }
+          // TICKET-054 Phần A: SETUP-fail breakdown, same pattern.
+          if (event.stage === 'SETUP' && !event.passed && event.reason) {
+            stats.setupFailReasons[event.reason] = (stats.setupFailReasons[event.reason] ?? 0) + 1;
+          }
+          // TICKET-054 Phần B: MACRO-fail split by side — not a new reason, just an extra dimension.
+          if (event.stage === 'MACRO' && !event.passed && event.side) {
+            stats.macroFailBySide[event.side]++;
+          }
           if (!event.passed) continue;
           if (event.stage === 'SETUP') stats.setupPass++;
           else if (event.stage === 'MACRO') stats.macroPass++;

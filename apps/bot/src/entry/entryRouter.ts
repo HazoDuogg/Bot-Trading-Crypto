@@ -2,8 +2,8 @@ import { MarketRegime, type CandleData } from '../regime/types.js';
 import { RegimeConfig } from '../regime/config.js';
 import { lastDefined, wilderATRSeries } from '../regime/indicators.js';
 import { EntryConfig } from './config.js';
-import type { Direction, DraftSetup, EntryRouterConfig, FunnelCallback } from './types.js';
-import { detectOrderBlock } from './detectors/orderBlock.js';
+import type { Direction, DraftSetup, EntryRouterConfig, FunnelCallback, SetupFailReason } from './types.js';
+import { detectOrderBlock, hasOrderBlockCandidate } from './detectors/orderBlock.js';
 import { detectFairValueGap } from './detectors/fairValueGap.js';
 import { detectLiquiditySweep } from './detectors/liquiditySweep.js';
 import { classifyMssFailReason, detectMarketStructureShift } from './detectors/marketStructureShift.js';
@@ -66,6 +66,31 @@ export interface EntryRouterInput {
   volumeZScore5m: number | undefined;
 }
 
+/**
+ * TICKET-054 — read-only diagnostic mirroring the OB->FVG->Sweep cascade's own reasoning, called
+ * ONLY for funnel reporting when that cascade has already fully failed (ob/fvg/sweep all null).
+ * Never used to decide anything; never alters detectOrderBlock()/detectFairValueGap()/
+ * detectLiquiditySweep() or any of their thresholds.
+ *
+ * PM-confirmed design (2026-07-22): detectOrderBlock()'s own outcome (candidate found vs none at
+ * all) is an exhaustive 2-way split that ALWAYS applies at this call site, so it ALWAYS takes
+ * priority — 'OB_FOUND_NO_BOS' is reported whenever OB had a candidate, 'NO_OB_CANDIDATE' otherwise,
+ * regardless of what FVG/Sweep would separately say (both are guaranteed null too whenever this
+ * function runs, since it's only called after the real cascade's own fvg/sweep checks already
+ * failed — neither detector has a partial-credit state to distinguish further). This makes
+ * 'NO_FVG_CANDIDATE'/'NO_SWEEP_CANDIDATE' structurally unreachable here — kept in the type/report
+ * for forward-compatibility, not a bug that they always read 0.
+ */
+function classifySetupFailReason(
+  candles5m: CandleData[],
+  direction: Direction,
+  symbol: string,
+  config: Pick<EntryRouterConfig, 'obDisabledSymbols'>,
+): SetupFailReason {
+  const obHasCandidate = !config.obDisabledSymbols.includes(symbol) && hasOrderBlockCandidate(candles5m, direction, { fractalN: EntryConfig.FRACTAL_N });
+  return obHasCandidate ? 'OB_FOUND_NO_BOS' : 'NO_OB_CANDIDATE';
+}
+
 function runTrendStyle(input: EntryRouterInput, config: EntryRouterConfig, regime: MarketRegime, onFunnelEvent?: FunnelCallback): DraftSetup | null {
   if (input.adxDirection1h === undefined || input.adxDirection1h === 'FLAT') return null; // no clear direction, no entry
   const direction: Direction = input.adxDirection1h === 'UP' ? 'BULLISH' : 'BEARISH';
@@ -104,7 +129,13 @@ function runTrendStyle(input: EntryRouterInput, config: EntryRouterConfig, regim
         wickRatioThreshold: EntryConfig.LIQUIDITY_SWEEP_WICK_RATIO_THRESHOLD,
       });
       if (!sweep) {
-        onFunnelEvent?.(input.symbol, now, { stage: 'SETUP', passed: false, reason: 'NO_SETUP_FOUND' });
+        // TICKET-054: granular reason only computed when a callback is listening — classifySetupFailReason()
+        // is a read-only diagnostic, never used to decide anything (same opt-in pattern as
+        // classifyMssFailReason()/classifyBoxBreakoutFailReason(), TICKET-043/053).
+        if (onFunnelEvent) {
+          const reason = classifySetupFailReason(input.candles5m, direction, input.symbol, config);
+          onFunnelEvent(input.symbol, now, { stage: 'SETUP', passed: false, reason });
+        }
         return null; // no OB, no FVG, no Sweep — nothing to trade
       }
       setupType = 'SWEEP';
@@ -118,7 +149,9 @@ function runTrendStyle(input: EntryRouterInput, config: EntryRouterConfig, regim
   // TICKET-017 Phần A: only take entries aligned with the 1D macro trend when the filter is enabled.
   // FLAT (or unknown) macroDirection does not block — only an outright opposing daily trend does.
   if (config.macroTrendFilterEnabled && ((side === 'LONG' && input.macroDirection === 'DOWN') || (side === 'SHORT' && input.macroDirection === 'UP'))) {
-    onFunnelEvent?.(input.symbol, now, { stage: 'MACRO', passed: false, reason: 'MACRO_TREND_OPPOSITE' });
+    // TICKET-054: side included (not a new reason — same MACRO_TREND_OPPOSITE — just an extra field)
+    // so the report can show whether LONG-blocked-by-DOWN or SHORT-blocked-by-UP dominates.
+    onFunnelEvent?.(input.symbol, now, { stage: 'MACRO', passed: false, reason: 'MACRO_TREND_OPPOSITE', side });
     return null;
   }
   onFunnelEvent?.(input.symbol, now, { stage: 'MACRO', passed: true });

@@ -23,6 +23,13 @@ export const MSS_FAIL_REASONS = ['NO_HIGHER_LOW_PATTERN', 'NO_REFERENCE_BETWEEN'
 // makes any such gap visible instead of silently under-counting.
 export const BOX_BREAKOUT_FAIL_REASONS = ['NO_EDGE_TOUCH', 'BODY_TOO_SMALL', 'VOLUME_NOT_ELEVATED'] as const;
 
+// TICKET-054 Phần A: every possible reason a stage='SETUP' event can carry passed=false — the 4
+// granular reasons from classifySetupFailReason(). PM-confirmed design: detectOrderBlock()'s own
+// candidate-found-or-not split is exhaustive and always takes priority, so 'NO_FVG_CANDIDATE'/
+// 'NO_SWEEP_CANDIDATE' are structurally unreachable in the current cascade (kept here for
+// forward-compatibility and so the total-matches-actual row below still lists all 4 explicitly).
+export const SETUP_FAIL_REASONS = ['NO_OB_CANDIDATE', 'OB_FOUND_NO_BOS', 'NO_FVG_CANDIDATE', 'NO_SWEEP_CANDIDATE'] as const;
+
 export interface RegimeFunnelStats {
   setupPass: number;
   macroPass: number;
@@ -35,6 +42,10 @@ export interface RegimeFunnelStats {
   mssTimeoutCandlesLate: number[];
   /** TICKET-053: granular breakdown of why detectBoxBreakout() found nothing, for SIDEWAY_STYLE regimes. */
   breakoutFailReasons: Record<string, number>;
+  /** TICKET-054 Phần A: granular breakdown of why the OB->FVG->Sweep cascade found no setup at all, TREND_RIDER only. */
+  setupFailReasons: Record<string, number>;
+  /** TICKET-054 Phần B: MACRO_TREND_OPPOSITE events split by which side got blocked, TREND_RIDER only. */
+  macroFailBySide: { LONG: number; SHORT: number };
 }
 
 export function emptyFunnelStats(): RegimeFunnelStats {
@@ -48,6 +59,8 @@ export function emptyFunnelStats(): RegimeFunnelStats {
     mssFailReasons: {},
     mssTimeoutCandlesLate: [],
     breakoutFailReasons: {},
+    setupFailReasons: {},
+    macroFailBySide: { LONG: 0, SHORT: 0 },
   };
 }
 
@@ -136,9 +149,72 @@ export function funnelReportMarkdown(
 
     const section = [`### ${regime} (nhánh ${path})`, '', '| Cửa | Số lượng | Tỷ lệ chuyển đổi từ cửa trước |', '|---|---|---|', ...rows, ''].join('\n');
 
-    // TICKET-043/044 — MSS fail breakdown, TREND_RIDER only (the only regime whose fixed cascade is
-    // TREND_STYLE in every config this session has run; SIDEWAY_STYLE has no MSS stage at all).
+    // TICKET-054 Phần A/B + TICKET-043/044 — SETUP FAIL, MACRO FAIL (by side), and MSS FAIL
+    // breakdowns, TREND_RIDER only (the only regime whose fixed cascade is TREND_STYLE in every
+    // config this session has run; SIDEWAY_STYLE has no SETUP/MACRO/MSS stage at all).
     if (regime === MarketRegime.TREND_RIDER) {
+      // TICKET-054 Phần A — SETUP FAIL breakdown. actual SETUP FAIL = every STATE-passed step that
+      // didn't also pass SETUP (SETUP is the direct child of STATE PASS on TREND_STYLE).
+      const setupFailTotal = SETUP_FAIL_REASONS.reduce((sum, r) => sum + (stats.setupFailReasons[r] ?? 0), 0);
+      const actualSetupFail = state - stats.setupPass;
+      const setupFailRows = SETUP_FAIL_REASONS.map(
+        (r) => `| ${r} | ${fmtInt(stats.setupFailReasons[r] ?? 0)} | ${pct(stats.setupFailReasons[r] ?? 0, setupFailTotal)} |`,
+      );
+      const setupFailMatches = setupFailTotal === actualSetupFail;
+      setupFailRows.push(
+        `| **Tổng cộng (đối chiếu STATE PASS − SETUP PASS = ${fmtInt(actualSetupFail)})** | ${fmtInt(setupFailTotal)}${setupFailMatches ? ' — khớp' : ' — LỆCH, kiểm tra lại!'} | 100.0% |`,
+      );
+      const setupFailSection = [
+        '### Chi tiết lý do SETUP FAIL (TREND_RIDER)',
+        '',
+        '| Lý do | Số lượng | % trên tổng SETUP FAIL |',
+        '|---|---|---|',
+        ...setupFailRows,
+        '',
+        // PM-confirmed design (TICKET-054): detectOrderBlock()'s candidate-found-or-not split is
+        // exhaustive here, so it always wins — NO_FVG_CANDIDATE/NO_SWEEP_CANDIDATE are expected to
+        // read 0 in the current cascade (FVG/Sweep are only tried once OB has already fully failed,
+        // and by then both are guaranteed null too — no partial-credit state to further distinguish
+        // them). Not a bug — always true, independent of whether the total below matches.
+        '_Lưu ý: NO_FVG_CANDIDATE/NO_SWEEP_CANDIDATE luôn đọc 0 ở cascade hiện tại — đã biết trước, do' +
+          ' thiết kế ưu tiên trạng thái OB (xem comment classifySetupFailReason()), không phải bug._',
+        '',
+        // Separate, structural cause of a total mismatch (same class of finding as TICKET-053's
+        // STATE-PASS-vs-BREAKOUT-PASS note): runTrendStyle() returns null BEFORE firing any funnel
+        // event at all when adxDirection1h is undefined/'FLAT' — those steps count toward STATE PASS
+        // (regime confirmation, independent of adxDirection1h) but never reach the SETUP check, so
+        // they're invisible to setupFailReasons. Verified via code inspection (entryRouter.ts's
+        // runTrendStyle() first line), same root-cause class as TICKET-053's Step-2-vs-Step-3 gap.
+        ...(!setupFailMatches
+          ? [
+              '_Lưu ý: LỆCH ở tổng cộng bên trên nhiều khả năng đến từ runTrendStyle() trả về null NGAY' +
+                ' (chưa bắn FunnelEvent nào) khi adxDirection1h là undefined/FLAT — các bước đó vẫn được' +
+                ' tính vào STATE PASS (xác nhận regime độc lập với adxDirection1h) nhưng chưa từng chạm' +
+                ' tới bước kiểm tra SETUP, nên không xuất hiện trong setupFailReasons. Cùng dạng phát hiện' +
+                ' với ghi chú STATE PASS − BREAKOUT PASS ở TICKET-053, không phải bug phân loại._',
+              '',
+            ]
+          : []),
+      ].join('\n');
+
+      // TICKET-054 Phần B — MACRO FAIL by side. Not a new reason (still MACRO_TREND_OPPOSITE only,
+      // per PM: 1 condition = clear enough) — just splits the existing reason by which side got
+      // blocked, to see if this 180-day window skews toward one direction (market characteristic,
+      // not a bug/error). actual MACRO FAIL = every SETUP-passed step that didn't also pass MACRO.
+      const macroFailBySideTotal = stats.macroFailBySide.LONG + stats.macroFailBySide.SHORT;
+      const actualMacroFail = stats.setupPass - stats.macroPass;
+      const macroFailBySideMatches = macroFailBySideTotal === actualMacroFail;
+      const macroFailBySideSection = [
+        '### MACRO FAIL theo side (TREND_RIDER)',
+        '',
+        '| Side bị chặn | Số lượng | % trên tổng MACRO FAIL |',
+        '|---|---|---|',
+        `| LONG (macroDirection=DOWN) | ${fmtInt(stats.macroFailBySide.LONG)} | ${pct(stats.macroFailBySide.LONG, macroFailBySideTotal)} |`,
+        `| SHORT (macroDirection=UP) | ${fmtInt(stats.macroFailBySide.SHORT)} | ${pct(stats.macroFailBySide.SHORT, macroFailBySideTotal)} |`,
+        `| **Tổng cộng (đối chiếu SETUP PASS − MACRO PASS = ${fmtInt(actualMacroFail)})** | ${fmtInt(macroFailBySideTotal)}${macroFailBySideMatches ? ' — khớp' : ' — LỆCH, kiểm tra lại!'} | 100.0% |`,
+        '',
+      ].join('\n');
+
       const mssFailTotal = MSS_FAIL_REASONS.reduce((sum, r) => sum + (stats.mssFailReasons[r] ?? 0), 0);
       // TICKET-044: actual MSS FAIL = every MACRO-passed step that didn't also pass MSS — the same
       // number the 4 reasons above must sum to exactly. Rendered as its own row so a future omission
@@ -181,7 +257,7 @@ export function funnelReportMarkdown(
         '',
       ].join('\n');
 
-      return section + '\n' + mssFailSection + '\n' + mssTimeoutDistSection;
+      return section + '\n' + setupFailSection + '\n' + macroFailBySideSection + '\n' + mssFailSection + '\n' + mssTimeoutDistSection;
     }
 
     // TICKET-053 — BREAKOUT fail breakdown, every SIDEWAY_STYLE regime (SIDEWAY_SCALPER, COMPRESSION,

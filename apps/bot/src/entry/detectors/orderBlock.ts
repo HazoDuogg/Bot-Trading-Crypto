@@ -39,3 +39,22 @@ export function detectOrderBlock(candles: CandleData[], direction: Direction, co
   }
   return null;
 }
+
+/**
+ * TICKET-054 — read-only diagnostic mirroring detectOrderBlock()'s own candidate scan (candle +
+ * reference swing), WITHOUT the BOS-within-K check, called only for funnel reporting when the real
+ * function has already returned null. Distinguishes "never had a candidate at all" from "had a
+ * candidate but it was never BOS-confirmed" — never used to decide anything, never alters
+ * detectOrderBlock() or its thresholds.
+ */
+export function hasOrderBlockCandidate(candles: CandleData[], direction: Direction, config: Pick<OrderBlockConfig, 'fractalN'>): boolean {
+  const swings = detectSwingPoints(candles, config.fractalN);
+  const swingType = direction === 'BULLISH' ? 'HIGH' : 'LOW';
+
+  for (let i = candles.length - 1; i >= 1; i--) {
+    const isCandidateCandle = direction === 'BULLISH' ? candles[i].close < candles[i].open : candles[i].close > candles[i].open;
+    if (!isCandidateCandle) continue;
+    if (latestSwingPointBefore(swings, swingType, i) !== null) return true;
+  }
+  return false;
+}
