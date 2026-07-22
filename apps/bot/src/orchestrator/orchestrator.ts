@@ -108,6 +108,22 @@ export interface DangerZoneDiagnostic {
   volumeZScore5m: number;
 }
 
+/**
+ * TICKET-055 — TEMPORARY, verification-only payload: fires whenever regime is confirmed TREND_RIDER
+ * and routeEntry() returns without ever firing a stage='SETUP' FunnelEvent — i.e. runTrendStyle()
+ * took some early-return path before reaching either `onFunnelEvent(..., {stage:'SETUP', passed:true})`
+ * or the `NO_SETUP_FOUND`-replacement fail event. Exists to verify TICKET-054's claim (all 1,677
+ * SETUP-FAIL-breakdown gap cases are the single known adxDirection1h undefined/FLAT early return in
+ * entryRouter.ts's runTrendStyle()) with real counted data instead of trusting the code-reading alone.
+ * Not part of normal orchestrator output — only built/delivered when the caller passes
+ * onSetupNotFiredDiagnostic to processCandle. Not required to be kept long-term once verified.
+ */
+export interface SetupNotFiredDiagnostic {
+  symbol: string;
+  timestamp: number;
+  adxDirection1h: 'UP' | 'DOWN' | 'FLAT' | undefined;
+}
+
 function touchesFavorable(side: 'LONG' | 'SHORT', candle: CandleData, price: number): boolean {
   return side === 'LONG' ? isTpHit(side, candle.high, price) : isTpHit(side, candle.low, price);
 }
@@ -256,6 +272,8 @@ export async function processCandle(
   // TICKET-042: pure pass-through to entryRouter.ts's routeEntry() — pure observability, never
   // read here, never affects any decision in this function.
   onFunnelEvent?: FunnelCallback,
+  // TICKET-055: TEMPORARY verification-only diagnostic — see SetupNotFiredDiagnostic doc comment.
+  onSetupNotFiredDiagnostic?: (diagnostic: SetupNotFiredDiagnostic) => void,
 ): Promise<ProcessCandleResult> {
   // Step 1 — regime, always runs.
   const regimeOutput = detectRegime({
@@ -316,6 +334,18 @@ export async function processCandle(
     const macroDirectionSeries = wilderDIDirectionSeries(input.candles1d, EntryConfig.MACRO_TREND_ADX_PERIOD_1D);
     const macroDirection = macroDirectionSeries.length > 0 ? macroDirectionSeries[macroDirectionSeries.length - 1] : undefined;
 
+    // TICKET-055: TEMPORARY verification wrapper — tracks whether routeEntry() ever fired a
+    // stage='SETUP' event this call, without changing what onFunnelEvent itself receives or how
+    // routeEntry() decides anything. Only wraps when onSetupNotFiredDiagnostic is actually passed
+    // (opt-in, same as every other diagnostic in this file).
+    let setupEventFired = false;
+    const funnelEventWrapper: FunnelCallback | undefined = onSetupNotFiredDiagnostic
+      ? (symbol, timestamp, event) => {
+          if (event.stage === 'SETUP') setupEventFired = true;
+          onFunnelEvent?.(symbol, timestamp, event);
+        }
+      : onFunnelEvent;
+
     const draftSetup = routeEntry(
       {
         regime: regimeOutput.regime,
@@ -329,8 +359,12 @@ export async function processCandle(
         volumeZScore5m: regimeOutput.computedMetrics.volumeZScore5m,
       },
       config.entryRouterConfig,
-      onFunnelEvent,
+      funnelEventWrapper,
     );
+
+    if (onSetupNotFiredDiagnostic && regimeOutput.regime === MarketRegime.TREND_RIDER && !setupEventFired) {
+      onSetupNotFiredDiagnostic({ symbol: input.symbol, timestamp: currentCandle.timestamp, adxDirection1h: regimeOutput.adxDirection1h });
+    }
 
     if (draftSetup === null) {
       return { symbolState: { ...state, regimeState }, accountBalance: input.accountBalance, event: null };

@@ -14,14 +14,20 @@ import path from 'node:path';
 import type { CandleData } from '../dist/regime/types.js';
 import { RegimeConfig } from '../dist/regime/config.js';
 import { computeCorrelatedRiskRatio } from '../dist/regime/correlatedRisk.js';
-import { processCandle, type DangerZoneDiagnostic, type ManipulatedDiagnostic, type ProcessCandleInput } from '../dist/orchestrator/orchestrator.js';
+import {
+  processCandle,
+  type DangerZoneDiagnostic,
+  type ManipulatedDiagnostic,
+  type ProcessCandleInput,
+  type SetupNotFiredDiagnostic,
+} from '../dist/orchestrator/orchestrator.js';
 import { INITIAL_SYMBOL_STATE, type CloseTradeEvent, type OrchestratorConfig, type SymbolState } from '../dist/orchestrator/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import type { EntryStyleForNeutral, FunnelEvent } from '../dist/entry/types.js';
 import { DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, DEFAULT_PLAN_AUTO_SELECTION_CONFIG } from '../dist/xgbFilter/config.js';
 import type { OpenPositionRisk } from '../dist/risk/riskPool.js';
 import type { TpPlan } from '../dist/risk/slTpManager.js';
-import { emptyFunnelStats, funnelReportMarkdown, STATE_PASS_REGIMES, type RegimeFunnelStats } from './entryFunnelReport.js';
+import { emptyFunnelStats, fmtInt, funnelReportMarkdown, pct, STATE_PASS_REGIMES, type RegimeFunnelStats } from './entryFunnelReport.js';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
 const OHLCV_DIR = path.resolve(process.cwd(), 'data/ohlcv');
@@ -291,6 +297,13 @@ async function main(): Promise<void> {
   const manipulatedLogLines: string[] = []; // TICKET-027
   const dangerZoneLogLines: string[] = []; // TICKET-033
 
+  // TICKET-055 — TEMPORARY verification counters (not required to keep long-term): breaks down every
+  // SetupNotFiredDiagnostic by its adxDirection1h value, to verify TICKET-054's claim with real data
+  // instead of trusting the code-reading alone.
+  let setupNotFiredUndefinedCount = 0;
+  let setupNotFiredFlatCount = 0;
+  let setupNotFiredOtherCount = 0; // should stay 0 if TICKET-054's explanation is complete
+
   // TICKET-042 — Entry Funnel Analytics accumulators. Pure counting, derived from data
   // processCandle() already produces (regimeState + OrchestratorEvent + the optional
   // onFunnelEvent callback) — never influences any decision above.
@@ -379,6 +392,12 @@ async function main(): Promise<void> {
         (d) => manipulatedLogLines.push(formatManipulatedDiagnostic(d)),
         (d) => dangerZoneLogLines.push(formatDangerZoneDiagnostic(d)),
         (_symbol, _timestamp, event) => funnelEventsThisStep.push(event),
+        // TICKET-055 — TEMPORARY verification-only counter, see declaration above.
+        (d: SetupNotFiredDiagnostic) => {
+          if (d.adxDirection1h === undefined) setupNotFiredUndefinedCount++;
+          else if (d.adxDirection1h === 'FLAT') setupNotFiredFlatCount++;
+          else setupNotFiredOtherCount++;
+        },
       );
       sd.state = result.symbolState;
       accountBalance = result.accountBalance;
@@ -441,6 +460,18 @@ async function main(): Promise<void> {
 
   console.log(
     `Xong. ${trades.length} lệnh đóng, ${riskPoolSkippedCount} lệnh bị bỏ qua (risk pool đầy), ${neutralGateRejectedCount} lệnh bị Momentum Gate từ chối (NEUTRAL_TRANSITION), balance cuối=$${accountBalance.toFixed(2)}`,
+  );
+
+  // TICKET-055 — TEMPORARY verification report (không lưu file riêng, chỉ in ra console).
+  const setupNotFiredTotal = setupNotFiredUndefinedCount + setupNotFiredFlatCount + setupNotFiredOtherCount;
+  console.log(`\nTrong ${fmtInt(setupNotFiredTotal)} case SETUP FAIL không phân loại được lý do (TICKET-055):`);
+  console.log(`- adxDirection1h = undefined: ${fmtInt(setupNotFiredUndefinedCount)} case`);
+  console.log(`- adxDirection1h = 'FLAT': ${fmtInt(setupNotFiredFlatCount)} case`);
+  console.log(
+    `- Tổng 2 loại trên: ${fmtInt(setupNotFiredUndefinedCount + setupNotFiredFlatCount)} / ${fmtInt(setupNotFiredTotal)} (${pct(setupNotFiredUndefinedCount + setupNotFiredFlatCount, setupNotFiredTotal)})`,
+  );
+  console.log(
+    `- CÒN LẠI (không phải undefined/FLAT, nhưng vẫn không bắn FunnelEvent): ${fmtInt(setupNotFiredOtherCount)} case${setupNotFiredOtherCount > 0 ? ' — CẦN ĐIỀU TRA THÊM, có nhánh return sớm khác chưa biết tới!' : ''}`,
   );
 
   // TICKET-027 — điều tra riêng, không trộn vào backtest-report.md/backtest-trades.csv.

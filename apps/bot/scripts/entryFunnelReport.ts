@@ -179,19 +179,20 @@ export function funnelReportMarkdown(
         '_Lưu ý: NO_FVG_CANDIDATE/NO_SWEEP_CANDIDATE luôn đọc 0 ở cascade hiện tại — đã biết trước, do' +
           ' thiết kế ưu tiên trạng thái OB (xem comment classifySetupFailReason()), không phải bug._',
         '',
-        // Separate, structural cause of a total mismatch (same class of finding as TICKET-053's
-        // STATE-PASS-vs-BREAKOUT-PASS note): runTrendStyle() returns null BEFORE firing any funnel
-        // event at all when adxDirection1h is undefined/'FLAT' — those steps count toward STATE PASS
-        // (regime confirmation, independent of adxDirection1h) but never reach the SETUP check, so
-        // they're invisible to setupFailReasons. Verified via code inspection (entryRouter.ts's
-        // runTrendStyle() first line), same root-cause class as TICKET-053's Step-2-vs-Step-3 gap.
+        // TICKET-055: TICKET-054's original guess here (adxDirection1h undefined/'FLAT' early return
+        // inside runTrendStyle()) was verified with a temporary counter and DISPROVEN — 0 cases landed
+        // in that branch. The counter also confirmed 0 "unknown early return" cases inside
+        // runTrendStyle() itself, meaning the entire gap happens OUTSIDE routeEntry() — i.e.
+        // state.openPosition !== null for that symbol (Step 3 runs instead of Step 2, routeEntry()
+        // never even called), the exact same structural gap already confirmed for BREAKOUT FAIL
+        // (TICKET-053). Same root-cause class, now empirically confirmed rather than guessed.
         ...(!setupFailMatches
           ? [
-              '_Lưu ý: LỆCH ở tổng cộng bên trên nhiều khả năng đến từ runTrendStyle() trả về null NGAY' +
-                ' (chưa bắn FunnelEvent nào) khi adxDirection1h là undefined/FLAT — các bước đó vẫn được' +
-                ' tính vào STATE PASS (xác nhận regime độc lập với adxDirection1h) nhưng chưa từng chạm' +
-                ' tới bước kiểm tra SETUP, nên không xuất hiện trong setupFailReasons. Cùng dạng phát hiện' +
-                ' với ghi chú STATE PASS − BREAKOUT PASS ở TICKET-053, không phải bug phân loại._',
+              '_Lưu ý: LỆCH ở tổng cộng bên trên đến từ symbol đang giữ lệnh mở (Step 3 chạy thay Step 2,' +
+                ' routeEntry() không được gọi nên không có FunnelEvent nào) — CÙNG nguyên nhân với ghi chú' +
+                ' STATE PASS − BREAKOUT PASS ở TICKET-053. TICKET-054 từng đoán do adxDirection1h' +
+                " undefined/'FLAT' trong runTrendStyle() — TICKET-055 đã dùng bộ đếm xác minh và bác bỏ" +
+                ' giả thuyết đó (0/1.677 case rơi vào nhánh này), không phải bug phân loại._',
               '',
             ]
           : []),
