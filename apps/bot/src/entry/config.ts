@@ -43,7 +43,4 @@ export const EntryConfig = {
 
   /** TICKET-017: period for the 1D macro-trend direction (wilderDIDirectionSeries on daily candles, same function as adxDirection1h). PM didn't specify a 1D-specific period — defaults to RegimeConfig.ADX_PERIOD_1H's value. TODO_CONFIRM. */
   MACRO_TREND_ADX_PERIOD_1D: 14,
-
-  /** TICKET-047: BOX_BOUNCE — off by default. Fraction of the box's own high-low range counting as "near the edge". TODO_CONFIRM, PM suggested 0.15. */
-  BOX_BOUNCE_EDGE_ZONE_PERCENT: 0.15,
 } as const;

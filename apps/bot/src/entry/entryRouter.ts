@@ -8,7 +8,6 @@ import { detectFairValueGap } from './detectors/fairValueGap.js';
 import { detectLiquiditySweep } from './detectors/liquiditySweep.js';
 import { classifyMssFailReason, detectMarketStructureShift } from './detectors/marketStructureShift.js';
 import { detectBoxBreakout } from './detectors/boxBreakout.js';
-import { detectBoxBounce } from './detectors/boxBounce.js';
 
 export const DEFAULT_ENTRY_ROUTER_CONFIG: EntryRouterConfig = {
   // TICKET-036: re-enabled — picks the cascade routeEntry() runs for NEUTRAL_TRANSITION.
@@ -23,10 +22,6 @@ export const DEFAULT_ENTRY_ROUTER_CONFIG: EntryRouterConfig = {
   // TICKET-041: matches EntryConfig.OB_BOS_LOOKFORWARD_K (10, TICKET-008) — baseline behavior
   // unchanged unless a caller (backtest.ts CLI) opts into a different value.
   obBosLookforwardK: EntryConfig.OB_BOS_LOOKFORWARD_K,
-  // TICKET-047: off by default — baseline behavior (SIDEWAY_SCALPER = Box Breakout only) unchanged
-  // unless a caller (backtest.ts CLI) opts in.
-  boxBounceEnabled: false,
-  boxBounceEdgeZonePercent: EntryConfig.BOX_BOUNCE_EDGE_ZONE_PERCENT,
   regimeRiskMultiplier: {
     [MarketRegime.TREND_RIDER]: 1.0,
     [MarketRegime.SIDEWAY_SCALPER]: 1.0,
@@ -184,34 +179,7 @@ function runBoxBreakoutStyle(input: EntryRouterInput, config: EntryRouterConfig,
     // TICKET-042: single 'BREAKOUT' stage covers both the detector's 3 conditions and the
     // macro-trend-filter-for-breakout check below — SIDEWAY_STYLE has no separate MACRO stage.
     onFunnelEvent?.(input.symbol, now, { stage: 'BREAKOUT', passed: false, reason: 'NO_BREAKOUT_YET' });
-
-    // TICKET-047: BOX_BOUNCE — SIDEWAY_SCALPER only (never COMPRESSION/NEUTRAL_TRANSITION even
-    // though they share this function), only when no breakout confirmed this candle, only when
-    // enabled. Priority is unconditional: detectBoxBreakout() above always runs first and unchanged.
-    if (config.boxBounceEnabled && regime === MarketRegime.SIDEWAY_SCALPER) {
-      const bounce = detectBoxBounce(input.candles15m, input.candles5m, EntryConfig.BOX_LOOKBACK_M, config.boxBounceEdgeZonePercent, EntryConfig.LIQUIDITY_SWEEP_WICK_RATIO_THRESHOLD);
-      if (bounce) {
-        const bounceCandle = input.candles5m[bounce.candleIndex];
-        // Same SL formula as Sweep (runTrendStyle above): outside the confirming candle's own
-        // extremum + an ATR buffer — no new formula.
-        const rawSlPrice = bounce.side === 'LONG' ? bounceCandle.low : bounceCandle.high;
-        const atr = lastDefined(wilderATRSeries(input.candles5m, RegimeConfig.ATR_PERIOD_5M));
-        if (atr === undefined) return null; // not enough 5m history to size the SL buffer
-        const buffer = EntryConfig.SL_BUFFER_ATR_MULTIPLIER * atr;
-        const slPrice = bounce.side === 'LONG' ? rawSlPrice - buffer : rawSlPrice + buffer;
-        return {
-          side: bounce.side,
-          entryPrice: bounceCandle.close,
-          slPrice,
-          setupType: 'BOX_BOUNCE',
-          regime,
-          riskMultiplier: config.regimeRiskMultiplier[regime],
-          tpTarget: bounce.boxMidpoint,
-        };
-      }
-    }
-
-    return null; // SIDEWAY_SCALPER: no breakout yet (and no bounce, or bounce disabled); COMPRESSION: still "armed"
+    return null; // SIDEWAY_SCALPER: no breakout yet; COMPRESSION: still "armed"
   }
 
   const side: 'LONG' | 'SHORT' = breakout.direction === 'UP' ? 'LONG' : 'SHORT';

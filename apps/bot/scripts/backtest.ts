@@ -18,10 +18,10 @@ import { processCandle, type DangerZoneDiagnostic, type ManipulatedDiagnostic, t
 import { INITIAL_SYMBOL_STATE, type CloseTradeEvent, type OrchestratorConfig, type SymbolState } from '../dist/orchestrator/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import type { EntryStyleForNeutral, FunnelEvent } from '../dist/entry/types.js';
-import { DEFAULT_BOX_BOUNCE_GATE_CONFIG, DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG } from '../dist/xgbFilter/config.js';
+import { DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG } from '../dist/xgbFilter/config.js';
 import type { OpenPositionRisk } from '../dist/risk/riskPool.js';
 import type { TpPlan } from '../dist/risk/slTpManager.js';
-import { emptyFunnelStats, funnelReportMarkdown, percentile, STATE_PASS_REGIMES, type RegimeFunnelStats } from './entryFunnelReport.js';
+import { emptyFunnelStats, funnelReportMarkdown, STATE_PASS_REGIMES, type RegimeFunnelStats } from './entryFunnelReport.js';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
 const OHLCV_DIR = path.resolve(process.cwd(), 'data/ohlcv');
@@ -57,8 +57,6 @@ function parseArgs(): {
   neutralGateThreshold: number;
   mssStalenessTolerance: number;
   obBosLookback: number;
-  boxBounceEnabled: boolean;
-  boxBounceGateBypassDiagnosticOnly: boolean;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -72,8 +70,6 @@ function parseArgs(): {
   const neutralGateArg = args.find((a) => a.startsWith('--neutral-gate-threshold='));
   const mssStalenessArg = args.find((a) => a.startsWith('--mss-staleness-tolerance='));
   const obBosLookbackArg = args.find((a) => a.startsWith('--ob-bos-lookback='));
-  const boxBounceArg = args.find((a) => a.startsWith('--box-bounce-enabled='));
-  const boxBounceGateBypassArg = args.find((a) => a.startsWith('--box-bounce-gate-bypass-diagnostic-only='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -93,23 +89,16 @@ function parseArgs(): {
     mssStalenessTolerance: mssStalenessArg ? Number(mssStalenessArg.split('=')[1]) : 5,
     // TICKET-041: defaults to 10 unchanged (matches EntryConfig.OB_BOS_LOOKFORWARD_K) when omitted.
     obBosLookback: obBosLookbackArg ? Number(obBosLookbackArg.split('=')[1]) : 10,
-    // TICKET-047: off by default — matches DEFAULT_ENTRY_ROUTER_CONFIG.boxBounceEnabled.
-    boxBounceEnabled: boxBounceArg ? boxBounceArg.split('=')[1] === 'true' : false,
-    // TICKET-049 — DIAGNOSTIC ONLY, never for production. Off by default. Deliberately long/explicit
-    // flag name (not just "--box-bounce-gate-bypass") so it can never be mistaken for a real flag.
-    boxBounceGateBypassDiagnosticOnly: boxBounceGateBypassArg ? boxBounceGateBypassArg.split('=')[1] === 'true' : false,
   };
 }
 
-/** TICKET-017/018/024/036/047/049 Phần C: output filenames auto-derived from which filters are active, so the A/B combinations never overwrite each other. */
+/** TICKET-017/018/024/036 Phần C: output filenames auto-derived from which filters are active, so the A/B combinations never overwrite each other. */
 function outputSuffix(
   macroTrendFilterEnabled: boolean,
   obDisabledSymbols: string[],
   macroTrendFilterAppliesToBoxBreakout: boolean,
   momentumFilterEnabled: boolean,
   neutralTransitionEnabled: boolean,
-  boxBounceEnabled: boolean,
-  boxBounceGateBypassDiagnosticOnly: boolean,
 ): string {
   const macro = macroTrendFilterEnabled;
   const ob = obDisabledSymbols.length > 0;
@@ -121,8 +110,6 @@ function outputSuffix(
   if (macroTrendFilterAppliesToBoxBreakout) base += '-with-boxfilter';
   if (momentumFilterEnabled) base += '-momentum';
   if (neutralTransitionEnabled) base += '-neutral';
-  if (boxBounceEnabled) base += '-boxbounce';
-  if (boxBounceGateBypassDiagnosticOnly) base += '-gatebypass-diagnostic';
   return base;
 }
 
@@ -244,14 +231,9 @@ async function main(): Promise<void> {
     neutralGateThreshold,
     mssStalenessTolerance,
     obBosLookback,
-    boxBounceEnabled,
-    boxBounceGateBypassDiagnosticOnly,
   } = parseArgs();
-  if (boxBounceGateBypassDiagnosticOnly) {
-    console.log('*** CẢNH BÁO: --box-bounce-gate-bypass-diagnostic-only=true — CHỈ DÙNG CHẨN ĐOÁN (TICKET-049), KHÔNG PHẢI CẤU HÌNH PRODUCTION. ***');
-  }
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, boxBounceEnabled=${boxBounceEnabled}, boxBounceGateBypassDiagnosticOnly=${boxBounceGateBypassDiagnosticOnly}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -267,7 +249,6 @@ async function main(): Promise<void> {
       macroTrendFilterAppliesToBoxBreakout,
       mssStalenessToleranceCandles: mssStalenessTolerance, // TICKET-040: CLI-overridable A/B testing — default (5) unchanged from before this ticket.
       obBosLookforwardK: obBosLookback, // TICKET-041: CLI-overridable A/B testing — default (10) unchanged from before this ticket.
-      boxBounceEnabled, // TICKET-047: CLI-overridable A/B testing — default (false) unchanged from before this ticket.
     },
     tpPlan,
     takerFeeRate: 0.0004, // TODO_CONFIRM per docs Mục 8 — Trader chưa cung cấp số thật theo VIP tier
@@ -282,23 +263,16 @@ async function main(): Promise<void> {
       neutralTransitionTradingEnabled: neutralTransitionEnabled,
       neutralTransitionMomentumGateThreshold: neutralGateThreshold, // TICKET-039: CLI-overridable A/B testing — default (0.55) unchanged from before this ticket.
     },
-    boxBounceGateConfig: DEFAULT_BOX_BOUNCE_GATE_CONFIG, // TICKET-047: no CLI flag yet — PM only asked for boxBounceEnabled/edgeZonePercent A/B testing this ticket.
-    boxBounceGateBypassDiagnosticOnly, // TICKET-049 — DIAGNOSTIC ONLY, off by default. Never for production.
   };
 
   let accountBalance = START_BALANCE;
   const trades: CloseTradeEvent[] = [];
-  // TICKET-036/047: SKIPPED events now have 3 distinct reasons — kept separate so this summary line
-  // never falsely blames "risk pool" for what's actually a Momentum Gate rejecting NEUTRAL_TRANSITION
-  // or BOX_BOUNCE. TICKET-047 fixed a latent conflation bug here: the old `else` branch would have
-  // silently counted every BOX_BOUNCE_GATE_REJECTED into neutralGateRejectedCount too.
+  // TICKET-036: SKIPPED events now have 2 distinct reasons — kept separate so this summary line
+  // never falsely blames "risk pool" for what's actually the Momentum Gate rejecting NEUTRAL_TRANSITION.
   let riskPoolSkippedCount = 0;
   let neutralGateRejectedCount = 0;
-  let boxBounceGateRejectedCount = 0;
   const manipulatedLogLines: string[] = []; // TICKET-027
   const dangerZoneLogLines: string[] = []; // TICKET-033
-  const boxBounceGateScores: number[] = []; // TICKET-048 — only defined scores
-  let boxBounceGateScoreUndefinedCount = 0; // TICKET-048 — score couldn't be computed (insufficient EMA/ATR history)
 
   // TICKET-042 — Entry Funnel Analytics accumulators. Pure counting, derived from data
   // processCandle() already produces (regimeState + OrchestratorEvent + the optional
@@ -388,11 +362,6 @@ async function main(): Promise<void> {
         (d) => manipulatedLogLines.push(formatManipulatedDiagnostic(d)),
         (d) => dangerZoneLogLines.push(formatDangerZoneDiagnostic(d)),
         (_symbol, _timestamp, event) => funnelEventsThisStep.push(event),
-        (d) => {
-          // TICKET-048 — diagnostic only, does not affect anything else in this loop.
-          if (d.gateScore === undefined) boxBounceGateScoreUndefinedCount++;
-          else boxBounceGateScores.push(d.gateScore);
-        },
       );
       sd.state = result.symbolState;
       accountBalance = result.accountBalance;
@@ -426,21 +395,20 @@ async function main(): Promise<void> {
       if (result.event?.type === 'CLOSE') trades.push(result.event);
       else if (result.event?.type === 'SKIPPED') {
         if (result.event.reason === 'RISK_POOL_EXCEEDED') riskPoolSkippedCount++;
-        else if (result.event.reason === 'NEUTRAL_GATE_REJECTED') neutralGateRejectedCount++;
-        else boxBounceGateRejectedCount++;
+        else neutralGateRejectedCount++;
       }
     }
 
     const progressStep = step - startStep;
     if (progressStep % 2000 === 0) {
       console.log(
-        `  bước ${progressStep}/${totalSteps - startStep} — balance=$${accountBalance.toFixed(2)}, trades=${trades.length}, riskPoolSkipped=${riskPoolSkippedCount}, neutralGateRejected=${neutralGateRejectedCount}, boxBounceGateRejected=${boxBounceGateRejectedCount}...`,
+        `  bước ${progressStep}/${totalSteps - startStep} — balance=$${accountBalance.toFixed(2)}, trades=${trades.length}, riskPoolSkipped=${riskPoolSkippedCount}, neutralGateRejected=${neutralGateRejectedCount}...`,
       );
     }
   }
 
   console.log(
-    `Xong. ${trades.length} lệnh đóng, ${riskPoolSkippedCount} lệnh bị bỏ qua (risk pool đầy), ${neutralGateRejectedCount} lệnh bị Momentum Gate từ chối (NEUTRAL_TRANSITION), ${boxBounceGateRejectedCount} lệnh bị Momentum Gate từ chối (BOX_BOUNCE, TICKET-047), balance cuối=$${accountBalance.toFixed(2)}`,
+    `Xong. ${trades.length} lệnh đóng, ${riskPoolSkippedCount} lệnh bị bỏ qua (risk pool đầy), ${neutralGateRejectedCount} lệnh bị Momentum Gate từ chối (NEUTRAL_TRANSITION), balance cuối=$${accountBalance.toFixed(2)}`,
   );
 
   // TICKET-027 — điều tra riêng, không trộn vào backtest-report.md/backtest-trades.csv.
@@ -458,48 +426,10 @@ async function main(): Promise<void> {
   writeFileSync(entryFunnelReportPath, funnelReportMarkdown(totalStepsEvaluated, stateCounts, funnelStats, neutralGateRejectedCount, entryStyleForNeutral));
   console.log(`→ ${entryFunnelReportPath}`);
 
-  // TICKET-048 — công cụ quan sát riêng: phân phối điểm Momentum của mọi tín hiệu BOX_BOUNCE đã đi
-  // qua cổng (không đổi ngưỡng/logic quyết định, chỉ ghi lại điểm số đã tính sẵn).
-  const boxBounceGateScoresReportPath = path.resolve(process.cwd(), 'data/box-bounce-gate-scores-report.md');
-  {
-    const sorted = [...boxBounceGateScores].sort((a, b) => a - b);
-    const n = sorted.length;
-    const near = sorted.filter((s) => s >= 0.45 && s <= 0.55).length;
-    const low = sorted.filter((s) => s < 0.3).length;
-    const rows =
-      n > 0
-        ? [
-            `| min | ${sorted[0].toFixed(4)} |`,
-            `| p25 | ${percentile(sorted, 25).toFixed(4)} |`,
-            `| p50 (median) | ${percentile(sorted, 50).toFixed(4)} |`,
-            `| p75 | ${percentile(sorted, 75).toFixed(4)} |`,
-            `| max | ${sorted[n - 1].toFixed(4)} |`,
-            `| Số tín hiệu có điểm trong khoảng 0.45-0.55 (sát ngưỡng) | ${near} |`,
-            `| Số tín hiệu có điểm dưới 0.3 | ${low} |`,
-          ]
-        : [`| (không có tín hiệu BOX_BOUNCE nào được đánh giá qua cổng) | — |`];
-    const boxBounceGateScoresReport = [
-      '# BOX_BOUNCE Momentum Gate — phân phối điểm số (TICKET-048)',
-      '',
-      'Công cụ quan sát — không đổi ngưỡng/logic quyết định. Số liệu nguyên văn, không tự kết luận.',
-      '',
-      `- Tổng số tín hiệu BOX_BOUNCE được đánh giá qua cổng: ${n + boxBounceGateScoreUndefinedCount}`,
-      `- Trong đó tính được điểm: ${n}, không tính được điểm (thiếu lịch sử EMA/ATR, luôn bị từ chối): ${boxBounceGateScoreUndefinedCount}`,
-      `- Ngưỡng hiện tại: ${config.boxBounceGateConfig.boxBounceMomentumGateThreshold}`,
-      '',
-      '| Thống kê | Giá trị |',
-      '|---|---|',
-      ...rows,
-      '',
-    ].join('\n');
-    writeFileSync(boxBounceGateScoresReportPath, boxBounceGateScoresReport);
-    console.log(`→ ${boxBounceGateScoresReportPath}`);
-  }
-
   // TICKET-030: CORRELATED_RISK has no CLI on/off flag (unconditionally wired in, same pattern as
   // MANIPULATED/LOW_LIQUIDITY) — "-correlated" appended so this run's report/trades never overwrite
   // the pre-TICKET-030 both-momentum files (PM explicitly wants the $468.49 baseline preserved for comparison).
-  const suffix = outputSuffix(macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled, neutralTransitionEnabled, boxBounceEnabled, boxBounceGateBypassDiagnosticOnly) + '-correlated';
+  const suffix = outputSuffix(macroTrendFilterEnabled, obDisabledSymbols, macroTrendFilterAppliesToBoxBreakout, momentumFilterEnabled, neutralTransitionEnabled) + '-correlated';
   const tradesPath = path.resolve(process.cwd(), `data/backtest-trades-${suffix}.csv`);
   writeFileSync(tradesPath, tradesCsv(trades));
   console.log(`→ ${tradesPath}`);
@@ -508,37 +438,6 @@ async function main(): Promise<void> {
   const wins = trades.filter((t) => t.pnlUsd > 0).length;
   const winrate = totalTrades > 0 ? (wins / totalTrades) * 100 : 0;
   const totalPnl = trades.reduce((sum, t) => sum + t.pnlUsd, 0);
-
-  // TICKET-049 — diagnostic-only: BOX_BOUNCE trades split out from the rest, ONLY meaningful when
-  // boxBounceGateBypassDiagnosticOnly is on (otherwise BOX_BOUNCE never opens a real trade at all —
-  // TICKET-047/048 already showed 0/36 clearing the real gate).
-  const boxBounceTrades = trades.filter((t) => t.setupType === 'BOX_BOUNCE');
-  const nonBoxBounceTrades = trades.filter((t) => t.setupType !== 'BOX_BOUNCE');
-  const boxBounceWins = boxBounceTrades.filter((t) => t.pnlUsd > 0).length;
-  const boxBounceWinrate = boxBounceTrades.length > 0 ? (boxBounceWins / boxBounceTrades.length) * 100 : 0;
-  const boxBouncePnl = boxBounceTrades.reduce((sum, t) => sum + t.pnlUsd, 0);
-  const nonBoxBounceWins = nonBoxBounceTrades.filter((t) => t.pnlUsd > 0).length;
-  const nonBoxBounceWinrate = nonBoxBounceTrades.length > 0 ? (nonBoxBounceWins / nonBoxBounceTrades.length) * 100 : 0;
-  const nonBoxBouncePnl = nonBoxBounceTrades.reduce((sum, t) => sum + t.pnlUsd, 0);
-
-  const diagnosticSection = boxBounceGateBypassDiagnosticOnly
-    ? [
-        '## TICKET-049 — CHẨN ĐOÁN: BOX_BOUNCE bỏ qua Momentum Gate',
-        '',
-        '**CẢNH BÁO: cấu hình này CHỈ dùng để chẩn đoán bản chất setup BOX_BOUNCE (wick-ratio + vùng biên hộp,',
-        'KHÔNG qua AI) — KHÔNG dùng để quyết định đưa BOX_BOUNCE lên live/paper trading. Baseline chính thức',
-        '($548.58, TICKET-047 với đầy đủ Momentum Gate) không đổi.**',
-        '',
-        '| | Số lệnh | Winrate | PNL ($) |',
-        '|---|---|---|---|',
-        `| BOX_BOUNCE (bỏ qua gate) | ${boxBounceTrades.length} | ${boxBounceWinrate.toFixed(1)}% | ${boxBouncePnl >= 0 ? '+' : ''}${boxBouncePnl.toFixed(2)} |`,
-        `| Các setupType khác (OB/FVG/SWEEP/BOX_BREAKOUT) | ${nonBoxBounceTrades.length} | ${nonBoxBounceWinrate.toFixed(1)}% | ${nonBoxBouncePnl >= 0 ? '+' : ''}${nonBoxBouncePnl.toFixed(2)} |`,
-        `| **Tổng thể cả backtest** | ${totalTrades} | ${winrate.toFixed(1)}% | ${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)} |`,
-        '',
-        'Không tự kết luận nên train AI riêng (Mean Reversion) hay dừng — chỉ trình bày số liệu để PM quyết định.',
-        '',
-      ]
-    : [];
 
   const report = [
     '# Backtest Report — TICKET-010',
@@ -551,9 +450,7 @@ async function main(): Promise<void> {
     `- Tổng PNL: ${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)} USD`,
     `- Số lệnh bị bỏ qua vì risk pool đầy: ${riskPoolSkippedCount}`,
     `- Số lệnh bị Momentum Gate từ chối (NEUTRAL_TRANSITION, TICKET-036): ${neutralGateRejectedCount}`,
-    `- Số lệnh bị Momentum Gate từ chối (BOX_BOUNCE, TICKET-047): ${boxBounceGateRejectedCount}`,
     '',
-    ...diagnosticSection,
     statsTable('PNL theo symbol', groupBy(trades, (t) => t.symbol)),
     statsTable('PNL theo regime', groupBy(trades, (t) => t.regime)),
     statsTable('PNL theo setupType', groupBy(trades, (t) => t.setupType)),
@@ -577,8 +474,6 @@ async function main(): Promise<void> {
     `- riskPoolMaxPct: ${(riskPoolMaxPct * 100).toFixed(0)}% (TICKET-037, CLI-overridable, default 10%)`,
     `- mssStalenessToleranceCandles: ${config.entryRouterConfig.mssStalenessToleranceCandles} (TICKET-040, CLI-overridable, default 5)`,
     `- obBosLookforwardK: ${config.entryRouterConfig.obBosLookforwardK} (TICKET-041, CLI-overridable, default 10)`,
-    `- boxBounceEnabled: ${boxBounceEnabled} (TICKET-047, SIDEWAY_SCALPER only, edgeZonePercent=${config.entryRouterConfig.boxBounceEdgeZonePercent}, hard Momentum Gate threshold=${config.boxBounceGateConfig.boxBounceMomentumGateThreshold})`,
-    `- boxBounceGateBypassDiagnosticOnly: ${boxBounceGateBypassDiagnosticOnly} (TICKET-049 — CHẨN ĐOÁN, không phải cấu hình production)`,
     `- Runner trailing: ATR (2.5×ATR), không dùng Structure trailing`,
     `- takerFeeRate: 0.0004 (TODO_CONFIRM — Trader chưa cung cấp số thật)`,
     `- Quy tắc SL/TP cùng nến: SL chạm trước`,

@@ -1,7 +1,7 @@
 import type { MarketRegime } from '../regime/types.js';
 import type { ManagedPositionState, TpPlan } from '../risk/slTpManager.js';
 import type { EntryRouterConfig } from '../entry/types.js';
-import type { BoxBounceGateConfig, MomentumFilterConfig, NeutralTransitionGateConfig } from '../xgbFilter/config.js';
+import type { MomentumFilterConfig, NeutralTransitionGateConfig } from '../xgbFilter/config.js';
 
 export interface RegimeHysteresisState {
   previousRegime: MarketRegime | null;
@@ -18,7 +18,7 @@ export interface RegimeHysteresisState {
  */
 export interface OpenTradeMeta {
   regime: MarketRegime;
-  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP' | 'BOX_BOUNCE';
+  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP';
   entryTimestamp: number;
   actualRiskDollar: number;
   marginRequired: number;
@@ -45,7 +45,7 @@ export interface OpenTradeEvent {
   symbol: string;
   side: 'LONG' | 'SHORT';
   regime: MarketRegime;
-  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP' | 'BOX_BOUNCE';
+  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP';
   tpPlan: TpPlan;
   entryTimestamp: number;
   entryPrice: number;
@@ -59,7 +59,7 @@ export interface CloseTradeEvent {
   symbol: string;
   side: 'LONG' | 'SHORT';
   regime: MarketRegime;
-  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP' | 'BOX_BOUNCE';
+  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP';
   tpPlan: TpPlan;
   entryTimestamp: number;
   entryPrice: number;
@@ -77,12 +77,8 @@ export interface SkippedEntryEvent {
   type: 'SKIPPED';
   symbol: string;
   timestamp: number;
-  /**
-   * TICKET-036: NEUTRAL_GATE_REJECTED = the mandatory Momentum Gate rejected a NEUTRAL_TRANSITION
-   * DraftSetup. TICKET-047: BOX_BOUNCE_GATE_REJECTED = the same pattern for BOX_BOUNCE. Both
-   * distinct from risk-pool capacity and from each other, never conflated.
-   */
-  reason: 'RISK_POOL_EXCEEDED' | 'NEUTRAL_GATE_REJECTED' | 'BOX_BOUNCE_GATE_REJECTED';
+  /** TICKET-036: NEUTRAL_GATE_REJECTED = the mandatory Momentum Gate rejected a NEUTRAL_TRANSITION DraftSetup — a distinct reason from risk-pool capacity, never conflated. */
+  reason: 'RISK_POOL_EXCEEDED' | 'NEUTRAL_GATE_REJECTED';
 }
 
 export type OrchestratorEvent = OpenTradeEvent | CloseTradeEvent | SkippedEntryEvent;
@@ -101,16 +97,4 @@ export interface OrchestratorConfig {
   momentumFilterConfig: MomentumFilterConfig;
   /** TICKET-036: hard Momentum Gate for NEUTRAL_TRANSITION only — backtest-only A/B testing, not wired into live. */
   neutralTransitionGateConfig: NeutralTransitionGateConfig;
-  /** TICKET-047: hard Momentum Gate for BOX_BOUNCE only — same pattern as neutralTransitionGateConfig above. */
-  boxBounceGateConfig: BoxBounceGateConfig;
-  /**
-   * TICKET-049 — DIAGNOSTIC ONLY, never for production/live/paper trading. Off by default (false).
-   * When true, BOX_BOUNCE still requires entryRouterConfig.boxBounceEnabled=true to produce a
-   * DraftSetup at all, but skips the boxBounceGateConfig.boxBounceMomentumGateThreshold comparison
-   * entirely (treated as always passing) — used ONLY to backtest whether the raw wick-ratio/
-   * edge-zone setup itself has edge, independent of whether the (Momentum-trained, not
-   * Mean-Reversion-trained) gate model can score it. Named deliberately long/explicit so it can
-   * never be mistaken for a real config flag.
-   */
-  boxBounceGateBypassDiagnosticOnly: boolean;
 }

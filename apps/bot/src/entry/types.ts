@@ -45,12 +45,10 @@ export interface DraftSetup {
   side: 'LONG' | 'SHORT';
   entryPrice: number;
   slPrice: number;
-  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP' | 'BOX_BOUNCE';
+  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP';
   regime: MarketRegime;
   /** From EntryRouterConfig.regimeRiskMultiplier — risk/ layer (not wired up this sprint) reads this. */
   riskMultiplier: number;
-  /** TICKET-047: BOX_BOUNCE only — the box midpoint, used as slTpManager's COUNTER_TREND TP target instead of the scenario's default entry±1R. Undefined for every other setupType. */
-  tpTarget?: number;
 }
 
 export type EntryStyleForNeutral = 'TREND_STYLE' | 'SIDEWAY_STYLE';
@@ -102,13 +100,4 @@ export interface EntryRouterConfig {
   mssStalenessToleranceCandles: number;
   /** TICKET-041: same value as EntryConfig.OB_BOS_LOOKFORWARD_K by default (TICKET-008) — threaded through here so backtest.ts's CLI can A/B test it without touching that constant. */
   obBosLookforwardK: number;
-  /**
-   * TICKET-047: off by default. SIDEWAY_SCALPER only (never COMPRESSION/NEUTRAL_TRANSITION, even
-   * though they share runBoxBreakoutStyle()) — tried only when detectBoxBreakout() found nothing
-   * this candle. Gated behind orchestrator.ts's mandatory Momentum Gate (xgbFilter/config.ts's
-   * BoxBounceGateConfig), same pattern as NEUTRAL_TRANSITION.
-   */
-  boxBounceEnabled: boolean;
-  /** TICKET-047: fraction of the box's own range counting as "near the edge" for a bounce candidate. Default EntryConfig.BOX_BOUNCE_EDGE_ZONE_PERCENT. A/B-testable via backtest.ts CLI, not hard-coded. */
-  boxBounceEdgeZonePercent: number;
 }
