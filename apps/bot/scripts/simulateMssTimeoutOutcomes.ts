@@ -225,6 +225,8 @@ async function main(): Promise<void> {
     momentumDirectEnabled: false, // TICKET-059: confirmed baseline default — unchanged behavior.
     momentumDirectThreshold: 0.75,
     momentumDirectMaxAtrPercentile: 100, // TICKET-062: confirmed baseline default — unchanged behavior.
+    momentumDirectMinSlPercent: 0.5, // TICKET-064: TODO_CONFIRM default — never read since momentumDirectEnabled is false here.
+    momentumDirectTpRMultiple: 2.0, // TICKET-064: TODO_CONFIRM default — never read since momentumDirectEnabled is false here.
   };
 
   let accountBalance = START_BALANCE;

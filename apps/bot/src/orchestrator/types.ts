@@ -128,4 +128,17 @@ export interface OrchestratorConfig {
    * exceeds 100), matching every ticket before this one exactly.
    */
   momentumDirectMaxAtrPercentile: number;
+  /**
+   * TICKET-064 Phần A — TODO_CONFIRM: PM suggested 0.5 (%). After computing the ATR-based SL for
+   * MOMENTUM_DIRECT, if the resulting SL distance (%) is narrower than this floor, the SL is widened
+   * out to exactly this floor instead — dilutes the fixed 2-way taker fee against a wider risk
+   * distance (TICKET-063: fees ate 32.64% of the median SL distance pre-ticket).
+   */
+  momentumDirectMinSlPercent: number;
+  /**
+   * TICKET-064 Phần B — TODO_CONFIRM: PM suggested 2.0. Replaces the old fixed 0.5% TP
+   * (EntryConfig.MOMENTUM_DIRECT_TP_PCT, removed by this ticket): TP = this × R, where R is the SL
+   * distance AFTER the momentumDirectMinSlPercent floor above has already been applied.
+   */
+  momentumDirectTpRMultiple: number;
 }

@@ -75,7 +75,7 @@ export const GIVEBACK_LOCK_PCT_NORMAL = 0.6; // Mục 5.4
 export const GIVEBACK_LOCK_PCT_LOW_CONFIDENCE = 0.7; // Mục 5.4
 export const ATR_TRAILING_MULTIPLIER = 2.5; // Mục 5.3.2
 
-function priceAtR(entryPrice: number, r: number, rMultiple: number, side: Side): number {
+export function priceAtR(entryPrice: number, r: number, rMultiple: number, side: Side): number {
   const direction = side === 'LONG' ? 1 : -1;
   return entryPrice + direction * rMultiple * r;
 }

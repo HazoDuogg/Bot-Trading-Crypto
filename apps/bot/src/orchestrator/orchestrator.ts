@@ -28,6 +28,7 @@ import {
   onTp1Hit,
   onTp2Hit,
   openPosition,
+  priceAtR,
   updateGivebackProtection,
   type ManagedPositionState,
   type SlTpManagerInput,
@@ -332,8 +333,23 @@ async function tryMomentumDirect(
   // no OB/FVG/Sweep zone to anchor to) ± ATR buffer.
   const rawSlPrice = side === 'LONG' ? currentCandle.low : currentCandle.high;
   const buffer = EntryConfig.SL_BUFFER_ATR_MULTIPLIER * atr;
-  const slPrice = side === 'LONG' ? rawSlPrice - buffer : rawSlPrice + buffer;
-  const tpPriceOverride = side === 'LONG' ? entryPrice * (1 + EntryConfig.MOMENTUM_DIRECT_TP_PCT) : entryPrice * (1 - EntryConfig.MOMENTUM_DIRECT_TP_PCT);
+  let slPrice = side === 'LONG' ? rawSlPrice - buffer : rawSlPrice + buffer;
+
+  // TICKET-064 Phần A — TICKET-063 found the raw ATR-based SL is often so narrow that the fixed
+  // 2-way taker fee eats a disproportionate share of it (median 32.64% of SL distance). Widen the
+  // SL out to momentumDirectMinSlPercent when the ATR-based distance is narrower than that floor;
+  // leave it untouched when it's already wider.
+  const rawSlDistancePercent = (Math.abs(entryPrice - slPrice) / entryPrice) * 100;
+  if (rawSlDistancePercent < config.momentumDirectMinSlPercent) {
+    const flooredDistance = (config.momentumDirectMinSlPercent / 100) * entryPrice;
+    slPrice = side === 'LONG' ? entryPrice - flooredDistance : entryPrice + flooredDistance;
+  }
+
+  // TICKET-064 Phần B — replaces the old fixed 0.5% TP (EntryConfig.MOMENTUM_DIRECT_TP_PCT, removed
+  // by this ticket) with an R-multiple of the (possibly floored) SL distance above, reusing
+  // slTpManager.ts's own priceAtR() rather than re-deriving the R-multiple math here.
+  const r = Math.abs(entryPrice - slPrice);
+  const tpPriceOverride = priceAtR(entryPrice, r, config.momentumDirectTpRMultiple, side);
 
   return {
     side,

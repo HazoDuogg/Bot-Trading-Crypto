@@ -25,7 +25,6 @@ import { INITIAL_SYMBOL_STATE, type CloseTradeEvent, type OrchestratorConfig, ty
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import type { EntryStyleForNeutral, FunnelEvent } from '../dist/entry/types.js';
 import { DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, DEFAULT_PLAN_AUTO_SELECTION_CONFIG } from '../dist/xgbFilter/config.js';
-import { EntryConfig } from '../dist/entry/config.js';
 import type { OpenPositionRisk } from '../dist/risk/riskPool.js';
 import type { TpPlan } from '../dist/risk/slTpManager.js';
 import { emptyFunnelStats, fmtInt, funnelReportMarkdown, pct, STATE_PASS_REGIMES, type RegimeFunnelStats } from './entryFunnelReport.js';
@@ -70,6 +69,8 @@ function parseArgs(): {
   momentumDirectEnabled: boolean;
   momentumDirectThreshold: number;
   momentumDirectMaxAtrPercentile: number;
+  momentumDirectMinSlPercent: number;
+  momentumDirectTpRMultiple: number;
   /** TICKET-061: diagnostic-only — skip this many calendar days at the start of the run (on top of
    * the existing warm-up startStep), so metrics needing longer history (e.g. macroDirection's 1D
    * ADX, TICKET-017) are already defined for every step. Default 0 — unchanged from every ticket
@@ -94,6 +95,8 @@ function parseArgs(): {
   const momentumDirectEnabledArg = args.find((a) => a.startsWith('--momentum-direct-enabled='));
   const momentumDirectThresholdArg = args.find((a) => a.startsWith('--momentum-direct-threshold='));
   const momentumDirectMaxAtrPercentileArg = args.find((a) => a.startsWith('--momentum-direct-max-atr-percentile='));
+  const momentumDirectMinSlPercentArg = args.find((a) => a.startsWith('--momentum-direct-min-sl-percent='));
+  const momentumDirectTpRMultipleArg = args.find((a) => a.startsWith('--momentum-direct-tp-r-multiple='));
   const skipDaysArg = args.find((a) => a.startsWith('--skip-days='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
@@ -127,6 +130,9 @@ function parseArgs(): {
     momentumDirectThreshold: momentumDirectThresholdArg ? Number(momentumDirectThresholdArg.split('=')[1]) : 0.75,
     // TICKET-062: TODO_CONFIRM, PM suggested 80 — default 100 (no real-world cap) unchanged unless CLI overrides.
     momentumDirectMaxAtrPercentile: momentumDirectMaxAtrPercentileArg ? Number(momentumDirectMaxAtrPercentileArg.split('=')[1]) : 100,
+    // TICKET-064: TODO_CONFIRM, PM suggested 0.5 (%) / 2.0 — defaults unchanged unless CLI overrides.
+    momentumDirectMinSlPercent: momentumDirectMinSlPercentArg ? Number(momentumDirectMinSlPercentArg.split('=')[1]) : 0.5,
+    momentumDirectTpRMultiple: momentumDirectTpRMultipleArg ? Number(momentumDirectTpRMultipleArg.split('=')[1]) : 2.0,
     // TICKET-061: default 0 unchanged from before this ticket.
     skipDays: skipDaysArg ? Number(skipDaysArg.split('=')[1]) : 0,
   };
@@ -284,10 +290,12 @@ async function main(): Promise<void> {
     momentumDirectEnabled,
     momentumDirectThreshold,
     momentumDirectMaxAtrPercentile,
+    momentumDirectMinSlPercent,
+    momentumDirectTpRMultiple,
     skipDays,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, skipDays=${skipDays}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, skipDays=${skipDays}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -326,6 +334,8 @@ async function main(): Promise<void> {
     momentumDirectEnabled, // TICKET-059: CLI-overridable A/B testing — default (false) unchanged from before this ticket.
     momentumDirectThreshold, // TICKET-059: TODO_CONFIRM, default 0.75 unchanged unless CLI overrides.
     momentumDirectMaxAtrPercentile, // TICKET-062: TODO_CONFIRM, default 100 (no real-world cap) unchanged unless CLI overrides.
+    momentumDirectMinSlPercent, // TICKET-064: TODO_CONFIRM, default 0.5 unless CLI overrides.
+    momentumDirectTpRMultiple, // TICKET-064: TODO_CONFIRM, default 2.0 unless CLI overrides.
   };
 
   let accountBalance = START_BALANCE;
@@ -621,8 +631,10 @@ async function main(): Promise<void> {
     `- mssStalenessToleranceCandles: ${config.entryRouterConfig.mssStalenessToleranceCandles} (TICKET-040, CLI-overridable, default 5)`,
     `- obBosLookforwardK: ${config.entryRouterConfig.obBosLookforwardK} (TICKET-041, CLI-overridable, default 10)`,
     `- maxConcurrentPositionsPerSymbol: ${config.maxConcurrentPositionsPerSymbol} (TICKET-056, CLI-overridable, default 1)`,
-    `- momentumDirectEnabled: ${momentumDirectEnabled} (TICKET-059, AI momentum score dùng thẳng làm tín hiệu vào lệnh, song song với cascade OB/FVG/Sweep/Breakout, threshold=${momentumDirectThreshold}, TP cố định=${(EntryConfig.MOMENTUM_DIRECT_TP_PCT * 100).toFixed(2)}%)`,
+    `- momentumDirectEnabled: ${momentumDirectEnabled} (TICKET-059, AI momentum score dùng thẳng làm tín hiệu vào lệnh, song song với cascade OB/FVG/Sweep/Breakout, threshold=${momentumDirectThreshold})`,
     `- momentumDirectMaxAtrPercentile: ${momentumDirectMaxAtrPercentile} (TICKET-062, TODO_CONFIRM, CLI-overridable, default 100 = không giới hạn)`,
+    `- momentumDirectMinSlPercent: ${momentumDirectMinSlPercent}% (TICKET-064 Phần A, TODO_CONFIRM, CLI-overridable, sàn tối thiểu khoảng cách SL — pha loãng phí)`,
+    `- momentumDirectTpRMultiple: ${momentumDirectTpRMultiple}× R (TICKET-064 Phần B, TODO_CONFIRM, CLI-overridable — thay thế TP cố định 0.5% cũ)`,
     `- planAutoSelectionEnabled: ${planAutoSelectionEnabled} (TICKET-052, AI-driven Plan A/B selection, TREND only, threshold=${config.planAutoSelectionConfig.planAutoSelectionMomentumThreshold})`,
     `- Runner trailing: ATR (2.5×ATR), không dùng Structure trailing`,
     `- takerFeeRate: 0.0004 (TODO_CONFIRM — Trader chưa cung cấp số thật)`,

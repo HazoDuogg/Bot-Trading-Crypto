@@ -17,9 +17,10 @@ import { buildFeatureVector, computeMomentumCrossFeatures, loadFeatureSchema } f
 import { scoreMomentum } from '../xgbFilter/momentumScorer.js';
 import { computeMomentumMultiplier } from '../xgbFilter/momentumMultiplier.js';
 import { detectRegime } from '../regime/regimeDetector.js';
-import { wilderDIDirectionSeries } from '../regime/indicators.js';
+import { lastDefined, wilderATRSeries, wilderDIDirectionSeries } from '../regime/indicators.js';
+import { RegimeConfig } from '../regime/config.js';
 import { EntryConfig } from '../entry/config.js';
-import { openPosition, type SlTpManagerInput } from '../risk/slTpManager.js';
+import { openPosition, priceAtR, type SlTpManagerInput } from '../risk/slTpManager.js';
 
 function c(open: number, close: number, high: number, low: number, timestamp = 0): CandleData {
   return { timestamp, open, close, high, low, volume: 100 };
@@ -80,6 +81,9 @@ const baseConfig: OrchestratorConfig = {
   momentumDirectThreshold: 0.75,
   // TICKET-062: 100 = no real-world cap (percentile rank never exceeds 100) — matches every ticket before this one exactly.
   momentumDirectMaxAtrPercentile: 100,
+  // TICKET-064: TODO_CONFIRM, PM suggested 0.5 / 2.0.
+  momentumDirectMinSlPercent: 0.5,
+  momentumDirectTpRMultiple: 2.0,
 };
 
 const trendLongInput: SlTpManagerInput = {
@@ -946,6 +950,19 @@ describe('processCandle — MOMENTUM_DIRECT (TICKET-059)', () => {
     return { candles5m, candles15m, candles1h, candles1m };
   }
 
+  // TICKET-064 Phần A — mirrors orchestrator.ts's own pre-floor ATR SL formula (Sweep-style: current
+  // candle's own low/high ± SL_BUFFER_ATR_MULTIPLIER×ATR(14)), so tests can independently know what
+  // the RAW (before momentumDirectMinSlPercent is applied) SL distance % would have been, without
+  // hardcoding a number that would silently go stale if EntryConfig/RegimeConfig ever changed.
+  function computeRawMomentumDirectSlPercent(candles5m: CandleData[], side: 'LONG' | 'SHORT'): number {
+    const atr = lastDefined(wilderATRSeries(candles5m, RegimeConfig.ATR_PERIOD_5M)) as number;
+    const entryCandle = candles5m[candles5m.length - 1];
+    const rawSlPrice = side === 'LONG' ? entryCandle.low : entryCandle.high;
+    const buffer = EntryConfig.SL_BUFFER_ATR_MULTIPLIER * atr;
+    const slPrice = side === 'LONG' ? rawSlPrice - buffer : rawSlPrice + buffer;
+    return (Math.abs(entryCandle.close - slPrice) / entryCandle.close) * 100;
+  }
+
   it('momentumDirectEnabled=false: no event at all, even though the score would clear the threshold — identical to every ticket before this one', async () => {
     const fixture = momentumDirectFixture();
     const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: false, momentumDirectThreshold: ALWAYS_CLEARS };
@@ -969,7 +986,55 @@ describe('processCandle — MOMENTUM_DIRECT (TICKET-059)', () => {
     expect(openedPosition.scenario).toBe('COUNTER_TREND'); // Mục 7: single fixed-price exit, no tiers
     expect(openedPosition.entryPrice).toBe(100); // current candle's close (all flat at 100)
     expect(openedPosition.tpLevels).toHaveLength(1);
-    expect(openedPosition.tpLevels[0].price).toBeCloseTo(100 * (1 - EntryConfig.MOMENTUM_DIRECT_TP_PCT), 8); // SHORT -> entry*(1-0.5%)
+    // TICKET-064 Phần B: TP = momentumDirectTpRMultiple × R, where R is the SL distance AFTER the
+    // Phần A floor was applied (baseConfig.momentumDirectMinSlPercent=0.5, momentumDirectTpRMultiple=2.0).
+    const r = Math.abs(openedPosition.entryPrice - openedPosition.initialSlPrice);
+    const expectedTp = priceAtR(openedPosition.entryPrice, r, baseConfig.momentumDirectTpRMultiple, 'SHORT');
+    expect(openedPosition.tpLevels[0].price).toBeCloseTo(expectedTp, 8);
+  });
+
+  // TICKET-064 Phần A — this fixture's raw ATR-based SL distance is well under baseConfig's default
+  // 0.5% floor (verified below via computeRawMomentumDirectSlPercent), so the floor SHOULD kick in.
+  it('raw ATR-based SL is narrower than momentumDirectMinSlPercent: SL gets widened out to exactly the floor', async () => {
+    const fixture = momentumDirectFixture();
+    const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: true, momentumDirectThreshold: ALWAYS_CLEARS, momentumDirectMinSlPercent: 0.5 };
+
+    const rawSlPercent = computeRawMomentumDirectSlPercent(fixture.candles5m, 'SHORT');
+    expect(rawSlPercent).toBeLessThan(0.5); // sanity: this fixture's raw ATR SL really is narrower than the floor
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    const openedPosition = result.symbolState.openPositions[0].position;
+    const actualSlPercent = (Math.abs(openedPosition.entryPrice - openedPosition.initialSlPrice) / openedPosition.entryPrice) * 100;
+    expect(actualSlPercent).toBeCloseTo(0.5, 6); // widened to exactly the floor, not left at the (narrower) raw ATR value
+  });
+
+  it('raw ATR-based SL is already wider than momentumDirectMinSlPercent: SL is left untouched (no floor applied)', async () => {
+    const fixture = momentumDirectFixture();
+    // Set the floor well BELOW this fixture's known raw ATR SL distance so it never triggers.
+    const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: true, momentumDirectThreshold: ALWAYS_CLEARS, momentumDirectMinSlPercent: 0.05 };
+
+    const rawSlPercent = computeRawMomentumDirectSlPercent(fixture.candles5m, 'SHORT');
+    expect(rawSlPercent).toBeGreaterThan(0.05); // sanity: floor is below the raw distance, so it must not fire
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    const openedPosition = result.symbolState.openPositions[0].position;
+    const actualSlPercent = (Math.abs(openedPosition.entryPrice - openedPosition.initialSlPrice) / openedPosition.entryPrice) * 100;
+    expect(actualSlPercent).toBeCloseTo(rawSlPercent, 6); // unchanged — equals the raw ATR value, not the (lower) floor
+  });
+
+  it('TP is exactly momentumDirectTpRMultiple × R, where R is the SL distance AFTER flooring', async () => {
+    const fixture = momentumDirectFixture();
+    const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: true, momentumDirectThreshold: ALWAYS_CLEARS, momentumDirectMinSlPercent: 0.5, momentumDirectTpRMultiple: 3.0 };
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    const openedPosition = result.symbolState.openPositions[0].position;
+    const r = Math.abs(openedPosition.entryPrice - openedPosition.initialSlPrice);
+    expect(r).toBeCloseTo((0.5 / 100) * openedPosition.entryPrice, 6); // sanity: R here is the floored 0.5%, not the raw ATR value
+    const expectedTp = priceAtR(openedPosition.entryPrice, r, 3.0, 'SHORT');
+    expect(openedPosition.tpLevels[0].price).toBeCloseTo(expectedTp, 8);
   });
 
   it('score below threshold: creates nothing', async () => {
