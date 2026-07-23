@@ -121,4 +121,11 @@ export interface OrchestratorConfig {
   momentumDirectEnabled: boolean;
   /** TODO_CONFIRM: PM suggested 0.75. Momentum score (own-side model) must be >= this to trigger MOMENTUM_DIRECT. */
   momentumDirectThreshold: number;
+  /**
+   * TICKET-062 — TODO_CONFIRM: PM suggested 80 (matches TICKET-061's group-split threshold).
+   * atrPercentile5m at the candidate candle must be <= this for MOMENTUM_DIRECT to trigger; undefined
+   * (insufficient history) always blocks. Default 100 = no real-world cap (percentile rank never
+   * exceeds 100), matching every ticket before this one exactly.
+   */
+  momentumDirectMaxAtrPercentile: number;
 }

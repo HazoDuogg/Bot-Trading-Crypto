@@ -78,6 +78,8 @@ const baseConfig: OrchestratorConfig = {
   // TICKET-059: off by default — matches every ticket before this one exactly.
   momentumDirectEnabled: false,
   momentumDirectThreshold: 0.75,
+  // TICKET-062: 100 = no real-world cap (percentile rank never exceeds 100) — matches every ticket before this one exactly.
+  momentumDirectMaxAtrPercentile: 100,
 };
 
 const trendLongInput: SlTpManagerInput = {
@@ -1000,6 +1002,32 @@ describe('processCandle — MOMENTUM_DIRECT (TICKET-059)', () => {
     expect(result.events).toHaveLength(0);
     expect(result.symbolState.openPositions).toHaveLength(0);
   });
+
+  // TICKET-062 — volatility cap: momentumDirectFixture()'s atrPercentile5m is 100 (verified in the
+  // fixture's own doc comment above) — a cap below that must block, a cap at/above it must not.
+  it('atrPercentile5m (100) exceeds the cap (80): creates nothing even though the momentum score always clears', async () => {
+    const fixture = momentumDirectFixture();
+    const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: true, momentumDirectThreshold: ALWAYS_CLEARS, momentumDirectMaxAtrPercentile: 80 };
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.events).toHaveLength(0);
+    expect(result.symbolState.openPositions).toHaveLength(0);
+  });
+
+  it('atrPercentile5m (100) is within the cap (100, boundary inclusive): creates the MOMENTUM_DIRECT DraftSetup as before', async () => {
+    const fixture = momentumDirectFixture();
+    const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: true, momentumDirectThreshold: ALWAYS_CLEARS, momentumDirectMaxAtrPercentile: 100 };
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.events[0]).toMatchObject({ type: 'OPEN', setupType: 'MOMENTUM_DIRECT' });
+    expect(result.symbolState.openPositions).toHaveLength(1);
+  });
+
+  // Default momentumDirectMaxAtrPercentile (100, from baseConfig, not overridden here) reproduces
+  // every MOMENTUM_DIRECT test above byte-for-byte — those tests were left completely unmodified by
+  // this ticket and still pass, which IS the "default = identical to before this ticket" proof.
 
   it('routeEntry() cascade already found a setup: detectMomentumDirect() is never even tried (no double entry, setupType stays OB)', async () => {
     // Reuses the OB+MSS LONG fixture from the multi-position describe block above — a real setup

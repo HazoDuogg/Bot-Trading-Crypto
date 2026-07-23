@@ -288,6 +288,7 @@ async function traceNeededWindows(neededWindows: NeededWindow[]): Promise<Map<st
     maxConcurrentPositionsPerSymbol: 1,
     momentumDirectEnabled: false, // TICKET-059: confirmed baseline default — unchanged behavior.
     momentumDirectThreshold: 0.75,
+    momentumDirectMaxAtrPercentile: 100, // TICKET-062: confirmed baseline default — unchanged behavior.
   };
 
   let accountBalance = 400;

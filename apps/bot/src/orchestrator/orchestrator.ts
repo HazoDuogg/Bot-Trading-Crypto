@@ -300,6 +300,14 @@ async function tryMomentumDirect(
 ): Promise<DraftSetup | null> {
   if (MOMENTUM_DIRECT_BLOCKED_REGIMES.includes(regimeOutput.regime)) return null;
 
+  // TICKET-062 — volatility cap: TICKET-061 found MOMENTUM_DIRECT fires mostly during extreme
+  // volatility (atrPercentile5m mean 83.90 vs ~48.5 baseline), and that exact high-volatility group
+  // drags winrate down (30.05% vs 42.05% for the rest). Undefined (insufficient 5m ATR history)
+  // can't be confirmed within the cap, so it blocks too — never defaults to passing on missing data,
+  // same "an toàn" convention as every other gate in this file.
+  const atrPercentile5m = regimeOutput.computedMetrics.atrPercentile5m;
+  if (atrPercentile5m === undefined || atrPercentile5m > config.momentumDirectMaxAtrPercentile) return null;
+
   const longScore = await scoreMomentumForSide('LONG', input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
   const shortScore = await scoreMomentumForSide('SHORT', input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
   const longPasses = longScore !== undefined && detectMomentumDirect(longScore, 'LONG', config.momentumDirectThreshold);
