@@ -69,6 +69,11 @@ function parseArgs(): {
   maxConcurrentPositionsPerSymbol: number;
   momentumDirectEnabled: boolean;
   momentumDirectThreshold: number;
+  /** TICKET-061: diagnostic-only — skip this many calendar days at the start of the run (on top of
+   * the existing warm-up startStep), so metrics needing longer history (e.g. macroDirection's 1D
+   * ADX, TICKET-017) are already defined for every step. Default 0 — unchanged from every ticket
+   * before this one unless the CLI explicitly opts in. */
+  skipDays: number;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -87,6 +92,7 @@ function parseArgs(): {
   const maxConcurrentPositionsArg = args.find((a) => a.startsWith('--max-concurrent-positions-per-symbol='));
   const momentumDirectEnabledArg = args.find((a) => a.startsWith('--momentum-direct-enabled='));
   const momentumDirectThresholdArg = args.find((a) => a.startsWith('--momentum-direct-threshold='));
+  const skipDaysArg = args.find((a) => a.startsWith('--skip-days='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -117,6 +123,8 @@ function parseArgs(): {
     momentumDirectEnabled: momentumDirectEnabledArg ? momentumDirectEnabledArg.split('=')[1] === 'true' : false,
     // TICKET-059: TODO_CONFIRM, PM suggested 0.75 — default unchanged unless CLI overrides.
     momentumDirectThreshold: momentumDirectThresholdArg ? Number(momentumDirectThresholdArg.split('=')[1]) : 0.75,
+    // TICKET-061: default 0 unchanged from before this ticket.
+    skipDays: skipDaysArg ? Number(skipDaysArg.split('=')[1]) : 0,
   };
 }
 
@@ -271,9 +279,10 @@ async function main(): Promise<void> {
     maxConcurrentPositionsPerSymbol,
     momentumDirectEnabled,
     momentumDirectThreshold,
+    skipDays,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, skipDays=${skipDays}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -346,7 +355,10 @@ async function main(): Promise<void> {
   // startStep must guarantee enough REAL TIME has elapsed for every timeframe's window to be full,
   // not just the 5m one — 325 15m candles takes 3.4 real days (975 5m-candle-equivalents), which
   // dominates over the 5m window's own 320-candle (26.7h) requirement.
-  const startStep = Math.max(WINDOW_5M - 1, WINDOW_15M * 3, WINDOW_1H * 12) + 5; // +5 safety margin
+  // TICKET-061: skipDays lets a diagnostic run additionally skip N calendar days on top of the
+  // usual warm-up margin — e.g. so 1D-history-dependent metrics (macroDirection, TICKET-017) are
+  // already defined from step 0 onward. 288 = number of 5m candles per day. Default 0 -> unchanged.
+  const startStep = Math.max(WINDOW_5M - 1, WINDOW_15M * 3, WINDOW_1H * 12) + 5 + skipDays * 288; // +5 safety margin
 
   console.log(`Chạy ${totalSteps - startStep} bước x ${SYMBOLS.length} coin (từ nến 5m #${startStep})...`);
 
