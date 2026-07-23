@@ -222,6 +222,8 @@ async function main(): Promise<void> {
     neutralTransitionGateConfig: { ...DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, neutralTransitionTradingEnabled: true, neutralTransitionMomentumGateThreshold: 0.5 },
     planAutoSelectionConfig: DEFAULT_PLAN_AUTO_SELECTION_CONFIG,
     maxConcurrentPositionsPerSymbol: 1, // TICKET-056: confirmed baseline default — unchanged behavior.
+    momentumDirectEnabled: false, // TICKET-059: confirmed baseline default — unchanged behavior.
+    momentumDirectThreshold: 0.75,
   };
 
   let accountBalance = START_BALANCE;

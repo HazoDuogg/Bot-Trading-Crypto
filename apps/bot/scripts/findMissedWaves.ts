@@ -4,7 +4,13 @@
  * traces back through the exact same Regime/Entry Funnel infrastructure already built in
  * TICKET-042 → 056 to report precisely which gate stopped it (Phần C).
  *
- * Pure observability: does NOT change any threshold/decision logic anywhere. Phần C re-runs the
+ * TICKET-058 — for EVERY one of the 60 waves (not just missed ones), measures how long TREND_RIDER
+ * took to get CONFIRMED (post-hysteresis, same `regimeState.previousRegime` field Phần C already
+ * reads) relative to each wave's start, reusing the exact same traced regime data — no new
+ * regime/entry computation, only a new aggregation over data this file already produces.
+ *
+ * Pure observability: does NOT change any threshold/decision logic anywhere (in particular, does NOT
+ * touch TICKET-014's ADX_PERSISTENCE_CANDLES=3 or any ADX threshold). Phần C re-runs the
  * confirmed-baseline simulation (same technique as simulateMssTimeoutOutcomes.ts, TICKET-045) purely
  * to CAPTURE the existing FunnelEvent/regime stream in more granular (per-candle, per-symbol) form
  * than backtest.ts's own aggregated stats — no new classification logic is introduced.
@@ -21,7 +27,7 @@ import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import type { FunnelEvent } from '../dist/entry/types.js';
 import { DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, DEFAULT_PLAN_AUTO_SELECTION_CONFIG } from '../dist/xgbFilter/config.js';
 import type { OpenPositionRisk } from '../dist/risk/riskPool.js';
-import { STATE_FAIL_REGIMES } from './entryFunnelReport.js';
+import { percentile, STATE_FAIL_REGIMES } from './entryFunnelReport.js';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
 const OHLCV_DIR = path.resolve(process.cwd(), 'data/ohlcv');
@@ -229,6 +235,28 @@ function describeOutcome(entry: TraceEntry, maxConcurrentPositionsPerSymbol: num
   return { rank: 6, description: 'Không xác định' };
 }
 
+interface TrendRiderDelayResult {
+  hasConfirmation: boolean;
+  /** Minutes, signed — negative means TREND_RIDER was already confirmed BEFORE the wave's price-based start. Only set when hasConfirmation is true. */
+  delayMinutes?: number;
+}
+
+/**
+ * TICKET-058 — reuses the SAME trace entries Phần C already collected (confirmedRegime is
+ * `regimeState.previousRegime`, i.e. already past hysteresis, not just candidateRegime) — no new
+ * regime computation. Takes the EARLIEST TREND_RIDER-confirmed entry within the ±2h window as "the"
+ * confirmation moment; if TREND_RIDER never appears in the window at all, this is reported as a
+ * distinct "never recognized as trend" case, NOT folded into the delay distribution (PM's explicit instruction).
+ */
+function computeTrendRiderDelay(wave: Wave, trace: TraceEntry[]): TrendRiderDelayResult {
+  const windowTrace = trace.filter((e) => Math.abs(e.timestamp - wave.startTimestamp) <= MATCH_WINDOW_MS);
+  const trendRiderEntries = windowTrace.filter((e) => e.confirmedRegime === MarketRegime.TREND_RIDER);
+  if (trendRiderEntries.length === 0) return { hasConfirmation: false };
+
+  const earliest = trendRiderEntries.reduce((a, b) => (b.timestamp < a.timestamp ? b : a));
+  return { hasConfirmation: true, delayMinutes: (earliest.timestamp - wave.startTimestamp) / 60_000 };
+}
+
 async function traceNeededWindows(neededWindows: NeededWindow[]): Promise<Map<string, TraceEntry[]>> {
   const traceBySymbol = new Map<string, TraceEntry[]>();
   for (const symbol of SYMBOLS) traceBySymbol.set(symbol, []);
@@ -258,6 +286,8 @@ async function traceNeededWindows(neededWindows: NeededWindow[]): Promise<Map<st
     neutralTransitionGateConfig: { ...DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, neutralTransitionTradingEnabled: true, neutralTransitionMomentumGateThreshold: 0.5 },
     planAutoSelectionConfig: { ...DEFAULT_PLAN_AUTO_SELECTION_CONFIG, planAutoSelectionEnabled: true, planAutoSelectionMomentumThreshold: 0.7 },
     maxConcurrentPositionsPerSymbol: 1,
+    momentumDirectEnabled: false, // TICKET-059: confirmed baseline default — unchanged behavior.
+    momentumDirectThreshold: 0.75,
   };
 
   let accountBalance = 400;
@@ -362,8 +392,10 @@ async function main(): Promise<void> {
   const missed = results.filter((r) => !r.matched);
   console.log(`  -> BẮT ĐƯỢC: ${results.length - missed.length} / ${results.length}, BỎ LỠ: ${missed.length}`);
 
-  console.log('[Phần C] Truy nguyên nhân chặn cho các đợt sóng bị bỏ lỡ...');
-  const neededWindows: NeededWindow[] = missed.map((r) => ({
+  // TICKET-058: needs trace data for ALL 60 waves now (not just the 59 missed ones), since the
+  // TREND_RIDER-delay analysis below applies to every wave regardless of caught/missed status.
+  console.log('[Phần C] Truy nguyên nhân chặn (sóng bỏ lỡ) + trace Regime cho toàn bộ 60 sóng (TICKET-058)...');
+  const neededWindows: NeededWindow[] = results.map((r) => ({
     symbol: r.wave.symbol,
     startMs: r.wave.startTimestamp - MATCH_WINDOW_MS,
     endMs: r.wave.startTimestamp + MATCH_WINDOW_MS,
@@ -394,6 +426,34 @@ async function main(): Promise<void> {
     return `| ${wave.symbol} | ${timeStr} | ${pctStr} | ${directionStr} | ${resultStr} | ${blockedAt} |`;
   });
 
+  // TICKET-058 — TREND_RIDER confirmation delay vs. each wave's price-based start.
+  console.log('[TICKET-058] Đo độ trễ xác nhận TREND_RIDER so với lúc sóng bắt đầu...');
+  const delayResults = results.map(({ wave }) => ({
+    wave,
+    delay: computeTrendRiderDelay(wave, traceBySymbol.get(wave.symbol) ?? []),
+  }));
+  const withConfirmation = delayResults.filter((r) => r.delay.hasConfirmation);
+  const withoutConfirmation = delayResults.filter((r) => !r.delay.hasConfirmation);
+  const sortedDelays = withConfirmation.map((r) => r.delay.delayMinutes as number).sort((a, b) => a - b);
+
+  const delayDistributionRows =
+    sortedDelays.length > 0
+      ? [
+          `| min | ${sortedDelays[0].toFixed(1)} |`,
+          `| p25 | ${percentile(sortedDelays, 25).toFixed(1)} |`,
+          `| p50 (median) | ${percentile(sortedDelays, 50).toFixed(1)} |`,
+          `| p75 | ${percentile(sortedDelays, 75).toFixed(1)} |`,
+          `| max | ${sortedDelays[sortedDelays.length - 1].toFixed(1)} |`,
+        ]
+      : ['| (không có đợt sóng nào có TREND_RIDER xác nhận trong ±2h) | — |'];
+
+  const delayDetailRows = delayResults.map(({ wave, delay }) => {
+    const timeStr = new Date(wave.startTimestamp).toISOString();
+    const hasStr = delay.hasConfirmation ? 'CÓ' : 'KHÔNG';
+    const delayStr = delay.hasConfirmation ? (delay.delayMinutes as number).toFixed(1) : '—';
+    return `| ${wave.symbol} | ${timeStr} | ${hasStr} | ${delayStr} |`;
+  });
+
   const report = [
     '# TICKET-057 — Tìm đợt sóng lớn bị bỏ lỡ + truy nguyên nhân chặn',
     '',
@@ -411,6 +471,26 @@ async function main(): Promise<void> {
     '| Symbol | Thời điểm | % sóng | Chiều | Kết quả | Cửa chặn cuối cùng (nếu bỏ lỡ) |',
     '|---|---|---|---|---|---|',
     ...rows,
+    '',
+    '## Độ trễ xác nhận TREND_RIDER so với lúc sóng bắt đầu (TICKET-058)',
+    '',
+    'Công cụ quan sát — không đổi ADX_PERSISTENCE_CANDLES, ngưỡng ADX, hay bất kỳ logic Regime/Entry nào.',
+    'Tái sử dụng đúng dữ liệu regime đã trace ở trên (Phần C), không tính toán lại từ đầu.',
+    '',
+    `- Số đợt sóng có TREND_RIDER xác nhận trong ±2h: ${withConfirmation.length} / ${results.length}`,
+    `- Số đợt sóng KHÔNG BAO GIỜ có TREND_RIDER xác nhận trong ±2h: ${withoutConfirmation.length} / ${results.length}`,
+    '',
+    '### Phân phối độ trễ (chỉ tính các đợt CÓ xác nhận, đơn vị phút)',
+    '',
+    '| Thống kê | Giá trị |',
+    '|---|---|',
+    ...delayDistributionRows,
+    '',
+    '### Chi tiết từng đợt sóng',
+    '',
+    '| Symbol | Thời điểm sóng | TREND_RIDER trong ±2h? | Độ trễ (phút) |',
+    '|---|---|---|---|',
+    ...delayDetailRows,
   ].join('\n');
 
   const reportPath = path.resolve(process.cwd(), 'data/missed-waves-report.md');

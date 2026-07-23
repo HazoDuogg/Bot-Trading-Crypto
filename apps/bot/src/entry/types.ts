@@ -45,10 +45,17 @@ export interface DraftSetup {
   side: 'LONG' | 'SHORT';
   entryPrice: number;
   slPrice: number;
-  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP';
+  /** TICKET-059: 'MOMENTUM_DIRECT' added — built entirely in orchestrator.ts (not routeEntry()), see momentumDirect.ts. */
+  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP' | 'MOMENTUM_DIRECT';
   regime: MarketRegime;
   /** From EntryRouterConfig.regimeRiskMultiplier — risk/ layer (not wired up this sprint) reads this. */
   riskMultiplier: number;
+  /**
+   * TICKET-059 — only ever set for setupType='MOMENTUM_DIRECT' (single-exit COUNTER_TREND scenario
+   * at a fixed % target, TICKET-023's calibrated move size — not R-based like every other setup
+   * type). Always undefined for OB/FVG/BOX_BREAKOUT/SWEEP; routeEntry() never sets this field.
+   */
+  tpPriceOverride?: number;
 }
 
 export type EntryStyleForNeutral = 'TREND_STYLE' | 'SIDEWAY_STYLE';

@@ -25,6 +25,7 @@ import { INITIAL_SYMBOL_STATE, type CloseTradeEvent, type OrchestratorConfig, ty
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import type { EntryStyleForNeutral, FunnelEvent } from '../dist/entry/types.js';
 import { DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, DEFAULT_PLAN_AUTO_SELECTION_CONFIG } from '../dist/xgbFilter/config.js';
+import { EntryConfig } from '../dist/entry/config.js';
 import type { OpenPositionRisk } from '../dist/risk/riskPool.js';
 import type { TpPlan } from '../dist/risk/slTpManager.js';
 import { emptyFunnelStats, fmtInt, funnelReportMarkdown, pct, STATE_PASS_REGIMES, type RegimeFunnelStats } from './entryFunnelReport.js';
@@ -66,6 +67,8 @@ function parseArgs(): {
   planAutoSelectionEnabled: boolean;
   planAutoSelectionThreshold: number;
   maxConcurrentPositionsPerSymbol: number;
+  momentumDirectEnabled: boolean;
+  momentumDirectThreshold: number;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -82,6 +85,8 @@ function parseArgs(): {
   const planAutoSelectionArg = args.find((a) => a.startsWith('--plan-auto-selection-enabled='));
   const planAutoSelectionThresholdArg = args.find((a) => a.startsWith('--plan-auto-selection-threshold='));
   const maxConcurrentPositionsArg = args.find((a) => a.startsWith('--max-concurrent-positions-per-symbol='));
+  const momentumDirectEnabledArg = args.find((a) => a.startsWith('--momentum-direct-enabled='));
+  const momentumDirectThresholdArg = args.find((a) => a.startsWith('--momentum-direct-threshold='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -108,6 +113,10 @@ function parseArgs(): {
     // TICKET-056: defaults to 1 unchanged (matches every ticket before this one — a symbol could
     // never hold more than 1 open position) — only the CLI may override, per PM's explicit instruction.
     maxConcurrentPositionsPerSymbol: maxConcurrentPositionsArg ? Number(maxConcurrentPositionsArg.split('=')[1]) : 1,
+    // TICKET-059: off by default — matches OrchestratorConfig.momentumDirectEnabled's default.
+    momentumDirectEnabled: momentumDirectEnabledArg ? momentumDirectEnabledArg.split('=')[1] === 'true' : false,
+    // TICKET-059: TODO_CONFIRM, PM suggested 0.75 — default unchanged unless CLI overrides.
+    momentumDirectThreshold: momentumDirectThresholdArg ? Number(momentumDirectThresholdArg.split('=')[1]) : 0.75,
   };
 }
 
@@ -120,6 +129,7 @@ function outputSuffix(
   neutralTransitionEnabled: boolean,
   planAutoSelectionEnabled: boolean,
   maxConcurrentPositionsPerSymbol: number,
+  momentumDirectEnabled: boolean,
 ): string {
   const macro = macroTrendFilterEnabled;
   const ob = obDisabledSymbols.length > 0;
@@ -134,6 +144,7 @@ function outputSuffix(
   if (planAutoSelectionEnabled) base += '-planauto';
   // TICKET-056: default (1) unchanged from before this ticket — only append when CLI overrides it.
   if (maxConcurrentPositionsPerSymbol !== 1) base += `-maxpos${maxConcurrentPositionsPerSymbol}`;
+  if (momentumDirectEnabled) base += '-momentumdirect';
   return base;
 }
 
@@ -258,9 +269,11 @@ async function main(): Promise<void> {
     planAutoSelectionEnabled,
     planAutoSelectionThreshold,
     maxConcurrentPositionsPerSymbol,
+    momentumDirectEnabled,
+    momentumDirectThreshold,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -296,6 +309,8 @@ async function main(): Promise<void> {
       planAutoSelectionMomentumThreshold: planAutoSelectionThreshold, // TICKET-052: TODO_CONFIRM, default 0.7 unchanged unless CLI overrides.
     },
     maxConcurrentPositionsPerSymbol, // TICKET-056: CLI-overridable A/B testing — default (1) unchanged from before this ticket.
+    momentumDirectEnabled, // TICKET-059: CLI-overridable A/B testing — default (false) unchanged from before this ticket.
+    momentumDirectThreshold, // TICKET-059: TODO_CONFIRM, default 0.75 unchanged unless CLI overrides.
   };
 
   let accountBalance = START_BALANCE;
@@ -539,6 +554,7 @@ async function main(): Promise<void> {
       neutralTransitionEnabled,
       planAutoSelectionEnabled,
       maxConcurrentPositionsPerSymbol,
+      momentumDirectEnabled,
     ) + '-correlated';
   const tradesPath = path.resolve(process.cwd(), `data/backtest-trades-${suffix}.csv`);
   writeFileSync(tradesPath, tradesCsv(trades));
@@ -587,6 +603,7 @@ async function main(): Promise<void> {
     `- mssStalenessToleranceCandles: ${config.entryRouterConfig.mssStalenessToleranceCandles} (TICKET-040, CLI-overridable, default 5)`,
     `- obBosLookforwardK: ${config.entryRouterConfig.obBosLookforwardK} (TICKET-041, CLI-overridable, default 10)`,
     `- maxConcurrentPositionsPerSymbol: ${config.maxConcurrentPositionsPerSymbol} (TICKET-056, CLI-overridable, default 1)`,
+    `- momentumDirectEnabled: ${momentumDirectEnabled} (TICKET-059, AI momentum score dùng thẳng làm tín hiệu vào lệnh, song song với cascade OB/FVG/Sweep/Breakout, threshold=${momentumDirectThreshold}, TP cố định=${(EntryConfig.MOMENTUM_DIRECT_TP_PCT * 100).toFixed(2)}%)`,
     `- planAutoSelectionEnabled: ${planAutoSelectionEnabled} (TICKET-052, AI-driven Plan A/B selection, TREND only, threshold=${config.planAutoSelectionConfig.planAutoSelectionMomentumThreshold})`,
     `- Runner trailing: ATR (2.5×ATR), không dùng Structure trailing`,
     `- takerFeeRate: 0.0004 (TODO_CONFIRM — Trader chưa cung cấp số thật)`,

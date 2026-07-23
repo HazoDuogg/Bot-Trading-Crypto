@@ -18,7 +18,7 @@ export interface RegimeHysteresisState {
  */
 export interface OpenTradeMeta {
   regime: MarketRegime;
-  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP';
+  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP' | 'MOMENTUM_DIRECT';
   entryTimestamp: number;
   actualRiskDollar: number;
   marginRequired: number;
@@ -52,7 +52,7 @@ export interface OpenTradeEvent {
   symbol: string;
   side: 'LONG' | 'SHORT';
   regime: MarketRegime;
-  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP';
+  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP' | 'MOMENTUM_DIRECT';
   tpPlan: TpPlan;
   entryTimestamp: number;
   entryPrice: number;
@@ -66,7 +66,7 @@ export interface CloseTradeEvent {
   symbol: string;
   side: 'LONG' | 'SHORT';
   regime: MarketRegime;
-  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP';
+  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP' | 'MOMENTUM_DIRECT';
   tpPlan: TpPlan;
   entryTimestamp: number;
   entryPrice: number;
@@ -113,4 +113,12 @@ export interface OrchestratorConfig {
    * exact same Regime/OB/FVG/Sweep/Breakout/MSS/Momentum Gate pipeline independently.
    */
   maxConcurrentPositionsPerSymbol: number;
+  /**
+   * TICKET-059 — AI momentum score used DIRECTLY as an independent entry signal (not just a
+   * filter/multiplier on top of OB/FVG/Sweep/Breakout), only tried when routeEntry()'s existing
+   * cascade found NOTHING for this candle. Default false — matches every ticket before this one exactly.
+   */
+  momentumDirectEnabled: boolean;
+  /** TODO_CONFIRM: PM suggested 0.75. Momentum score (own-side model) must be >= this to trigger MOMENTUM_DIRECT. */
+  momentumDirectThreshold: number;
 }

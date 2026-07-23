@@ -43,4 +43,7 @@ export const EntryConfig = {
 
   /** TICKET-017: period for the 1D macro-trend direction (wilderDIDirectionSeries on daily candles, same function as adxDirection1h). PM didn't specify a 1D-specific period — defaults to RegimeConfig.ADX_PERIOD_1H's value. TODO_CONFIRM. */
   MACRO_TREND_ADX_PERIOD_1D: 14,
+
+  /** TICKET-059: MOMENTUM_DIRECT single-exit TP, fixed % move (not R-based). TODO_CONFIRM — PM: phải khớp đúng ngưỡng model được train để dự đoán (TICKET-023), không tự chọn số khác. */
+  MOMENTUM_DIRECT_TP_PCT: 0.005,
 } as const;

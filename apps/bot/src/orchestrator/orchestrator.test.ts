@@ -75,6 +75,9 @@ const baseConfig: OrchestratorConfig = {
   planAutoSelectionConfig: DEFAULT_PLAN_AUTO_SELECTION_CONFIG,
   // TICKET-056: default 1 — matches every ticket before this one (a symbol could never hold more than 1 open position).
   maxConcurrentPositionsPerSymbol: 1,
+  // TICKET-059: off by default — matches every ticket before this one exactly.
+  momentumDirectEnabled: false,
+  momentumDirectThreshold: 0.75,
 };
 
 const trendLongInput: SlTpManagerInput = {
@@ -885,6 +888,168 @@ describe('processCandle — multi-position per symbol (TICKET-056)', () => {
     expect(result.symbolState.openPositions).toHaveLength(1); // posB still tracked
     expect(result.symbolState.openPositions[0].position.entryPrice).toBe(50);
     expect(result.symbolState.openPositions[0].position.closed).toBe(false);
+  });
+});
+
+// TICKET-059 — MOMENTUM_DIRECT: the AI momentum score used DIRECTLY as an entry signal, only ever
+// tried when routeEntry()'s OB/FVG/Sweep/Breakout/MSS cascade already returned null for this candle.
+// Real ONNX model throughout (same style as the momentum-filter/NEUTRAL_TRANSITION-gate describe
+// blocks above) — thresholds picked so the real score's exact value doesn't matter (0 always
+// clears, 1.01 never does), except where a test needs to know which side genuinely wins.
+describe('processCandle — MOMENTUM_DIRECT (TICKET-059)', () => {
+  // Flat, featureless 5m/15m/1m (no OB/FVG/Sweep pattern anywhere) + a clean 1h uptrend -> regime
+  // resolves TREND_RIDER (verified: adx1hRecent all >= TREND_ENTER_ADX, atrPercentile5m=100) but
+  // routeEntry()'s cascade finds nothing (verified: SETUP FAIL/NO_OB_CANDIDATE) — exactly the
+  // "cascade already tried and failed" precondition MOMENTUM_DIRECT requires. candles1hMomentum
+  // mirrors candles1h's own trend, extended to 250 candles for EMA(200) (same technique as
+  // fullOpenFlowFixtureShort() above).
+  function momentumDirectFixture(candles1dOverride?: CandleData[]) {
+    const fullCandles1h = makeCandles(250, 3_600_000, (i) => 100 + i * 2, () => 1);
+    const candles1h = fullCandles1h.slice(-40);
+    const candles5m = makeCandles(320, 300_000, () => 100, () => 0.5);
+    const candles15m = makeCandles(325, 900_000, () => 100, () => 1);
+    const candles1m = makeCandles(50, 60_000, () => 100, () => 0.5);
+    return {
+      candles5m,
+      candles15m,
+      candles1h,
+      candles1m,
+      candles1hMomentum: fullCandles1h,
+      ...(candles1dOverride ? { candles1d: candles1dOverride } : {}),
+    };
+  }
+
+  // Empirically: this fixture's real bearish score (~0.57) beats its real bullish score (~0.15) —
+  // SHORT is the side every "threshold=0 always clears" test below ends up picking via the
+  // higher-score tie-break. Not asserted as a business claim, just the fixture's known behavior.
+  const ALWAYS_CLEARS = 0; // real scores are always in [0,1], so this always passes both sides
+  const NEVER_CLEARS = 1.01; // real scores are always <= 1, so this never passes either side
+
+  // Strong 1D uptrend -> macroDirection='UP' (verified) — opposes the fixture's winning SHORT side
+  // (block condition: side==='SHORT' && macroDirection==='UP').
+  const opposingMacro1d = makeCandles(30, 24 * 60 * 60_000, (i) => 100 + i * 5, () => 1);
+
+  // Reused from regimeDetector.test.ts's own DANGER_ZONE fixture (extreme 5m range spike + a single
+  // huge last-candle volume spike -> atrPercentile5m~100 AND volumeZScore5m>>2.5) — one of the 5
+  // states MOMENTUM_DIRECT must never fire in, regardless of score.
+  function dangerZoneFixture() {
+    const count5m = 320;
+    const candles1h = makeCandles(40, 3_600_000, (i) => 100 + i * 0.5, () => 1);
+    const candles5m = makeCandles(count5m, 300_000, (i) => 100 + i * 0.01, (i) => (i >= 315 ? 8 : 0.5)).map((cndl, i) => ({
+      ...cndl,
+      volume: i === count5m - 1 ? 5000 : 100,
+    }));
+    const candles15m = makeCandles(325, 900_000, (i) => 100 + i * 0.01, () => 1);
+    const candles1m = makeCandles(50, 60_000, () => 100, () => 0.5);
+    return { candles5m, candles15m, candles1h, candles1m };
+  }
+
+  it('momentumDirectEnabled=false: no event at all, even though the score would clear the threshold — identical to every ticket before this one', async () => {
+    const fixture = momentumDirectFixture();
+    const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: false, momentumDirectThreshold: ALWAYS_CLEARS };
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.events).toHaveLength(0);
+    expect(result.symbolState.openPositions).toHaveLength(0);
+    expect(result.accountBalance).toBe(400);
+  });
+
+  it('enabled + score clears threshold + macro-aligned (flat 1D) + regime allowed (TREND_RIDER): creates a MOMENTUM_DIRECT DraftSetup', async () => {
+    const fixture = momentumDirectFixture();
+    const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: true, momentumDirectThreshold: ALWAYS_CLEARS };
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.events[0]).toMatchObject({ type: 'OPEN', symbol: 'BTCUSDT', side: 'SHORT', setupType: 'MOMENTUM_DIRECT', regime: MarketRegime.TREND_RIDER });
+    expect(result.symbolState.openPositions).toHaveLength(1);
+    const openedPosition = result.symbolState.openPositions[0].position;
+    expect(openedPosition.scenario).toBe('COUNTER_TREND'); // Mục 7: single fixed-price exit, no tiers
+    expect(openedPosition.entryPrice).toBe(100); // current candle's close (all flat at 100)
+    expect(openedPosition.tpLevels).toHaveLength(1);
+    expect(openedPosition.tpLevels[0].price).toBeCloseTo(100 * (1 - EntryConfig.MOMENTUM_DIRECT_TP_PCT), 8); // SHORT -> entry*(1-0.5%)
+  });
+
+  it('score below threshold: creates nothing', async () => {
+    const fixture = momentumDirectFixture();
+    const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: true, momentumDirectThreshold: NEVER_CLEARS };
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.events).toHaveLength(0);
+    expect(result.symbolState.openPositions).toHaveLength(0);
+  });
+
+  it('score clears threshold but the winning side is against the 1D macro trend: creates nothing', async () => {
+    const fixture = momentumDirectFixture(opposingMacro1d); // macroDirection='UP', opposes the fixture's winning SHORT side
+    const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: true, momentumDirectThreshold: ALWAYS_CLEARS };
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.events).toHaveLength(0);
+    expect(result.symbolState.openPositions).toHaveLength(0);
+  });
+
+  it('regime is one of the 5 hard-blocked states (DANGER_ZONE): creates nothing, even at a threshold that always clears', async () => {
+    const fixture = dangerZoneFixture();
+    const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: true, momentumDirectThreshold: ALWAYS_CLEARS };
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.symbolState.regimeState.previousRegime).toBe(MarketRegime.DANGER_ZONE); // sanity: fixture really is DANGER_ZONE
+    expect(result.events).toHaveLength(0);
+    expect(result.symbolState.openPositions).toHaveLength(0);
+  });
+
+  it('routeEntry() cascade already found a setup: detectMomentumDirect() is never even tried (no double entry, setupType stays OB)', async () => {
+    // Reuses the OB+MSS LONG fixture from the multi-position describe block above — a real setup
+    // the OB/FVG/Sweep cascade WILL find on its own.
+    function fullOpenFlowFixture() {
+      const candles1h = makeCandles(40, 3_600_000, (i) => 100 + i * 2, () => 1);
+      const fillerCount = 310;
+      const filler5m = makeCandles(fillerCount, 300_000, () => 100, () => 0.5);
+      const obPattern5m: CandleData[] = [
+        c(99, 99, 100, 98),
+        c(100.5, 100.5, 102, 99),
+        c(103, 103, 105, 101),
+        c(101, 101, 102, 100),
+        c(99, 99, 100, 98),
+        c(101, 99, 101, 99),
+        c(99, 102, 102.5, 99),
+        c(102, 106, 106, 101.5),
+      ];
+      const lastFillerTs = filler5m[filler5m.length - 1].timestamp;
+      const obPatternWithTs = obPattern5m.map((candle, i) => ({ ...candle, timestamp: lastFillerTs + (i + 1) * 300_000 }));
+      const candles5m = [...filler5m, ...obPatternWithTs];
+      const obCandleIndex = fillerCount + 5;
+      const candles15m = makeCandles(325, 900_000, () => 100, () => 1);
+      const mssStartTs = candles5m[obCandleIndex].timestamp;
+      const mssPattern1m: CandleData[] = [
+        c(99.5, 99.5, 100, 99),
+        c(99.25, 99.25, 100, 98.5),
+        c(97.5, 97.5, 99.5, 96),
+        c(99.25, 99.25, 100, 98.5),
+        c(99.5, 99.5, 100, 99),
+        c(100.5, 100.5, 102, 99),
+        c(99.25, 99.25, 100, 98.5),
+        c(99.5, 99.5, 100, 99),
+        c(98.75, 98.75, 99.5, 98),
+        c(99.25, 99.25, 100, 98.5),
+        c(99.5, 99.5, 100, 99),
+        c(102.5, 103, 103.2, 102.3),
+      ].map((candle, i) => ({ ...candle, timestamp: mssStartTs + i * 60_000 }));
+      return { candles5m, candles15m, candles1h, candles1m: mssPattern1m };
+    }
+
+    const fixture = fullOpenFlowFixture();
+    const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: true, momentumDirectThreshold: ALWAYS_CLEARS };
+
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.events).toHaveLength(1); // not 2 — no MOMENTUM_DIRECT attempted on top of the cascade's own entry
+    expect(result.events[0]).toMatchObject({ type: 'OPEN', side: 'LONG', setupType: 'OB', regime: MarketRegime.TREND_RIDER });
+    expect(result.symbolState.openPositions).toHaveLength(1);
+    expect(result.symbolState.openPositions[0].position.scenario).toBe('TREND'); // not COUNTER_TREND — the cascade's own TREND path, untouched
   });
 });
 

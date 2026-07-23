@@ -10,7 +10,8 @@ import { lastDefined, wilderATRSeries, wilderDIDirectionSeries } from '../regime
 import { MarketRegime, type CandleData, type RegimeOutput } from '../regime/types.js';
 import { routeEntry } from '../entry/entryRouter.js';
 import { EntryConfig } from '../entry/config.js';
-import type { FunnelCallback } from '../entry/types.js';
+import { detectMomentumDirect } from '../entry/momentumDirect.js';
+import type { DraftSetup, FunnelCallback } from '../entry/types.js';
 import { buildFeatureVector, computeMomentumCrossFeatures, loadFeatureSchema, type FeatureSchema } from '../xgbFilter/featureBuilder.js';
 import { scoreMomentum } from '../xgbFilter/momentumScorer.js';
 import { computeMomentumMultiplier } from '../xgbFilter/momentumMultiplier.js';
@@ -269,6 +270,74 @@ export function selectTpPlan(defaultPlan: TpPlan, momentumScore: number | undefi
   return defaultPlan;
 }
 
+/**
+ * TICKET-059 — mirrors scripts/entryFunnelReport.ts's STATE_FAIL_REGIMES (same 5 MarketRegime
+ * values, "Entry Funnel Analytics 'STATE PASS'"). Duplicated locally rather than imported: src/ is
+ * its own compilation unit and cannot depend on scripts/ (which itself depends on dist/, built FROM
+ * src/ — importing the other way would be a wrong-direction/circular dependency).
+ */
+const MOMENTUM_DIRECT_BLOCKED_REGIMES: readonly MarketRegime[] = [
+  MarketRegime.DANGER_ZONE,
+  MarketRegime.MANIPULATED,
+  MarketRegime.LOW_LIQUIDITY,
+  MarketRegime.VOLATILE_CHOP,
+  MarketRegime.CORRELATED_RISK,
+];
+
+/**
+ * TICKET-059 Phần B — the AI momentum score used DIRECTLY as an entry signal, independent of
+ * OB/FVG/Sweep/Box Breakout/MSS. Only ever tried by the caller when routeEntry()'s cascade already
+ * returned null for this candle (see tryOpenNewPosition below) — never replaces or short-circuits it.
+ * Mirrors (does not call — entryRouter.ts stays untouched per the ticket) the same macro-trend-filter
+ * condition and ATR-based SL buffer formula runTrendStyle() uses for its Sweep fallback.
+ */
+async function tryMomentumDirect(
+  input: ProcessCandleInput,
+  config: OrchestratorConfig,
+  regimeOutput: RegimeOutput,
+  currentCandle: CandleData,
+  macroDirection: 'UP' | 'DOWN' | 'FLAT' | undefined,
+): Promise<DraftSetup | null> {
+  if (MOMENTUM_DIRECT_BLOCKED_REGIMES.includes(regimeOutput.regime)) return null;
+
+  const longScore = await scoreMomentumForSide('LONG', input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
+  const shortScore = await scoreMomentumForSide('SHORT', input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
+  const longPasses = longScore !== undefined && detectMomentumDirect(longScore, 'LONG', config.momentumDirectThreshold);
+  const shortPasses = shortScore !== undefined && detectMomentumDirect(shortScore, 'SHORT', config.momentumDirectThreshold);
+  if (!longPasses && !shortPasses) return null;
+
+  // Both sides rarely pass at once (opposite-direction models scoring the same candle) — if they
+  // do, take the higher-scoring side rather than leaving this undefined behavior.
+  const side: 'LONG' | 'SHORT' =
+    longPasses && shortPasses ? ((longScore as number) >= (shortScore as number) ? 'LONG' : 'SHORT') : longPasses ? 'LONG' : 'SHORT';
+
+  // Mandatory macro alignment check — unlike routeEntry()'s cascade, NOT gated behind
+  // entryRouterConfig.macroTrendFilterEnabled (TICKET-059 Phần B lists this as an unconditional
+  // step for MOMENTUM_DIRECT, not an A/B-testable optional filter).
+  if ((side === 'LONG' && macroDirection === 'DOWN') || (side === 'SHORT' && macroDirection === 'UP')) return null;
+
+  const atr = lastDefined(wilderATRSeries(input.candles5m, RegimeConfig.ATR_PERIOD_5M));
+  if (atr === undefined) return null; // not enough 5m history to size the SL buffer
+
+  const entryPrice = currentCandle.close;
+  // Sweep-style SL: nearest extreme point (current candle's own low/high, since MOMENTUM_DIRECT has
+  // no OB/FVG/Sweep zone to anchor to) ± ATR buffer.
+  const rawSlPrice = side === 'LONG' ? currentCandle.low : currentCandle.high;
+  const buffer = EntryConfig.SL_BUFFER_ATR_MULTIPLIER * atr;
+  const slPrice = side === 'LONG' ? rawSlPrice - buffer : rawSlPrice + buffer;
+  const tpPriceOverride = side === 'LONG' ? entryPrice * (1 + EntryConfig.MOMENTUM_DIRECT_TP_PCT) : entryPrice * (1 - EntryConfig.MOMENTUM_DIRECT_TP_PCT);
+
+  return {
+    side,
+    entryPrice,
+    slPrice,
+    setupType: 'MOMENTUM_DIRECT',
+    regime: regimeOutput.regime,
+    riskMultiplier: config.entryRouterConfig.regimeRiskMultiplier[regimeOutput.regime],
+    tpPriceOverride,
+  };
+}
+
 interface EntryAttemptResult {
   event: OpenTradeEvent | SkippedEntryEvent | null;
   newEntry: OpenPositionEntry | null;
@@ -327,7 +396,16 @@ async function tryOpenNewPosition(
     onSetupNotFiredDiagnostic({ symbol: input.symbol, timestamp: currentCandle.timestamp, adxDirection1h: regimeOutput.adxDirection1h });
   }
 
-  if (draftSetup === null) return { event: null, newEntry: null };
+  // TICKET-059 Phần B — only tried when the cascade above found NOTHING for this candle. Runs
+  // entirely parallel to routeEntry(): never replaces it, never runs when routeEntry() already
+  // succeeded. Off by default (config.momentumDirectEnabled=false) — draftSetup===null still falls
+  // straight through to the early return below, byte-identical to every ticket before this one.
+  let effectiveDraftSetup: DraftSetup | null = draftSetup;
+  if (effectiveDraftSetup === null && config.momentumDirectEnabled) {
+    effectiveDraftSetup = await tryMomentumDirect(input, config, regimeOutput, currentCandle, macroDirection);
+  }
+
+  if (effectiveDraftSetup === null) return { event: null, newEntry: null };
 
   // TICKET-036 — mandatory Momentum Gate, NEUTRAL_TRANSITION only. Runs BEFORE anything else
   // (account-balance check, soft momentumMultiplier below) since it can outright discard the
@@ -335,11 +413,14 @@ async function tryOpenNewPosition(
   // DraftSetup for NEUTRAL_TRANSITION now (Phần A) — neutralTransitionTradingEnabled=false must
   // still reproduce the exact pre-TICKET-036 behavior (no event at all, same as draftSetup===null
   // above), NOT a SKIPPED event, since NEUTRAL_TRANSITION genuinely never entered before this ticket.
-  if (draftSetup.regime === MarketRegime.NEUTRAL_TRANSITION) {
+  // TICKET-059: excludes MOMENTUM_DIRECT-sourced setups — this gate is specific to routeEntry()'s
+  // own NEUTRAL_TRANSITION cascade path, a different mechanism from MOMENTUM_DIRECT's own threshold
+  // check (tryMomentumDirect already applied its own gating above).
+  if (effectiveDraftSetup.regime === MarketRegime.NEUTRAL_TRANSITION && effectiveDraftSetup.setupType !== 'MOMENTUM_DIRECT') {
     if (!config.neutralTransitionGateConfig.neutralTransitionTradingEnabled) {
       return { event: null, newEntry: null };
     }
-    const gateScore = await scoreMomentumForSide(draftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
+    const gateScore = await scoreMomentumForSide(effectiveDraftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
     // Missing score (insufficient EMA/ATR history) -> gateScore undefined -> comparison is false ->
     // rejected, same as an explicit low score. Never defaults to passing (PM's explicit "an toàn" requirement).
     const gatePassed = gateScore !== undefined && gateScore >= config.neutralTransitionGateConfig.neutralTransitionMomentumGateThreshold;
@@ -364,7 +445,7 @@ async function tryOpenNewPosition(
   // TICKET-024 Phần C/D — soft risk-multiplier from the momentum model, applied to the sizer's
   // REQUESTED risk (riskDollarOrPercent) so it flows through maxMarginCap capping the same way a
   // smaller riskDollarOrPercent naturally would. Never gates entry outright — only scales size.
-  // Off by default: momentumMultiplier stays 1.0 and combinedRiskMultiplier === draftSetup.riskMultiplier
+  // Off by default: momentumMultiplier stays 1.0 and combinedRiskMultiplier === effectiveDraftSetup.riskMultiplier
   // (itself always 1.0 for every regime that currently reaches this point), so behavior is
   // byte-for-byte unchanged from before this ticket unless momentumFilterConfig.momentumFilterEnabled.
   //
@@ -376,20 +457,20 @@ async function tryOpenNewPosition(
   if (config.momentumFilterConfig.momentumFilterEnabled || config.planAutoSelectionConfig.planAutoSelectionEnabled) {
     // TICKET-036: reuses the same scoreMomentumForSide() helper the Gate above calls — no
     // re-derivation of the LONG/SHORT model split or feature vector construction.
-    momentumScore = await scoreMomentumForSide(draftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
+    momentumScore = await scoreMomentumForSide(effectiveDraftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
   }
   let momentumMultiplier = 1.0;
   if (config.momentumFilterConfig.momentumFilterEnabled && momentumScore !== undefined) {
     momentumMultiplier = computeMomentumMultiplier(momentumScore, config.momentumFilterConfig);
   }
   // momentumScore undefined (insufficient EMA/ATR history) -> momentumMultiplier stays 1.0, same as disabled.
-  const combinedRiskMultiplier = draftSetup.riskMultiplier * momentumMultiplier;
+  const combinedRiskMultiplier = effectiveDraftSetup.riskMultiplier * momentumMultiplier;
 
-  const slDistancePercent = Math.abs(draftSetup.entryPrice - draftSetup.slPrice) / draftSetup.entryPrice;
+  const slDistancePercent = Math.abs(effectiveDraftSetup.entryPrice - effectiveDraftSetup.slPrice) / effectiveDraftSetup.entryPrice;
   const sizingOutput = new DynamicRMarginSizer().calculate({
     accountBalance,
     riskDollarOrPercent: config.riskDollarOrPercent * combinedRiskMultiplier,
-    entryPrice: draftSetup.entryPrice,
+    entryPrice: effectiveDraftSetup.entryPrice,
     slDistancePercent,
     leverage: config.leverage,
     maxMarginCap: config.maxMarginCap,
@@ -405,31 +486,46 @@ async function tryOpenNewPosition(
   }
 
   // TICKET-052: AI-driven Plan A/B selection — TREND scenario only, reuses momentumScore already
-  // computed above (never re-scored). Off by default: returns config.tpPlan unchanged.
+  // computed above (never re-scored). Off by default: returns config.tpPlan unchanged. Meaningless
+  // for MOMENTUM_DIRECT's COUNTER_TREND scenario below (single fixed-price exit, no tiers) — still
+  // computed unconditionally (cheap, pure) but simply unused in that branch.
   const selectedTpPlan = selectTpPlan(config.tpPlan, momentumScore, config.planAutoSelectionConfig);
 
-  // scenario is always TREND — entryRouter has no COUNTER_TREND path (OB/FVG/Sweep are all
-  // direction-aligned with adxDirection1h; box breakout isn't a reversal play either).
-  const openInput: SlTpManagerInput = {
-    scenario: 'TREND',
-    entryPrice: draftSetup.entryPrice,
-    slPrice: draftSetup.slPrice,
-    side: draftSetup.side,
-    tpPlan: selectedTpPlan,
-    positionSize: sizingOutput.positionSize,
-    takerFeeRate: config.takerFeeRate,
-  };
+  // TICKET-059: MOMENTUM_DIRECT uses Mục 7's COUNTER_TREND scenario (single fixed-price exit at
+  // tpPriceOverride, no tiers, no Runner) — everything else (OB/FVG/Sweep/Breakout) stays on the
+  // TREND scenario exactly as before this ticket; entryRouter.ts has no COUNTER_TREND path itself.
+  const openInput: SlTpManagerInput =
+    effectiveDraftSetup.setupType === 'MOMENTUM_DIRECT'
+      ? {
+          scenario: 'COUNTER_TREND',
+          entryPrice: effectiveDraftSetup.entryPrice,
+          slPrice: effectiveDraftSetup.slPrice,
+          side: effectiveDraftSetup.side,
+          tpPlan: config.tpPlan, // ignored by computeTpLevels() for COUNTER_TREND — field is required but unused
+          tpPriceOverride: effectiveDraftSetup.tpPriceOverride,
+          positionSize: sizingOutput.positionSize,
+          takerFeeRate: config.takerFeeRate,
+        }
+      : {
+          scenario: 'TREND',
+          entryPrice: effectiveDraftSetup.entryPrice,
+          slPrice: effectiveDraftSetup.slPrice,
+          side: effectiveDraftSetup.side,
+          tpPlan: selectedTpPlan,
+          positionSize: sizingOutput.positionSize,
+          takerFeeRate: config.takerFeeRate,
+        };
   const newPosition = openPosition(openInput);
 
   const event: OpenTradeEvent = {
     type: 'OPEN',
     symbol: input.symbol,
-    side: draftSetup.side,
-    regime: draftSetup.regime,
-    setupType: draftSetup.setupType,
-    tpPlan: selectedTpPlan,
+    side: effectiveDraftSetup.side,
+    regime: effectiveDraftSetup.regime,
+    setupType: effectiveDraftSetup.setupType,
+    tpPlan: openInput.tpPlan,
     entryTimestamp: currentCandle.timestamp,
-    entryPrice: draftSetup.entryPrice,
+    entryPrice: effectiveDraftSetup.entryPrice,
     riskMultiplier: combinedRiskMultiplier,
     actualRiskDollar: sizingOutput.actualRiskDollar,
     marginRequired: sizingOutput.marginRequired,
@@ -440,8 +536,8 @@ async function tryOpenNewPosition(
     newEntry: {
       position: newPosition,
       meta: {
-        regime: draftSetup.regime,
-        setupType: draftSetup.setupType,
+        regime: effectiveDraftSetup.regime,
+        setupType: effectiveDraftSetup.setupType,
         entryTimestamp: currentCandle.timestamp,
         actualRiskDollar: sizingOutput.actualRiskDollar,
         marginRequired: sizingOutput.marginRequired,

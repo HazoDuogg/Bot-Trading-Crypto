@@ -20,6 +20,15 @@ export interface SlTpManagerInput {
   positionSize: number;
   /** Decimal fraction, e.g. 0.0004 for 0.04%. Read from config — never hard-code at the call site. */
   takerFeeRate: number;
+  /**
+   * TICKET-059 — only meaningful when scenario === 'COUNTER_TREND'; ignored for TREND. When set,
+   * computeTpLevels() uses this EXACT price for the single COUNTER_TREND_TP exit instead of the
+   * default entry±COUNTER_TREND_TP_R(1R) formula — needed for MOMENTUM_DIRECT's fixed 0.5% target,
+   * which must stay independent of the ATR-based SL distance (R varies per trade with volatility;
+   * the momentum model was calibrated (TICKET-023) against a fixed % move, not a fixed R-multiple).
+   * Omitted (undefined) reproduces the exact pre-TICKET-059 COUNTER_TREND behavior (entry±1R).
+   */
+  tpPriceOverride?: number;
 }
 
 export interface TpLevel {
@@ -82,17 +91,20 @@ function assertTrendScenario(state: ManagedPositionState, action: string): void 
 }
 
 export function computeTpLevels(
-  input: Pick<SlTpManagerInput, 'scenario' | 'entryPrice' | 'slPrice' | 'side' | 'tpPlan'>,
+  input: Pick<SlTpManagerInput, 'scenario' | 'entryPrice' | 'slPrice' | 'side' | 'tpPlan' | 'tpPriceOverride'>,
 ): TpLevel[] {
   const r = Math.abs(input.entryPrice - input.slPrice);
 
   if (input.scenario === 'COUNTER_TREND') {
-    // Mục 7: single TP at 1R, chốt sạch 100%, no tiers.
+    // Mục 7: single TP, chốt sạch 100%, no tiers. Default entry±1R, UNLESS tpPriceOverride is set
+    // (TICKET-059) — then rMultiple is null (a fixed-price target isn't meaningfully an R-multiple;
+    // R varies per trade with ATR-based SL width, so "how many R away" isn't a fixed number here).
+    const usingOverride = input.tpPriceOverride !== undefined;
     return [
       {
         label: 'COUNTER_TREND_TP',
-        price: priceAtR(input.entryPrice, r, COUNTER_TREND_TP_R, input.side),
-        rMultiple: COUNTER_TREND_TP_R,
+        price: usingOverride ? (input.tpPriceOverride as number) : priceAtR(input.entryPrice, r, COUNTER_TREND_TP_R, input.side),
+        rMultiple: usingOverride ? null : COUNTER_TREND_TP_R,
         closePercent: 1,
       },
     ];
