@@ -19,7 +19,8 @@
     "generate-training-data": "npm run build:scripts && node apps/bot/scripts-dist/generateTrainingData.js",
     "generate-momentum-training-data": "npm run build:scripts && node apps/bot/scripts-dist/generateMomentumTrainingData.js",
     "simulate-mss-timeout": "npm run build:scripts && node apps/bot/scripts-dist/simulateMssTimeoutOutcomes.js",
-    "find-missed-waves": "npm run build:scripts && node apps/bot/scripts-dist/findMissedWaves.js"
+    "find-missed-waves": "npm run build:scripts && node apps/bot/scripts-dist/findMissedWaves.js",
+    "measure-binance-latency": "npm run build:scripts && node apps/bot/scripts-dist/measureBinanceLatency.js"
   },
   "dependencies": {
     "dotenv": "^17.4.2"
