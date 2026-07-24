@@ -141,4 +141,36 @@ export interface OrchestratorConfig {
    * distance AFTER the momentumDirectMinSlPercent floor above has already been applied.
    */
   momentumDirectTpRMultiple: number;
+  /**
+   * TICKET-068 — TODO_CONFIRM: PM suggested 2. Caps the TOTAL number of currently open
+   * setupType='MOMENTUM_DIRECT' positions across ALL symbols combined (not per-symbol —
+   * maxConcurrentPositionsPerSymbol above still applies independently, in parallel; a candidate must
+   * clear BOTH). TICKET-067 found 4 concurrent same-direction MOMENTUM_DIRECT positions (2 symbols ×
+   * 2 each) all lost together in one correlated move, driving the -39.68% Max Drawdown. Default a
+   * very large number (e.g. 999) = no real-world cap, matching every ticket before this one exactly.
+   */
+  momentumDirectMaxTotalConcurrent: number;
+  /**
+   * TICKET-071 (renamed from momentumDirectCorrelationBlockThreshold, TICKET-070 — same value,
+   * different action) — TODO_CONFIRM: PM suggested 0.90. Combined (not standalone) risk trigger:
+   * fires only when BOTH are true at once — correlatedRiskRatio (already computed, TICKET-030) at or
+   * above this threshold AND at least 1 other-symbol setupType='MOMENTUM_DIRECT' position already
+   * open on the SAME side as this candidate. TICKET-069 found correlatedRiskRatio alone doesn't
+   * separate winners from losers (0.0029 mean difference), but was elevated (0.90-0.93) exactly
+   * during TICKET-067's 4-concurrent-same-side Drawdown episode. TICKET-068/070 found outright
+   * BLOCKING on this trigger makes Max Drawdown worse (path-dependent effect) — TICKET-071 instead
+   * scales the trade's size down via momentumDirectCorrelationRiskMultiplier below, keeping it in
+   * the trade sequence. Default a value no real correlatedRiskRatio ever reaches (e.g. 999) = never
+   * fires, matching every ticket before this one exactly.
+   */
+  momentumDirectCorrelationRiskThreshold: number;
+  /**
+   * TICKET-071 — TODO_CONFIRM: PM suggested 0.5. When the combined trigger above fires, this
+   * multiplies into the DraftSetup's own riskMultiplier (same field regimeRiskMultiplier already
+   * populates) — tryOpenNewPosition() already multiplies riskMultiplier × momentumMultiplier into
+   * combinedRiskMultiplier before sizing, so this reuses that exact mechanism, no new plumbing.
+   * Default 1.0 = no size change, matching every ticket before this one exactly when the trigger
+   * never fires (momentumDirectCorrelationRiskThreshold=999 default).
+   */
+  momentumDirectCorrelationRiskMultiplier: number;
 }

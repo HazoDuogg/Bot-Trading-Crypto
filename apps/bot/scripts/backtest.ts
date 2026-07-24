@@ -71,6 +71,9 @@ function parseArgs(): {
   momentumDirectMaxAtrPercentile: number;
   momentumDirectMinSlPercent: number;
   momentumDirectTpRMultiple: number;
+  momentumDirectMaxTotalConcurrent: number;
+  momentumDirectCorrelationRiskThreshold: number;
+  momentumDirectCorrelationRiskMultiplier: number;
   /** TICKET-061: diagnostic-only — skip this many calendar days at the start of the run (on top of
    * the existing warm-up startStep), so metrics needing longer history (e.g. macroDirection's 1D
    * ADX, TICKET-017) are already defined for every step. Default 0 — unchanged from every ticket
@@ -97,6 +100,9 @@ function parseArgs(): {
   const momentumDirectMaxAtrPercentileArg = args.find((a) => a.startsWith('--momentum-direct-max-atr-percentile='));
   const momentumDirectMinSlPercentArg = args.find((a) => a.startsWith('--momentum-direct-min-sl-percent='));
   const momentumDirectTpRMultipleArg = args.find((a) => a.startsWith('--momentum-direct-tp-r-multiple='));
+  const momentumDirectMaxTotalConcurrentArg = args.find((a) => a.startsWith('--momentum-direct-max-total-concurrent='));
+  const momentumDirectCorrelationRiskThresholdArg = args.find((a) => a.startsWith('--momentum-direct-correlation-risk-threshold='));
+  const momentumDirectCorrelationRiskMultiplierArg = args.find((a) => a.startsWith('--momentum-direct-correlation-risk-multiplier='));
   const skipDaysArg = args.find((a) => a.startsWith('--skip-days='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
@@ -133,6 +139,13 @@ function parseArgs(): {
     // TICKET-064: TODO_CONFIRM, PM suggested 0.5 (%) / 2.0 — defaults unchanged unless CLI overrides.
     momentumDirectMinSlPercent: momentumDirectMinSlPercentArg ? Number(momentumDirectMinSlPercentArg.split('=')[1]) : 0.5,
     momentumDirectTpRMultiple: momentumDirectTpRMultipleArg ? Number(momentumDirectTpRMultipleArg.split('=')[1]) : 2.0,
+    // TICKET-068: TODO_CONFIRM, PM suggested 2 — default 999 (no real-world cap) unchanged unless CLI overrides.
+    momentumDirectMaxTotalConcurrent: momentumDirectMaxTotalConcurrentArg ? Number(momentumDirectMaxTotalConcurrentArg.split('=')[1]) : 999,
+    // TICKET-071 (renamed from TICKET-070's block threshold, same value): TODO_CONFIRM, PM suggested
+    // 0.90 — default 999 (trigger never fires) unchanged unless CLI overrides.
+    momentumDirectCorrelationRiskThreshold: momentumDirectCorrelationRiskThresholdArg ? Number(momentumDirectCorrelationRiskThresholdArg.split('=')[1]) : 999,
+    // TICKET-071: TODO_CONFIRM, PM suggested 0.5 — default 1.0 (no size change) unchanged unless CLI overrides.
+    momentumDirectCorrelationRiskMultiplier: momentumDirectCorrelationRiskMultiplierArg ? Number(momentumDirectCorrelationRiskMultiplierArg.split('=')[1]) : 1.0,
     // TICKET-061: default 0 unchanged from before this ticket.
     skipDays: skipDaysArg ? Number(skipDaysArg.split('=')[1]) : 0,
   };
@@ -292,10 +305,13 @@ async function main(): Promise<void> {
     momentumDirectMaxAtrPercentile,
     momentumDirectMinSlPercent,
     momentumDirectTpRMultiple,
+    momentumDirectMaxTotalConcurrent,
+    momentumDirectCorrelationRiskThreshold,
+    momentumDirectCorrelationRiskMultiplier,
     skipDays,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, skipDays=${skipDays}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, skipDays=${skipDays}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -336,6 +352,9 @@ async function main(): Promise<void> {
     momentumDirectMaxAtrPercentile, // TICKET-062: TODO_CONFIRM, default 100 (no real-world cap) unchanged unless CLI overrides.
     momentumDirectMinSlPercent, // TICKET-064: TODO_CONFIRM, default 0.5 unless CLI overrides.
     momentumDirectTpRMultiple, // TICKET-064: TODO_CONFIRM, default 2.0 unless CLI overrides.
+    momentumDirectMaxTotalConcurrent, // TICKET-068: TODO_CONFIRM, default 999 (no real-world cap) unchanged unless CLI overrides.
+    momentumDirectCorrelationRiskThreshold, // TICKET-071: TODO_CONFIRM, default 999 (trigger never fires) unchanged unless CLI overrides.
+    momentumDirectCorrelationRiskMultiplier, // TICKET-071: TODO_CONFIRM, default 1.0 (no size change) unchanged unless CLI overrides.
   };
 
   let accountBalance = START_BALANCE;
@@ -387,6 +406,22 @@ async function main(): Promise<void> {
       const totalRisk = symbolsData[symbol].state.openPositions.reduce((sum, entry) => sum + entry.meta.actualRiskDollar, 0);
       if (totalRisk > 0) openRiskBySymbol[symbol] = totalRisk;
     }
+
+    // TICKET-068: total setupType='MOMENTUM_DIRECT' open positions across ALL 4 symbols, same
+    // one-step-lag convention as openRiskBySymbol above (computed from state entering this step,
+    // before any of this step's own opens/closes) — fed into every symbol's ProcessCandleInput below.
+    const momentumDirectOpenPositionsTotal = SYMBOLS.reduce(
+      (sum, symbol) => sum + symbolsData[symbol].state.openPositions.filter((entry) => entry.meta.setupType === 'MOMENTUM_DIRECT').length,
+      0,
+    );
+
+    // TICKET-070: per-position (symbol + side) detail of every currently open MOMENTUM_DIRECT
+    // position across ALL 4 symbols, same one-step-lag convention as above.
+    const momentumDirectOpenPositions: Array<{ symbol: string; side: 'LONG' | 'SHORT' }> = SYMBOLS.flatMap((symbol) =>
+      symbolsData[symbol].state.openPositions
+        .filter((entry) => entry.meta.setupType === 'MOMENTUM_DIRECT')
+        .map((entry) => ({ symbol, side: entry.position.side })),
+    );
 
     // TICKET-030: cross-symbol correlation needs all 4 symbols' aligned 1H windows BEFORE any
     // processCandle() call this step — computed ONCE here, then the same value is fed into every
@@ -443,6 +478,8 @@ async function main(): Promise<void> {
         correlatedRiskRatio,
         accountBalance,
         allOpenPositionsRisk,
+        momentumDirectOpenPositionsTotal,
+        momentumDirectOpenPositions,
       };
 
       // TICKET-042: per-call buffer — processCandle() runs synchronously for this one symbol/step,
@@ -635,6 +672,9 @@ async function main(): Promise<void> {
     `- momentumDirectMaxAtrPercentile: ${momentumDirectMaxAtrPercentile} (TICKET-062, TODO_CONFIRM, CLI-overridable, default 100 = không giới hạn)`,
     `- momentumDirectMinSlPercent: ${momentumDirectMinSlPercent}% (TICKET-064 Phần A, TODO_CONFIRM, CLI-overridable, sàn tối thiểu khoảng cách SL — pha loãng phí)`,
     `- momentumDirectTpRMultiple: ${momentumDirectTpRMultiple}× R (TICKET-064 Phần B, TODO_CONFIRM, CLI-overridable — thay thế TP cố định 0.5% cũ)`,
+    `- momentumDirectMaxTotalConcurrent: ${momentumDirectMaxTotalConcurrent} (TICKET-068, TODO_CONFIRM, CLI-overridable, default 999 = không giới hạn, giới hạn tổng vị thế MOMENTUM_DIRECT toàn hệ thống, song song với maxConcurrentPositionsPerSymbol)`,
+    `- momentumDirectCorrelationRiskThreshold: ${momentumDirectCorrelationRiskThreshold} (TICKET-071, TODO_CONFIRM, CLI-overridable, default 999 = trigger không bao giờ kích hoạt, điều kiện kết hợp: correlatedRiskRatio cao + đã có lệnh cùng chiều khác coin)`,
+    `- momentumDirectCorrelationRiskMultiplier: ${momentumDirectCorrelationRiskMultiplier} (TICKET-071, TODO_CONFIRM, CLI-overridable, default 1.0 = không đổi size, nhân vào riskMultiplier khi trigger kích hoạt — thay thế cơ chế chặn hẳn của TICKET-070)`,
     `- planAutoSelectionEnabled: ${planAutoSelectionEnabled} (TICKET-052, AI-driven Plan A/B selection, TREND only, threshold=${config.planAutoSelectionConfig.planAutoSelectionMomentumThreshold})`,
     `- Runner trailing: ATR (2.5×ATR), không dùng Structure trailing`,
     `- takerFeeRate: 0.0004 (TODO_CONFIRM — Trader chưa cung cấp số thật)`,

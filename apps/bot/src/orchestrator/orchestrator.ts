@@ -80,6 +80,22 @@ export interface ProcessCandleInput {
    * summing/listing every currently open position across every symbol, including this one.
    */
   allOpenPositionsRisk: OpenPositionRisk[];
+  /**
+   * TICKET-068 — total count of currently open setupType='MOMENTUM_DIRECT' positions across ALL
+   * symbols (including this one), same one-step-lag convention as allOpenPositionsRisk (caller
+   * computes it once per step, before that step's per-symbol processCandle() calls, from each
+   * symbol's own state entering the step). Optional: omit to leave momentumDirectMaxTotalConcurrent
+   * permanently non-blocking (treated as 0 open — never blocks on its own).
+   */
+  momentumDirectOpenPositionsTotal?: number;
+  /**
+   * TICKET-070 — per-position detail (symbol + side) of every currently open setupType='MOMENTUM_DIRECT'
+   * position across ALL symbols, same one-step-lag convention as momentumDirectOpenPositionsTotal
+   * above (caller computes it once per step, before that step's per-symbol processCandle() calls).
+   * Optional: omit to leave momentumDirectCorrelationBlockThreshold permanently non-blocking (treated
+   * as no other same-side positions open).
+   */
+  momentumDirectOpenPositions?: Array<{ symbol: string; side: 'LONG' | 'SHORT' }>;
 }
 
 export interface ProcessCandleResult {
@@ -301,6 +317,14 @@ async function tryMomentumDirect(
 ): Promise<DraftSetup | null> {
   if (MOMENTUM_DIRECT_BLOCKED_REGIMES.includes(regimeOutput.regime)) return null;
 
+  // TICKET-068 — system-wide concurrency cap: TICKET-067 found 4 concurrent same-direction
+  // MOMENTUM_DIRECT positions (2 symbols × 2 each, all SHORT) lost together in one correlated move,
+  // driving the -39.68% Max Drawdown. This is a SEPARATE, parallel check from
+  // maxConcurrentPositionsPerSymbol (still enforced independently by the caller before
+  // tryOpenNewPosition/tryMomentumDirect is even attempted) — a candidate must clear BOTH. Missing
+  // input (momentumDirectOpenPositionsTotal undefined) is treated as 0 open, never blocking on its own.
+  if ((input.momentumDirectOpenPositionsTotal ?? 0) >= config.momentumDirectMaxTotalConcurrent) return null;
+
   // TICKET-062 — volatility cap: TICKET-061 found MOMENTUM_DIRECT fires mostly during extreme
   // volatility (atrPercentile5m mean 83.90 vs ~48.5 baseline), and that exact high-volatility group
   // drags winrate down (30.05% vs 42.05% for the rest). Undefined (insufficient 5m ATR history)
@@ -319,6 +343,19 @@ async function tryMomentumDirect(
   // do, take the higher-scoring side rather than leaving this undefined behavior.
   const side: 'LONG' | 'SHORT' =
     longPasses && shortPasses ? ((longScore as number) >= (shortScore as number) ? 'LONG' : 'SHORT') : longPasses ? 'LONG' : 'SHORT';
+
+  // TICKET-071 — replaces TICKET-070's outright block with a SIZE REDUCTION on the exact same
+  // trigger condition: correlatedRiskRatio elevated AND another symbol already has a same-side
+  // MOMENTUM_DIRECT position open (TICKET-067's 4-concurrent-same-side Drawdown episode).
+  // TICKET-068/070 both found outright blocking makes Max Drawdown WORSE (path-dependent effect —
+  // dropping a trade reshuffles the entire chain of trades after it). Shrinking the position instead
+  // keeps the trade IN the chain (same entry/exit timing, same downstream state) while cutting its
+  // dollar risk if the dangerous situation actually plays out. Missing correlatedRiskRatio never
+  // shrinks on its own (same as CORRELATED_RISK regime's own handling elsewhere — undefined means
+  // "not enough history", not "assume high risk").
+  const correlationElevated = input.correlatedRiskRatio !== undefined && input.correlatedRiskRatio >= config.momentumDirectCorrelationRiskThreshold;
+  const hasOtherSymbolSameSideOpen = (input.momentumDirectOpenPositions ?? []).some((p) => p.symbol !== input.symbol && p.side === side);
+  const correlationRiskMultiplier = correlationElevated && hasOtherSymbolSameSideOpen ? config.momentumDirectCorrelationRiskMultiplier : 1.0;
 
   // Mandatory macro alignment check — unlike routeEntry()'s cascade, NOT gated behind
   // entryRouterConfig.macroTrendFilterEnabled (TICKET-059 Phần B lists this as an unconditional
@@ -357,7 +394,11 @@ async function tryMomentumDirect(
     slPrice,
     setupType: 'MOMENTUM_DIRECT',
     regime: regimeOutput.regime,
-    riskMultiplier: config.entryRouterConfig.regimeRiskMultiplier[regimeOutput.regime],
+    // TICKET-071: correlationRiskMultiplier (1.0 unless the combined risk trigger fired) folds into
+    // this same riskMultiplier field, which tryOpenNewPosition() already multiplies together with
+    // momentumMultiplier into combinedRiskMultiplier before sizing — no new plumbing, reuses the
+    // exact mechanism regimeRiskMultiplier/momentumMultiplier already combine through.
+    riskMultiplier: config.entryRouterConfig.regimeRiskMultiplier[regimeOutput.regime] * correlationRiskMultiplier,
     tpPriceOverride,
   };
 }

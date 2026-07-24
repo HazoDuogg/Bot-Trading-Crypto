@@ -84,6 +84,12 @@ const baseConfig: OrchestratorConfig = {
   // TICKET-064: TODO_CONFIRM, PM suggested 0.5 / 2.0.
   momentumDirectMinSlPercent: 0.5,
   momentumDirectTpRMultiple: 2.0,
+  // TICKET-068: TODO_CONFIRM, PM suggested 2 — 999 here = no real-world cap, matches every ticket before this one exactly.
+  momentumDirectMaxTotalConcurrent: 999,
+  // TICKET-071 (renamed from TICKET-070): TODO_CONFIRM, PM suggested 0.90 — 999 here = trigger never fires, matches every ticket before this one exactly.
+  momentumDirectCorrelationRiskThreshold: 999,
+  // TICKET-071: TODO_CONFIRM, PM suggested 0.5 — 1.0 here = no size change, matches every ticket before this one exactly.
+  momentumDirectCorrelationRiskMultiplier: 1.0,
 };
 
 const trendLongInput: SlTpManagerInput = {
@@ -1093,6 +1099,103 @@ describe('processCandle — MOMENTUM_DIRECT (TICKET-059)', () => {
   // Default momentumDirectMaxAtrPercentile (100, from baseConfig, not overridden here) reproduces
   // every MOMENTUM_DIRECT test above byte-for-byte — those tests were left completely unmodified by
   // this ticket and still pass, which IS the "default = identical to before this ticket" proof.
+
+  // TICKET-068 — system-wide MOMENTUM_DIRECT concurrency cap. momentumDirectOpenPositionsTotal is
+  // supplied by the caller (backtest.ts sums it across all 4 symbols) — these tests set it directly,
+  // independent of maxConcurrentPositionsPerSymbol (a separate, still-independently-enforced gate).
+  it('already at momentumDirectMaxTotalConcurrent system-wide (regardless of symbol): creates nothing even though per-symbol room and score both clear', async () => {
+    const fixture = momentumDirectFixture();
+    const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: true, momentumDirectThreshold: ALWAYS_CLEARS, momentumDirectMaxTotalConcurrent: 2 };
+
+    const result = await processCandle(baseInput({ ...fixture, momentumDirectOpenPositionsTotal: 2 }), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.events).toHaveLength(0);
+    expect(result.symbolState.openPositions).toHaveLength(0);
+  });
+
+  it('below momentumDirectMaxTotalConcurrent system-wide: creates the MOMENTUM_DIRECT DraftSetup as before', async () => {
+    const fixture = momentumDirectFixture();
+    const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: true, momentumDirectThreshold: ALWAYS_CLEARS, momentumDirectMaxTotalConcurrent: 2 };
+
+    const result = await processCandle(baseInput({ ...fixture, momentumDirectOpenPositionsTotal: 1 }), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.events[0]).toMatchObject({ type: 'OPEN', setupType: 'MOMENTUM_DIRECT' });
+    expect(result.symbolState.openPositions).toHaveLength(1);
+  });
+
+  // Default momentumDirectMaxTotalConcurrent (999, from baseConfig, not overridden here) plus the
+  // default momentumDirectOpenPositionsTotal (undefined -> treated as 0) reproduces every
+  // MOMENTUM_DIRECT test above byte-for-byte — same "default = identical to before this ticket" proof
+  // as TICKET-062's atrPercentile5m cap.
+
+  // TICKET-071 — combined risk trigger: correlatedRiskRatio elevated AND another symbol already has
+  // a same-side MOMENTUM_DIRECT position open. Replaces TICKET-070's outright block with a SIZE
+  // REDUCTION on the exact same trigger — the trade is still created (never null), just with its
+  // riskMultiplier scaled down by momentumDirectCorrelationRiskMultiplier. This fixture's winning
+  // side is SHORT (documented above); regimeRiskMultiplier is 1.0 for TREND_RIDER
+  // (DEFAULT_ENTRY_ROUTER_CONFIG) and momentumFilterConfig is disabled in baseConfig (momentumMultiplier
+  // stays 1.0), so the event's riskMultiplier reduces to exactly the correlation multiplier alone.
+  it('correlatedRiskRatio elevated AND another symbol has a same-side (SHORT) MOMENTUM_DIRECT position open: still creates the DraftSetup, but riskMultiplier is scaled down', async () => {
+    const fixture = momentumDirectFixture();
+    const config: OrchestratorConfig = {
+      ...baseConfig,
+      momentumDirectEnabled: true,
+      momentumDirectThreshold: ALWAYS_CLEARS,
+      momentumDirectCorrelationRiskThreshold: 0.9,
+      momentumDirectCorrelationRiskMultiplier: 0.5,
+    };
+
+    const result = await processCandle(
+      baseInput({ ...fixture, correlatedRiskRatio: 0.95, momentumDirectOpenPositions: [{ symbol: 'ETHUSDT', side: 'SHORT' }] }),
+      INITIAL_SYMBOL_STATE,
+      config,
+    );
+
+    expect(result.events[0]).toMatchObject({ type: 'OPEN', setupType: 'MOMENTUM_DIRECT', riskMultiplier: 0.5 });
+    expect(result.symbolState.openPositions).toHaveLength(1);
+    expect(result.symbolState.openPositions[0].meta.riskMultiplier).toBe(0.5);
+  });
+
+  it('correlatedRiskRatio elevated BUT no other-symbol same-side MOMENTUM_DIRECT position open: riskMultiplier stays 1.0 (trigger needs BOTH conditions)', async () => {
+    const fixture = momentumDirectFixture();
+    const config: OrchestratorConfig = {
+      ...baseConfig,
+      momentumDirectEnabled: true,
+      momentumDirectThreshold: ALWAYS_CLEARS,
+      momentumDirectCorrelationRiskThreshold: 0.9,
+      momentumDirectCorrelationRiskMultiplier: 0.5,
+    };
+
+    const result = await processCandle(baseInput({ ...fixture, correlatedRiskRatio: 0.95, momentumDirectOpenPositions: [] }), INITIAL_SYMBOL_STATE, config);
+
+    expect(result.events[0]).toMatchObject({ type: 'OPEN', setupType: 'MOMENTUM_DIRECT', riskMultiplier: 1.0 });
+    expect(result.symbolState.openPositions).toHaveLength(1);
+  });
+
+  it('correlatedRiskRatio LOW even though another symbol has a same-side MOMENTUM_DIRECT position open: riskMultiplier stays 1.0 (trigger needs BOTH conditions)', async () => {
+    const fixture = momentumDirectFixture();
+    const config: OrchestratorConfig = {
+      ...baseConfig,
+      momentumDirectEnabled: true,
+      momentumDirectThreshold: ALWAYS_CLEARS,
+      momentumDirectCorrelationRiskThreshold: 0.9,
+      momentumDirectCorrelationRiskMultiplier: 0.5,
+    };
+
+    const result = await processCandle(
+      baseInput({ ...fixture, correlatedRiskRatio: 0.5, momentumDirectOpenPositions: [{ symbol: 'ETHUSDT', side: 'SHORT' }] }),
+      INITIAL_SYMBOL_STATE,
+      config,
+    );
+
+    expect(result.events[0]).toMatchObject({ type: 'OPEN', setupType: 'MOMENTUM_DIRECT', riskMultiplier: 1.0 });
+    expect(result.symbolState.openPositions).toHaveLength(1);
+  });
+
+  // Default momentumDirectCorrelationRiskThreshold (999, from baseConfig, not overridden here) plus
+  // the default momentumDirectOpenPositions (undefined -> treated as no other same-side positions)
+  // reproduces every MOMENTUM_DIRECT test above byte-for-byte — same "default = identical to before
+  // this ticket" proof as TICKET-062/068.
 
   it('routeEntry() cascade already found a setup: detectMomentumDirect() is never even tried (no double entry, setupType stays OB)', async () => {
     // Reuses the OB+MSS LONG fixture from the multi-position describe block above — a real setup
