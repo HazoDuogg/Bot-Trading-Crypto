@@ -35,9 +35,13 @@ export const DEFAULT_WINDOW_SIZES: Record<Interval, number> = {
 
 // Poll cadence per timeframe — engineering/ops parameter (not a strategy threshold), chosen so a
 // newly closed candle is picked up within a fraction of its own interval without hammering the API.
+// TICKET-077 1.1: PM explicitly confirmed 1-2s is a reasonable interval for the 5m timeframe (this
+// is the one that matters most for entry-decision freshness) — tightened from the original 20s.
+// 15m/1h/1d unchanged (they close far less often; polling them this fast would only burn rate-limit
+// budget for no benefit — 1.2 re-checks the total weight budget against this new cadence).
 export const DEFAULT_POLL_INTERVALS_MS: Record<Interval, number> = {
   '1m': 10_000,
-  '5m': 20_000,
+  '5m': 2_000,
   '15m': 30_000,
   '1h': 60_000,
   '1d': 300_000,
@@ -45,6 +49,23 @@ export const DEFAULT_POLL_INTERVALS_MS: Record<Interval, number> = {
 
 const KLINE_LIMIT = 3; // last closed candle(s) + the currently-forming one
 const MAX_RETRIES = 5; // 1s,2s,4s,8s,16s backoff on 429/network error, same policy as scripts/fetchOhlcv.ts
+// TICKET-077 1.0: bare fetch() has no timeout — a hung TCP connection (common failure mode behind a
+// flaky VPS network path) would block forever without ever reaching the catch/retry below, which
+// looks identical to "no price data" from the outside. Same AbortController pattern as
+// binanceOrderExecutor.ts's fetchWithTimeout().
+const REQUEST_TIMEOUT_MS = 10_000;
+// TICKET-077 1.1: a candle's nominal close time (timestamp + intervalMs) doesn't guarantee Binance's
+// own kline aggregation has settled server-side yet — a small safety margin avoids treating a candle
+// as final one tick too early (which would feed the orchestrator a value that still gets revised).
+const CLOSE_SAFETY_BUFFER_MS = 2_000;
+const BACKFILL_LIMIT = 1000;
+// TICKET-077 1.2: ground-truthed from GET /fapi/v1/exchangeInfo's `rateLimits` array (REQUEST_WEIGHT,
+// 1 MINUTE) at time of writing — this is Binance's own published number for the IP, not a guess.
+// Kept as a constant (not fetched at runtime) since re-deriving it on every poll would itself cost
+// weight; if Binance changes it, WEIGHT_SAFETY_THRESHOLD_PCT's margin (see below) absorbs the drift.
+const WEIGHT_LIMIT_PER_MINUTE = 2400;
+// PM's rule: "dư ít nhất 30-40% margin an toàn" — 0.6 (60% used) leaves exactly that margin.
+const WEIGHT_SAFETY_THRESHOLD_PCT = 0.6;
 
 export interface LiveCandleFeedConfig {
   symbols: string[];
@@ -54,6 +75,12 @@ export interface LiveCandleFeedConfig {
   klineLimit?: number;
   onError?: (err: Error, symbol: string, interval: Interval) => void;
   onPoll?: (symbol: string, interval: Interval, candles: CandleData[]) => void;
+  /** Called whenever a gap is detected AND successfully backfilled. A gap that fails to backfill surfaces through onError instead. */
+  onGapFilled?: (symbol: string, interval: Interval, gaps: CandleGap[]) => void;
+  /** Fires whenever a response includes the X-MBX-USED-WEIGHT-1m header — lets a caller (or a live dashboard) observe real rate-limit consumption, ground-truthed from Binance itself rather than a locally-computed estimate. */
+  onWeightUpdate?: (usedWeight1m: number, limitPerMinute: number) => void;
+  /** Fires when a poll is SKIPPED because used weight crossed WEIGHT_SAFETY_THRESHOLD_PCT — the auto-widen-under-pressure behavior 1.2 asks for (skipping a tick has the same rate-reducing effect as lengthening the interval, without needing to touch the timer itself). */
+  onThrottled?: (symbol: string, interval: Interval, usedWeight1m: number) => void;
   /** Injected for tests; defaults to setInterval/clearInterval. */
   setIntervalFn?: typeof setInterval;
   clearIntervalFn?: typeof clearInterval;
@@ -76,29 +103,85 @@ function parseKline(k: RawKline): CandleData {
   return { timestamp: k[0], open: Number(k[1]), high: Number(k[2]), low: Number(k[3]), close: Number(k[4]), volume: Number(k[5]) };
 }
 
-/** Replaces any buffered candle at/after the new batch's first timestamp (the forming candle keeps updating), then trims to windowSize. */
+/**
+ * Merges by timestamp key (newBatch wins on overlap — the forming candle keeps updating), sorted
+ * ascending, trimmed to windowSize.
+ * TICKET-077 1.1: rewritten from a "drop everything at/after newBatch[0]" scheme to a keyed merge —
+ * the old scheme silently deleted any buffered candle that fell in a poll's timestamp range but
+ * wasn't itself returned (e.g. a transient gap on Binance's side), which is exactly the kind of
+ * missing-candle case detectGaps()/backfill below needs to be able to see and repair.
+ */
 export function mergeCandles(buffer: CandleData[], newBatch: CandleData[], windowSize: number): CandleData[] {
   if (newBatch.length === 0) return buffer;
-  const cutoff = newBatch[0].timestamp;
-  const kept = buffer.filter((c) => c.timestamp < cutoff);
-  const merged = [...kept, ...newBatch];
+  const byTimestamp = new Map(buffer.map((c) => [c.timestamp, c]));
+  for (const c of newBatch) byTimestamp.set(c.timestamp, c);
+  const merged = [...byTimestamp.values()].sort((a, b) => a.timestamp - b.timestamp);
   return merged.length > windowSize ? merged.slice(merged.length - windowSize) : merged;
 }
 
-async function fetchKlines(baseUrl: string, symbol: string, interval: Interval, limit: number): Promise<CandleData[]> {
-  const url = `${baseUrl}/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+export interface CandleGap {
+  afterTimestamp: number; // last known-good candle before the gap
+  beforeTimestamp: number; // first known-good candle after the gap
+  missingCount: number;
+}
+
+/** Finds gaps in an otherwise-ascending, evenly-spaced candle buffer (a candle missing entirely, not just stale). */
+export function detectGaps(candles: CandleData[], intervalMs: number): CandleGap[] {
+  const gaps: CandleGap[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    const expectedNext = candles[i - 1].timestamp + intervalMs;
+    if (candles[i].timestamp > expectedNext) {
+      const missingCount = Math.round((candles[i].timestamp - expectedNext) / intervalMs);
+      gaps.push({ afterTimestamp: candles[i - 1].timestamp, beforeTimestamp: candles[i].timestamp, missingCount });
+    }
+  }
+  return gaps;
+}
+
+/** A candle is only trustworthy as "final" once its nominal close time has passed by a small safety margin. */
+export function isCandleClosed(candle: CandleData, intervalMs: number, nowMs: number): boolean {
+  return nowMs >= candle.timestamp + intervalMs + CLOSE_SAFETY_BUFFER_MS;
+}
+
+async function fetchWithTimeout(url: string): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export interface KlinesResult {
+  candles: CandleData[];
+  usedWeight1m?: number; // parsed from X-MBX-USED-WEIGHT-1m, undefined if the header is missing
+}
+
+/** Reads the mandatory Retry-After header on a 429/418 response — Binance says how long to wait, so a fixed exponential guess is never used when the exchange tells us explicitly. Falls back to exponential backoff only if the header is absent. */
+function retryAfterMs(res: Response, attempt: number): number {
+  const header = res.headers.get('retry-after');
+  const seconds = header !== null ? Number(header) : NaN;
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 1000 * 2 ** attempt;
+}
+
+async function fetchKlinesFromUrl(url: string): Promise<KlinesResult> {
   let lastError: unknown;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      const res = await fetch(url);
-      if (res.status === 429) {
-        if (attempt === MAX_RETRIES - 1) throw new Error(`429 rate-limited after ${MAX_RETRIES} attempts: ${url}`);
-        await sleep(1000 * 2 ** attempt);
+      const res = await fetchWithTimeout(url);
+      const usedWeight1m = res.headers.get('x-mbx-used-weight-1m');
+      // TICKET-077 1.2: 418 = IP auto-banned by Binance for ignoring 429s — treated identically to
+      // 429 here (honor Retry-After, never retry immediately) but is the more severe of the two.
+      if (res.status === 429 || res.status === 418) {
+        const waitMs = retryAfterMs(res, attempt);
+        if (attempt === MAX_RETRIES - 1) throw new Error(`HTTP ${res.status} sau ${MAX_RETRIES} lần thử (Retry-After tôn trọng mỗi lần): ${url}`);
+        await sleep(waitMs);
         continue;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}: ${url}`);
       const raw = (await res.json()) as RawKline[];
-      return raw.map(parseKline);
+      return { candles: raw.map(parseKline), usedWeight1m: usedWeight1m !== null ? Number(usedWeight1m) : undefined };
     } catch (err) {
       lastError = err;
       if (attempt === MAX_RETRIES - 1) throw err;
@@ -108,12 +191,26 @@ async function fetchKlines(baseUrl: string, symbol: string, interval: Interval, 
   throw lastError;
 }
 
+function fetchKlines(baseUrl: string, symbol: string, interval: Interval, limit: number): Promise<KlinesResult> {
+  return fetchKlinesFromUrl(`${baseUrl}/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+}
+
+/** TICKET-077 1.1: fetches an explicit [startTime, endTime] range to backfill a detected gap — same retry policy as the regular poll. */
+function fetchKlinesRange(baseUrl: string, symbol: string, interval: Interval, startTime: number, endTime: number): Promise<KlinesResult> {
+  return fetchKlinesFromUrl(`${baseUrl}/fapi/v1/klines?symbol=${symbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=${BACKFILL_LIMIT}`);
+}
+
 /** Maintains an in-memory rolling buffer of candles per symbol/interval, refreshed by REST polling on independent per-interval timers. */
 export class LiveCandleFeed {
-  private readonly config: Required<Omit<LiveCandleFeedConfig, 'onError' | 'onPoll'>> & Pick<LiveCandleFeedConfig, 'onError' | 'onPoll'>;
+  private readonly config: Required<Omit<LiveCandleFeedConfig, 'onError' | 'onPoll' | 'onGapFilled' | 'onWeightUpdate' | 'onThrottled'>> &
+    Pick<LiveCandleFeedConfig, 'onError' | 'onPoll' | 'onGapFilled' | 'onWeightUpdate' | 'onThrottled'>;
   private readonly buffers: Map<string, CandleData[]> = new Map(); // key = `${symbol}:${interval}`
   private readonly timers: ReturnType<typeof setInterval>[] = [];
   private running = false;
+  // TICKET-077 1.2: latest ground-truthed weight usage observed from ANY response's
+  // X-MBX-USED-WEIGHT-1m header — shared across all symbols/intervals since Binance's limit is
+  // per-IP, not per-endpoint.
+  private lastKnownUsedWeight1m = 0;
 
   constructor(config: LiveCandleFeedConfig) {
     this.config = {
@@ -124,9 +221,17 @@ export class LiveCandleFeed {
       klineLimit: config.klineLimit ?? KLINE_LIMIT,
       onError: config.onError,
       onPoll: config.onPoll,
+      onGapFilled: config.onGapFilled,
+      onWeightUpdate: config.onWeightUpdate,
+      onThrottled: config.onThrottled,
       setIntervalFn: config.setIntervalFn ?? setInterval,
       clearIntervalFn: config.clearIntervalFn ?? clearInterval,
     };
+  }
+
+  /** Most recent ground-truthed X-MBX-USED-WEIGHT-1m seen from any response so far (0 before the first poll). */
+  getLastKnownUsedWeight1m(): number {
+    return this.lastKnownUsedWeight1m;
   }
 
   private key(symbol: string, interval: Interval): string {
@@ -137,14 +242,56 @@ export class LiveCandleFeed {
     return this.buffers.get(this.key(symbol, interval)) ?? [];
   }
 
-  private async pollOnce(symbol: string, interval: Interval): Promise<void> {
+  /** Only the candles safe to treat as final (nominal close time + safety buffer already elapsed) — the last 1-2 entries of getCandles() may still be excluded if they haven't settled yet. */
+  getClosedCandles(symbol: string, interval: Interval, nowMs: number = Date.now()): CandleData[] {
+    const intervalMs = INTERVAL_MS[interval];
+    return this.getCandles(symbol, interval).filter((c) => isCandleClosed(c, intervalMs, nowMs));
+  }
+
+  private noteWeight(result: KlinesResult): void {
+    if (result.usedWeight1m === undefined) return;
+    this.lastKnownUsedWeight1m = result.usedWeight1m;
+    this.config.onWeightUpdate?.(result.usedWeight1m, WEIGHT_LIMIT_PER_MINUTE);
+  }
+
+  /** TICKET-077 1.1: after every regular merge, checks the buffer for gaps and backfills them via an explicit [startTime, endTime] range request — a gap that fails to backfill surfaces through onError, never silently left in the buffer. */
+  private async backfillGaps(symbol: string, interval: Interval): Promise<void> {
+    const key = this.key(symbol, interval);
+    const intervalMs = INTERVAL_MS[interval];
+    const buffer = this.buffers.get(key) ?? [];
+    const gaps = detectGaps(buffer, intervalMs);
+    if (gaps.length === 0) return;
+
     try {
-      const newBatch = await fetchKlines(this.config.baseUrl, symbol, interval, this.config.klineLimit);
+      for (const gap of gaps) {
+        const backfill = await fetchKlinesRange(this.config.baseUrl, symbol, interval, gap.afterTimestamp + intervalMs, gap.beforeTimestamp - intervalMs);
+        this.noteWeight(backfill);
+        const windowSize = this.config.windowSizes[interval] ?? DEFAULT_WINDOW_SIZES[interval];
+        this.buffers.set(key, mergeCandles(this.buffers.get(key) ?? [], backfill.candles, windowSize));
+      }
+      this.config.onGapFilled?.(symbol, interval, gaps);
+    } catch (err) {
+      this.config.onError?.(new Error(`backfillGaps(${symbol},${interval}) thất bại: ${(err as Error).message}`), symbol, interval);
+    }
+  }
+
+  private async pollOnce(symbol: string, interval: Interval): Promise<void> {
+    // TICKET-077 1.2: "tự động giãn interval khi gần chạm ngưỡng" — skipping this tick has the same
+    // rate-reducing effect as widening the interval, without needing a scheduling refactor (weight
+    // resets every rolling minute on Binance's side, so the next tick re-checks fresh).
+    if (this.lastKnownUsedWeight1m / WEIGHT_LIMIT_PER_MINUTE > WEIGHT_SAFETY_THRESHOLD_PCT) {
+      this.config.onThrottled?.(symbol, interval, this.lastKnownUsedWeight1m);
+      return;
+    }
+    try {
+      const result = await fetchKlines(this.config.baseUrl, symbol, interval, this.config.klineLimit);
+      this.noteWeight(result);
       const key = this.key(symbol, interval);
       const windowSize = this.config.windowSizes[interval] ?? DEFAULT_WINDOW_SIZES[interval];
-      const merged = mergeCandles(this.buffers.get(key) ?? [], newBatch, windowSize);
+      const merged = mergeCandles(this.buffers.get(key) ?? [], result.candles, windowSize);
       this.buffers.set(key, merged);
       this.config.onPoll?.(symbol, interval, merged);
+      await this.backfillGaps(symbol, interval);
     } catch (err) {
       this.config.onError?.(err as Error, symbol, interval);
     }

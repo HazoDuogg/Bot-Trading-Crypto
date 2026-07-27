@@ -3,8 +3,15 @@ import { BinanceOrderExecutor } from './binanceOrderExecutor.js';
 
 const CREDS = { apiKey: 'test-key', apiSecret: 'test-secret', baseUrl: 'https://testnet.example' };
 
-function jsonResponse(status: number, body: unknown): Response {
-  return { ok: status >= 200 && status < 300, status, statusText: 'x', json: async () => body, text: async () => JSON.stringify(body) } as unknown as Response;
+function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: 'x',
+    headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  } as unknown as Response;
 }
 
 describe('BinanceOrderExecutor — dryRun (default)', () => {
@@ -80,14 +87,81 @@ describe('BinanceOrderExecutor — live mode (dryRun=false)', () => {
     expect((init.headers as Record<string, string>)['X-MBX-APIKEY']).toBe('test-key');
   });
 
-  it('placeStopMarket for a SHORT position uses side=BUY + reduceOnly=true', async () => {
-    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(200, { orderId: 7, status: 'NEW' }));
+  it('placeStopMarket for a SHORT position uses side=BUY + reduceOnly=true, via /fapi/v1/algoOrder (TICKET-077 1.3 — bắt buộc từ 09/12/2025)', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(200, { algoId: 7, algoStatus: 'NEW' }));
     const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
-    await exec.placeStopMarket('ETHUSDT', 'SHORT', 2000, 0.5);
+    const result = await exec.placeStopMarket('ETHUSDT', 'SHORT', 2000, 0.5);
+    expect(result).toMatchObject({ algoId: 7, algoStatus: 'NEW' });
+    const [url] = fetchFn.mock.calls[0];
+    expect(url).toContain('/fapi/v1/algoOrder');
+    expect(url).toContain('side=BUY');
+    expect(url).toContain('algoType=CONDITIONAL');
+    expect(url).toContain('type=STOP_MARKET');
+    expect(url).toContain('triggerPrice=2000');
+    expect(url).toContain('reduceOnly=true');
+  });
+
+  it('placeTakeProfitMarket uses /fapi/v1/algoOrder with algoType=CONDITIONAL and triggerPrice (not stopPrice)', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(200, { algoId: 11, algoStatus: 'NEW' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    const result = await exec.placeTakeProfitMarket('BTCUSDT', 'LONG', 70000, 0.01);
+    expect(result).toMatchObject({ algoId: 11, algoStatus: 'NEW' });
+    const [url] = fetchFn.mock.calls[0];
+    expect(url).toContain('/fapi/v1/algoOrder');
+    expect(url).toContain('type=TAKE_PROFIT_MARKET');
+    expect(url).toContain('triggerPrice=70000');
+    expect(url).not.toContain('stopPrice=');
+  });
+
+  it('cancelAlgoOrder DELETEs /fapi/v1/algoOrder with algoId (a separate ID space from cancelOrder\'s orderId)', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(200, { algoId: 7, clientAlgoId: 'x', code: '200', msg: 'success' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await exec.cancelAlgoOrder('ETHUSDT', 7);
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toContain('/fapi/v1/algoOrder');
+    expect(url).toContain('algoId=7');
+    expect(init.method).toBe('DELETE');
+  });
+
+  it('placeLimitOrder for a LONG opens with side=BUY, type=LIMIT, timeInForce=GTC (not reduceOnly)', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(200, { orderId: 8, status: 'NEW' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    const result = await exec.placeLimitOrder('BTCUSDT', 'LONG', 50000, 0.01);
+    expect(result).toMatchObject({ orderId: 8, status: 'NEW' });
     const [url] = fetchFn.mock.calls[0];
     expect(url).toContain('side=BUY');
-    expect(url).toContain('type=STOP_MARKET');
+    expect(url).toContain('type=LIMIT');
+    expect(url).toContain('timeInForce=GTC');
+    expect(url).toContain('price=50000');
+    expect(url).not.toContain('reduceOnly');
+  });
+
+  it('closePositionMarket for a LONG position uses side=SELL + reduceOnly=true (partial or full quantity)', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(200, { orderId: 9, status: 'FILLED' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await exec.closePositionMarket('BTCUSDT', 'LONG', 0.005);
+    const [url] = fetchFn.mock.calls[0];
+    expect(url).toContain('side=SELL');
+    expect(url).toContain('type=MARKET');
     expect(url).toContain('reduceOnly=true');
+    expect(url).toContain('quantity=0.005');
+  });
+
+  it('closePositionMarket for a SHORT position uses side=BUY + reduceOnly=true', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(200, { orderId: 10, status: 'FILLED' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await exec.closePositionMarket('ETHUSDT', 'SHORT', 0.02);
+    const [url] = fetchFn.mock.calls[0];
+    expect(url).toContain('side=BUY');
+    expect(url).toContain('reduceOnly=true');
+  });
+
+  it('placeLimitOrder/closePositionMarket are gated by dryRun like every other mutating call', async () => {
+    const fetchFn = vi.fn();
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, fetchFn }); // dryRun defaults true
+    await exec.placeLimitOrder('BTCUSDT', 'LONG', 50000, 0.01);
+    await exec.closePositionMarket('BTCUSDT', 'LONG', 0.01);
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 
   it('does NOT retry a mutating call once an HTTP error response is received', async () => {
@@ -129,16 +203,19 @@ describe('BinanceOrderExecutor — live mode (dryRun=false)', () => {
     expect(fetchFn).toHaveBeenCalledTimes(1); // no retry on ambiguous timeout
   });
 
-  it('updateStopOrder cancels the old order then places a new one', async () => {
+  it('updateStopOrder cancels the old algo order (via cancelAlgoOrder/algoId) then places a new one', async () => {
     const fetchFn = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse(200, {})) // cancel
-      .mockResolvedValueOnce(jsonResponse(200, { orderId: 99, status: 'NEW' })); // new stop
+      .mockResolvedValueOnce(jsonResponse(200, { algoId: 5, code: '200', msg: 'success' })) // cancel
+      .mockResolvedValueOnce(jsonResponse(200, { algoId: 99, algoStatus: 'NEW' })); // new stop
     const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
     const result = await exec.updateStopOrder('BTCUSDT', 5, 'LONG', 61000, 0.01);
-    expect(result).toMatchObject({ orderId: 99 });
+    expect(result).toMatchObject({ algoId: 99 });
     expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(fetchFn.mock.calls[0][0]).toContain('/fapi/v1/algoOrder');
+    expect(fetchFn.mock.calls[0][0]).toContain('algoId=5');
     expect(fetchFn.mock.calls[0][1].method).toBe('DELETE');
+    expect(fetchFn.mock.calls[1][0]).toContain('/fapi/v1/algoOrder');
     expect(fetchFn.mock.calls[1][1].method).toBe('POST');
   });
 
@@ -151,5 +228,50 @@ describe('BinanceOrderExecutor — live mode (dryRun=false)', () => {
     const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn, onOrderFailure });
     await expect(exec.updateStopOrder('BTCUSDT', 5, 'LONG', 61000, 0.01)).rejects.toThrow(/VỊ THẾ ĐANG KHÔNG CÓ SL/);
     expect(onOrderFailure).toHaveBeenCalledWith(expect.stringContaining('URGENT_NO_SL'), expect.any(Error));
+  });
+});
+
+describe('BinanceOrderExecutor — ORDERS rate-limit tracking (TICKET-077 1.2 follow-up)', () => {
+  it('reads X-MBX-ORDER-COUNT-* headers from a mutating response and exposes them via getters/callback', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(200, { orderId: 1, status: 'FILLED' }, { 'x-mbx-order-count-10s': '5', 'x-mbx-order-count-1m': '20' }));
+    const onOrderCountUpdate = vi.fn();
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn, onOrderCountUpdate });
+
+    await exec.openMarketPosition('BTCUSDT', 'LONG', 0.01);
+
+    expect(exec.getLastKnownOrderCount10s()).toBe(5);
+    expect(exec.getLastKnownOrderCount1m()).toBe(20);
+    expect(onOrderCountUpdate).toHaveBeenCalledWith(5, 300, 20, 1200);
+  });
+
+  it('isOrderRateThrottled() is false when usage is well under the safety margin', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(200, { orderId: 1, status: 'FILLED' }, { 'x-mbx-order-count-10s': '10', 'x-mbx-order-count-1m': '50' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await exec.openMarketPosition('BTCUSDT', 'LONG', 0.01);
+    expect(exec.isOrderRateThrottled()).toBe(false);
+  });
+
+  it('rejects the NEXT mutating call outright (no wait, no retry) once the 10s ORDERS window crosses the safety margin — critical for Bước 1.3\'s rapid place→move-SL→move-TP→partial-close sequences', async () => {
+    // 200/300 = 66.7% > 60% threshold.
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { orderId: 1, status: 'FILLED' }, { 'x-mbx-order-count-10s': '200', 'x-mbx-order-count-1m': '200' }))
+      .mockResolvedValue(jsonResponse(200, { orderId: 2, status: 'NEW' }));
+    const onOrderFailure = vi.fn();
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn, onOrderFailure });
+
+    await exec.openMarketPosition('BTCUSDT', 'LONG', 0.01); // pushes count10s to 200/300
+    await expect(exec.placeStopMarket('BTCUSDT', 'LONG', 60000, 0.01)).rejects.toThrow(/ORDERS rate limit gần chạm ngưỡng/);
+    expect(fetchFn).toHaveBeenCalledTimes(1); // the throttled call never even reached fetch
+    expect(onOrderFailure).toHaveBeenCalledWith(expect.stringContaining('placeStopMarket'), expect.any(Error));
+  });
+
+  it('rejects outright once the 1m ORDERS window (not just 10s) crosses the safety margin', async () => {
+    // count10s stays low (10/300) but count1m is 800/1200 = 66.7% > 60%.
+    const fetchFn = vi.fn().mockResolvedValueOnce(jsonResponse(200, { orderId: 1, status: 'FILLED' }, { 'x-mbx-order-count-10s': '10', 'x-mbx-order-count-1m': '800' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await exec.openMarketPosition('BTCUSDT', 'LONG', 0.01);
+    expect(exec.isOrderRateThrottled()).toBe(true);
+    await expect(exec.cancelOrder('BTCUSDT', 1)).rejects.toThrow(/ORDERS rate limit gần chạm ngưỡng/);
   });
 });
