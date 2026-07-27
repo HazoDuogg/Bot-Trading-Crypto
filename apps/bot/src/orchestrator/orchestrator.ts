@@ -7,7 +7,7 @@
 import { detectRegime } from '../regime/regimeDetector.js';
 import { RegimeConfig } from '../regime/config.js';
 import { lastDefined, wilderATRSeries, wilderDIDirectionSeries } from '../regime/indicators.js';
-import { MarketRegime, type CandleData, type RegimeOutput } from '../regime/types.js';
+import { MarketRegime, type CandleData, type ComputedMetrics, type RegimeOutput } from '../regime/types.js';
 import { routeEntry } from '../entry/entryRouter.js';
 import { EntryConfig } from '../entry/config.js';
 import { detectMomentumDirect } from '../entry/momentumDirect.js';
@@ -658,6 +658,11 @@ export async function processCandle(
   onFunnelEvent?: FunnelCallback,
   // TICKET-055: TEMPORARY verification-only diagnostic — see SetupNotFiredDiagnostic doc comment.
   onSetupNotFiredDiagnostic?: (diagnostic: SetupNotFiredDiagnostic) => void,
+  // TICKET-078 — pure pass-through of regimeOutput.computedMetrics every call (adx1h,
+  // atrPercentile5m, etc.), same observability pattern as onManipulatedConfirmed/onFunnelEvent above
+  // — never read here, never affects any decision. Lets a caller (e.g. Telegram notifications) show
+  // the metrics behind a regime confirmation/change without recomputing detectRegime() itself.
+  onRegimeMetrics?: (computedMetrics: ComputedMetrics) => void,
 ): Promise<ProcessCandleResult> {
   // Step 1 — regime, always runs.
   const regimeOutput = detectRegime({
@@ -678,6 +683,8 @@ export async function processCandle(
     previousDangerZoneTimestamp: regimeOutput.lastDangerZoneTimestamp,
   };
   const currentCandle = input.candles5m[input.candles5m.length - 1];
+
+  onRegimeMetrics?.(regimeOutput.computedMetrics);
 
   // TICKET-027 — diagnostic-only, no effect on any decision below: fires once per fresh transition
   // into MANIPULATED (state.regimeState.previousRegime was something else, now confirmed MANIPULATED).

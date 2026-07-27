@@ -382,6 +382,23 @@ describe('processCandle — no open position, entry pipeline wiring', () => {
     expect(openEvent.momentumScore).toBeUndefined();
   });
 
+  // TICKET-078 — onRegimeMetrics fires every call with regimeOutput.computedMetrics, so a caller
+  // (e.g. Telegram's regime-change notification) can show adx1h/atrPercentile5m without recomputing
+  // detectRegime() itself. Pure observability — asserting it doesn't change any other behavior.
+  it('onRegimeMetrics fires every call with the same computedMetrics regime confirmation used', async () => {
+    const fixture = fullOpenFlowFixture();
+    let captured: { adx1h?: number; atrPercentile5m?: number } | undefined;
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, baseConfig, undefined, undefined, undefined, undefined, (m) => {
+      captured = m;
+    });
+
+    expect(captured).toBeDefined();
+    expect(captured?.adx1h).toBeGreaterThan(0);
+    expect(captured?.atrPercentile5m).toBeGreaterThanOrEqual(0);
+    // Same OPEN event this fixture always produces — confirms the callback didn't change any decision.
+    expect(result.events[0]).toMatchObject({ type: 'OPEN', symbol: 'BTCUSDT', side: 'LONG' });
+  });
+
   it('skips the entry (SKIPPED event, no position) when the risk pool is already full for other symbols', async () => {
     const fixture = fullOpenFlowFixture();
     const result = await processCandle(

@@ -201,7 +201,13 @@ async function main(): Promise<void> {
 
       const balanceBeforeThisSymbol = accountBalance;
       const previousRegime = sd.state.regimeState.previousRegime;
-      const result = await processCandle(input, sd.state, CONFIG);
+      // TICKET-078 — captures regimeOutput.computedMetrics for THIS call via the new onRegimeMetrics
+      // diagnostic callback (orchestrator.ts), so a regime-change sample can show real adx1h/
+      // atrPercentile5m instead of the placeholder undefined the first draft of this script used.
+      let lastComputedMetrics: { adx1h?: number; atrPercentile5m?: number } = {};
+      const result = await processCandle(input, sd.state, CONFIG, undefined, undefined, undefined, undefined, (m) => {
+        lastComputedMetrics = m;
+      });
       sd.state = result.symbolState;
       accountBalance = result.accountBalance;
 
@@ -211,8 +217,8 @@ async function main(): Promise<void> {
           symbol,
           fromRegime: previousRegime,
           toRegime: newRegime,
-          adx1h: undefined,
-          atrPercentile5m: undefined,
+          adx1h: lastComputedMetrics.adx1h,
+          atrPercentile5m: lastComputedMetrics.atrPercentile5m,
           timestamp: currentCandle.timestamp,
         });
       }
