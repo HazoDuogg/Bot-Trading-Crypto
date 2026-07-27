@@ -34,7 +34,16 @@ import {
   type SlTpManagerInput,
   type TpPlan,
 } from '../risk/slTpManager.js';
-import type { ExitReason, OpenPositionEntry, OpenTradeEvent, OrchestratorConfig, OrchestratorEvent, SkippedEntryEvent, SymbolState } from './types.js';
+import type {
+  ExitReason,
+  MomentumDirectCircuitBreakerSideState,
+  OpenPositionEntry,
+  OpenTradeEvent,
+  OrchestratorConfig,
+  OrchestratorEvent,
+  SkippedEntryEvent,
+  SymbolState,
+} from './types.js';
 
 export interface ProcessCandleInput {
   symbol: string;
@@ -314,6 +323,7 @@ async function tryMomentumDirect(
   regimeOutput: RegimeOutput,
   currentCandle: CandleData,
   macroDirection: 'UP' | 'DOWN' | 'FLAT' | undefined,
+  circuitBreakerState: { LONG: MomentumDirectCircuitBreakerSideState; SHORT: MomentumDirectCircuitBreakerSideState },
 ): Promise<DraftSetup | null> {
   if (MOMENTUM_DIRECT_BLOCKED_REGIMES.includes(regimeOutput.regime)) return null;
 
@@ -343,6 +353,12 @@ async function tryMomentumDirect(
   // do, take the higher-scoring side rather than leaving this undefined behavior.
   const side: 'LONG' | 'SHORT' =
     longPasses && shortPasses ? ((longScore as number) >= (shortScore as number) ? 'LONG' : 'SHORT') : longPasses ? 'LONG' : 'SHORT';
+
+  // TICKET-081 — per symbol+side circuit breaker: N consecutive SL losses on this exact symbol+side
+  // pauses MOMENTUM_DIRECT signals for that side only, until cooldownUntilTimestamp passes. Other
+  // symbols/sides are untouched (separate state per side, per symbol).
+  const cooldownUntil = circuitBreakerState[side].cooldownUntilTimestamp;
+  if (cooldownUntil !== null && currentCandle.timestamp < cooldownUntil) return null;
 
   // TICKET-071 — replaces TICKET-070's outright block with a SIZE REDUCTION on the exact same
   // trigger condition: correlatedRiskRatio elevated AND another symbol already has a same-side
@@ -424,6 +440,7 @@ async function tryOpenNewPosition(
   accountBalance: number,
   onFunnelEvent: FunnelCallback | undefined,
   onSetupNotFiredDiagnostic: ((diagnostic: SetupNotFiredDiagnostic) => void) | undefined,
+  circuitBreakerState: { LONG: MomentumDirectCircuitBreakerSideState; SHORT: MomentumDirectCircuitBreakerSideState },
 ): Promise<EntryAttemptResult> {
   // TICKET-017 Phần A: same direction function as adxDirection1h, applied to 1D candles instead.
   const macroDirectionSeries = wilderDIDirectionSeries(input.candles1d, EntryConfig.MACRO_TREND_ADX_PERIOD_1D);
@@ -467,7 +484,7 @@ async function tryOpenNewPosition(
   // straight through to the early return below, byte-identical to every ticket before this one.
   let effectiveDraftSetup: DraftSetup | null = draftSetup;
   if (effectiveDraftSetup === null && config.momentumDirectEnabled) {
-    effectiveDraftSetup = await tryMomentumDirect(input, config, regimeOutput, currentCandle, macroDirection);
+    effectiveDraftSetup = await tryMomentumDirect(input, config, regimeOutput, currentCandle, macroDirection, circuitBreakerState);
   }
 
   if (effectiveDraftSetup === null) return { event: null, newEntry: null };
@@ -680,6 +697,11 @@ export async function processCandle(
   const events: OrchestratorEvent[] = [];
   let accountBalance = input.accountBalance;
   const remainingPositions: OpenPositionEntry[] = [];
+  // TICKET-081 — per-side circuit breaker state, updated below as MOMENTUM_DIRECT positions close.
+  const circuitBreakerState: { LONG: MomentumDirectCircuitBreakerSideState; SHORT: MomentumDirectCircuitBreakerSideState } = {
+    LONG: { ...state.momentumDirectCircuitBreaker.LONG },
+    SHORT: { ...state.momentumDirectCircuitBreaker.SHORT },
+  };
 
   // Step 3 — advance every currently open position for this symbol, independently. TICKET-056: was
   // "the one open position, if any" — now a loop, since a symbol can hold more than one. A same-candle
@@ -713,6 +735,21 @@ export async function processCandle(
       riskMultiplier: entry.meta.riskMultiplier,
       accountBalanceAfter: accountBalance,
     });
+
+    // TICKET-081 — only MOMENTUM_DIRECT's own loss history drives this side's circuit breaker;
+    // other setupTypes closing never touch it.
+    if (entry.meta.setupType === 'MOMENTUM_DIRECT') {
+      const sideState = circuitBreakerState[position.side];
+      if (exitReason === 'SL') {
+        sideState.consecutiveSlLosses += 1;
+        if (sideState.consecutiveSlLosses >= config.momentumDirectCircuitBreakerLossThreshold) {
+          sideState.cooldownUntilTimestamp = currentCandle.timestamp + config.momentumDirectCircuitBreakerCooldownMs;
+        }
+      } else {
+        sideState.consecutiveSlLosses = 0;
+        sideState.cooldownUntilTimestamp = null;
+      }
+    }
   }
 
   // Step 2 — try a new entry iff still under the per-symbol concurrency limit. TICKET-056: gated on
@@ -722,13 +759,22 @@ export async function processCandle(
   // PM-confirmed (2026-07-22): `accountBalance` passed to the sizer here already reflects this same
   // candle's own close(s) above, same sequencing already used across symbols within one backtest step.
   if (state.openPositions.length < config.maxConcurrentPositionsPerSymbol) {
-    const { event, newEntry } = await tryOpenNewPosition(input, config, regimeOutput, currentCandle, accountBalance, onFunnelEvent, onSetupNotFiredDiagnostic);
+    const { event, newEntry } = await tryOpenNewPosition(
+      input,
+      config,
+      regimeOutput,
+      currentCandle,
+      accountBalance,
+      onFunnelEvent,
+      onSetupNotFiredDiagnostic,
+      circuitBreakerState,
+    );
     if (event) events.push(event);
     if (newEntry) remainingPositions.push(newEntry);
   }
 
   return {
-    symbolState: { regimeState, openPositions: remainingPositions },
+    symbolState: { regimeState, openPositions: remainingPositions, momentumDirectCircuitBreaker: circuitBreakerState },
     accountBalance,
     events,
   };

@@ -90,6 +90,10 @@ const baseConfig: OrchestratorConfig = {
   momentumDirectCorrelationRiskThreshold: 999,
   // TICKET-071: TODO_CONFIRM, PM suggested 0.5 — 1.0 here = no size change, matches every ticket before this one exactly.
   momentumDirectCorrelationRiskMultiplier: 1.0,
+  // TICKET-081: TODO_CONFIRM, PM suggested 3 — 999999 here = never triggers, matches every ticket before this one exactly.
+  momentumDirectCircuitBreakerLossThreshold: 999999,
+  // TICKET-081: TODO_CONFIRM, PM suggested 7_200_000 (2h) — 0 here, unreached in practice while the loss threshold above never fires.
+  momentumDirectCircuitBreakerCooldownMs: 0,
 };
 
 const trendLongInput: SlTpManagerInput = {
@@ -105,6 +109,11 @@ const trendLongInput: SlTpManagerInput = {
 // TICKET-056: entry far below fullOpenFlowFixture()'s ~94-106 price range, so a position opened here
 // is guaranteed untouched (no tier fill, no close) by any candle from that fixture — used in the
 // multi-position tests below to isolate "does the 2nd entry succeed" from "did the 1st also react".
+// TICKET-081 test fixture — a SHORT COUNTER_TREND position (mirrors the LONG counterTrendInput used
+// in the "Step 3: COUNTER_TREND position" describe block below): entry=100, slPrice=100.7 (R=0.7),
+// TP = priceAtR(100, 0.7, 1, 'SHORT') = 99.3.
+const counterTrendMomentumShortInput: SlTpManagerInput = { ...trendLongInput, scenario: 'COUNTER_TREND', side: 'SHORT', slPrice: 100.7 };
+
 const farAwayLongInput: SlTpManagerInput = {
   scenario: 'TREND',
   entryPrice: 50,
@@ -129,7 +138,7 @@ function makeMeta(overrides: Partial<OpenTradeMeta> = {}): OpenTradeMeta {
 
 function stateWithOpenPosition(position: ReturnType<typeof openPosition>, metaOverrides: Partial<OpenTradeMeta> = {}): SymbolState {
   return {
-    regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
+    ...INITIAL_SYMBOL_STATE,
     openPositions: [{ position, meta: makeMeta(metaOverrides) }],
   };
 }
@@ -821,6 +830,7 @@ describe('processCandle — multi-position per symbol (TICKET-056)', () => {
     const existingPos = openPosition(farAwayLongInput);
     const state: SymbolState = {
       regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
+      momentumDirectCircuitBreaker: { LONG: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null }, SHORT: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null } },
       openPositions: [{ position: existingPos, meta: makeMeta({ actualRiskDollar: 25 }) }],
     };
     const fixture = fullOpenFlowFixture();
@@ -842,6 +852,7 @@ describe('processCandle — multi-position per symbol (TICKET-056)', () => {
     const existingPos = openPosition(farAwayLongInput);
     const state: SymbolState = {
       regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
+      momentumDirectCircuitBreaker: { LONG: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null }, SHORT: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null } },
       openPositions: [{ position: existingPos, meta: makeMeta({ actualRiskDollar: 35 }) }],
     };
     const fixture = fullOpenFlowFixture();
@@ -865,6 +876,7 @@ describe('processCandle — multi-position per symbol (TICKET-056)', () => {
     const posB = openPosition({ ...farAwayLongInput, entryPrice: 60, slPrice: 59 });
     const state: SymbolState = {
       regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
+      momentumDirectCircuitBreaker: { LONG: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null }, SHORT: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null } },
       openPositions: [
         { position: posA, meta: makeMeta() },
         { position: posB, meta: makeMeta() },
@@ -885,6 +897,7 @@ describe('processCandle — multi-position per symbol (TICKET-056)', () => {
     const posB = openPosition(farAwayLongInput); // entry=50 — untouched by the candle below
     const state: SymbolState = {
       regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
+      momentumDirectCircuitBreaker: { LONG: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null }, SHORT: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null } },
       openPositions: [
         { position: posA, meta: makeMeta({ actualRiskDollar: 10 }) },
         { position: posB, meta: makeMeta({ actualRiskDollar: 5 }) },
@@ -1196,6 +1209,126 @@ describe('processCandle — MOMENTUM_DIRECT (TICKET-059)', () => {
   // the default momentumDirectOpenPositions (undefined -> treated as no other same-side positions)
   // reproduces every MOMENTUM_DIRECT test above byte-for-byte — same "default = identical to before
   // this ticket" proof as TICKET-062/068.
+
+  // TICKET-081 — per symbol+side circuit breaker: N consecutive SL losses on this exact symbol+side
+  // pauses MOMENTUM_DIRECT for that side only, until the configured cooldown passes.
+  describe('circuit breaker (TICKET-081)', () => {
+    function stateWithCircuitBreaker(side: 'LONG' | 'SHORT', consecutiveSlLosses: number, cooldownUntilTimestamp: number | null): SymbolState {
+      return {
+        ...INITIAL_SYMBOL_STATE,
+        momentumDirectCircuitBreaker: {
+          ...INITIAL_SYMBOL_STATE.momentumDirectCircuitBreaker,
+          [side]: { consecutiveSlLosses, cooldownUntilTimestamp },
+        },
+      };
+    }
+
+    it('SHORT side in active cooldown: MOMENTUM_DIRECT creates nothing even though score/regime/macro all clear', async () => {
+      const fixture = momentumDirectFixture();
+      const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: true, momentumDirectThreshold: ALWAYS_CLEARS };
+      const currentTimestamp = fixture.candles5m[fixture.candles5m.length - 1].timestamp;
+      const state = stateWithCircuitBreaker('SHORT', 3, currentTimestamp + 1); // cooldown still in the future
+
+      const result = await processCandle(baseInput(fixture), state, config);
+
+      expect(result.events).toHaveLength(0);
+      expect(result.symbolState.openPositions).toHaveLength(0);
+    });
+
+    it('LONG side in active cooldown does not block the SHORT side (per-side isolation)', async () => {
+      const fixture = momentumDirectFixture();
+      const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: true, momentumDirectThreshold: ALWAYS_CLEARS };
+      const currentTimestamp = fixture.candles5m[fixture.candles5m.length - 1].timestamp;
+      const state = stateWithCircuitBreaker('LONG', 3, currentTimestamp + 1); // only LONG is in cooldown; fixture's winning side is SHORT
+
+      const result = await processCandle(baseInput(fixture), state, config);
+
+      expect(result.events[0]).toMatchObject({ type: 'OPEN', side: 'SHORT', setupType: 'MOMENTUM_DIRECT' });
+      expect(result.symbolState.openPositions).toHaveLength(1);
+    });
+
+    it('cooldown already expired (currentCandle.timestamp >= cooldownUntilTimestamp): MOMENTUM_DIRECT fires again', async () => {
+      const fixture = momentumDirectFixture();
+      const config: OrchestratorConfig = { ...baseConfig, momentumDirectEnabled: true, momentumDirectThreshold: ALWAYS_CLEARS };
+      const currentTimestamp = fixture.candles5m[fixture.candles5m.length - 1].timestamp;
+      const state = stateWithCircuitBreaker('SHORT', 3, currentTimestamp); // cooldown ends exactly at this candle
+
+      const result = await processCandle(baseInput(fixture), state, config);
+
+      expect(result.events[0]).toMatchObject({ type: 'OPEN', side: 'SHORT', setupType: 'MOMENTUM_DIRECT' });
+    });
+
+    it('N-th consecutive SL loss on a MOMENTUM_DIRECT SHORT position sets cooldownUntilTimestamp for SHORT only', async () => {
+      const closingPos = openPosition(counterTrendMomentumShortInput);
+      const state: SymbolState = {
+        ...INITIAL_SYMBOL_STATE,
+        openPositions: [{ position: closingPos, meta: makeMeta({ setupType: 'MOMENTUM_DIRECT' }) }],
+        momentumDirectCircuitBreaker: {
+          LONG: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null },
+          SHORT: { consecutiveSlLosses: 2, cooldownUntilTimestamp: null }, // 2 prior SL losses already recorded
+        },
+      };
+      const candles5m = [...sufficientDummyCandles().candles5m.slice(0, -1), c(100.7, 100.7, 100.8, 99.2)]; // touches SHORT's SL (99.3... see fixture below)
+      const config: OrchestratorConfig = { ...baseConfig, momentumDirectCircuitBreakerLossThreshold: 3, momentumDirectCircuitBreakerCooldownMs: 7_200_000 };
+
+      const result = await processCandle(baseInput({ candles5m }), state, config);
+
+      expect(result.events[0]).toMatchObject({ type: 'CLOSE', exitReason: 'SL', side: 'SHORT' });
+      const currentTimestamp = candles5m[candles5m.length - 1].timestamp;
+      expect(result.symbolState.momentumDirectCircuitBreaker.SHORT).toEqual({ consecutiveSlLosses: 3, cooldownUntilTimestamp: currentTimestamp + 7_200_000 });
+      expect(result.symbolState.momentumDirectCircuitBreaker.LONG).toEqual({ consecutiveSlLosses: 0, cooldownUntilTimestamp: null }); // untouched
+    });
+
+    it('below the loss threshold: increments the counter but does not set a cooldown yet', async () => {
+      const closingPos = openPosition(counterTrendMomentumShortInput);
+      const state: SymbolState = {
+        ...INITIAL_SYMBOL_STATE,
+        openPositions: [{ position: closingPos, meta: makeMeta({ setupType: 'MOMENTUM_DIRECT' }) }],
+      };
+      const candles5m = [...sufficientDummyCandles().candles5m.slice(0, -1), c(100.7, 100.7, 100.8, 99.2)]; // touches SHORT's SL
+      const config: OrchestratorConfig = { ...baseConfig, momentumDirectCircuitBreakerLossThreshold: 3, momentumDirectCircuitBreakerCooldownMs: 7_200_000 };
+
+      const result = await processCandle(baseInput({ candles5m }), state, config);
+
+      expect(result.events[0]).toMatchObject({ type: 'CLOSE', exitReason: 'SL' });
+      expect(result.symbolState.momentumDirectCircuitBreaker.SHORT).toEqual({ consecutiveSlLosses: 1, cooldownUntilTimestamp: null });
+    });
+
+    it('a non-SL close (win) resets the counter and clears any active cooldown for that side', async () => {
+      const closingPos = openPosition(counterTrendMomentumShortInput);
+      const state: SymbolState = {
+        ...INITIAL_SYMBOL_STATE,
+        openPositions: [{ position: closingPos, meta: makeMeta({ setupType: 'MOMENTUM_DIRECT' }) }],
+        momentumDirectCircuitBreaker: {
+          LONG: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null },
+          SHORT: { consecutiveSlLosses: 2, cooldownUntilTimestamp: 123 },
+        },
+      };
+      const candles5m = [...sufficientDummyCandles().candles5m.slice(0, -1), c(99.5, 99.2, 99.6, 99.2)]; // touches SHORT's TP (99.3), not SL (100.7)
+      const config: OrchestratorConfig = { ...baseConfig };
+
+      const result = await processCandle(baseInput({ candles5m }), state, config);
+
+      expect(result.events[0]).toMatchObject({ type: 'CLOSE', exitReason: 'COUNTER_TREND_TP' });
+      expect(result.symbolState.momentumDirectCircuitBreaker.SHORT).toEqual({ consecutiveSlLosses: 0, cooldownUntilTimestamp: null });
+    });
+
+    it('a non-MOMENTUM_DIRECT setupType closing with SL never touches the circuit breaker counters', async () => {
+      const closingPos = openPosition(trendLongInput); // setupType defaults to 'OB' via makeMeta()
+      const state: SymbolState = {
+        ...INITIAL_SYMBOL_STATE,
+        openPositions: [{ position: closingPos, meta: makeMeta({ setupType: 'OB' }) }],
+      };
+      const candles5m = [...sufficientDummyCandles().candles5m.slice(0, -1), c(100, 100, 102, 98)]; // touches SL
+      const config: OrchestratorConfig = { ...baseConfig, momentumDirectCircuitBreakerLossThreshold: 1, momentumDirectCircuitBreakerCooldownMs: 7_200_000 };
+
+      const result = await processCandle(baseInput({ candles5m }), state, config);
+
+      expect(result.events[0]).toMatchObject({ type: 'CLOSE', exitReason: 'SL' });
+      expect(result.symbolState.momentumDirectCircuitBreaker.LONG).toEqual({ consecutiveSlLosses: 0, cooldownUntilTimestamp: null });
+      expect(result.symbolState.momentumDirectCircuitBreaker.SHORT).toEqual({ consecutiveSlLosses: 0, cooldownUntilTimestamp: null });
+    });
+  });
 
   it('routeEntry() cascade already found a setup: detectMomentumDirect() is never even tried (no double entry, setupType stays OB)', async () => {
     // Reuses the OB+MSS LONG fixture from the multi-position describe block above — a real setup

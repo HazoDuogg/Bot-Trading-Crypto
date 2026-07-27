@@ -38,11 +38,17 @@ export interface SymbolState {
   regimeState: RegimeHysteresisState;
   /** TICKET-056: was `openPosition: ManagedPositionState | null` + `openMeta` — up to config.maxConcurrentPositionsPerSymbol entries now, each tracked fully independently (its own TP/SL/trailing). */
   openPositions: OpenPositionEntry[];
+  /** TICKET-081 — per-side (LONG/SHORT) MOMENTUM_DIRECT loss-streak circuit breaker for THIS symbol. */
+  momentumDirectCircuitBreaker: { LONG: MomentumDirectCircuitBreakerSideState; SHORT: MomentumDirectCircuitBreakerSideState };
 }
 
 export const INITIAL_SYMBOL_STATE: SymbolState = {
   regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
   openPositions: [],
+  momentumDirectCircuitBreaker: {
+    LONG: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null },
+    SHORT: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null },
+  },
 };
 
 export type ExitReason = 'TP1' | 'TP2' | 'RUNNER_SL' | 'SL' | 'BREAKEVEN_SL' | 'COUNTER_TREND_TP';
@@ -173,4 +179,27 @@ export interface OrchestratorConfig {
    * never fires (momentumDirectCorrelationRiskThreshold=999 default).
    */
   momentumDirectCorrelationRiskMultiplier: number;
+  /**
+   * TICKET-081 — TODO_CONFIRM: PM suggested 3. Per symbol+side circuit breaker (khác hẳn
+   * momentumDirectCorrelationRiskThreshold ở trên — cái đó phản ứng theo tương quan/biến động THỜI
+   * ĐIỂM HIỆN TẠI, chỉ số đã được TICKET-069 xác nhận KHÔNG phân biệt được thắng/thua; cái này phản
+   * ứng theo LỊCH SỬ THUA THẬT của chính symbol+side đó). Khi setupType='MOMENTUM_DIRECT' đóng lệnh
+   * với exitReason='SL' đủ số lần liên tiếp này trên CÙNG symbol+side, tạm dừng bắn tín hiệu
+   * MOMENTUM_DIRECT cho ĐÚNG symbol+side đó (không ảnh hưởng symbol/side khác). Default một số rất
+   * lớn (999999) = không bao giờ kích hoạt, giống mọi ticket trước ticket này.
+   */
+  momentumDirectCircuitBreakerLossThreshold: number;
+  /**
+   * TICKET-081 — TODO_CONFIRM: PM suggested 2 giờ (7_200_000 ms). Thời gian tạm dừng sau khi cầu dao
+   * kích hoạt. Bộ đếm reset về 0 ngay khi có 1 lệnh MOMENTUM_DIRECT đóng KHÔNG PHẢI 'SL' (tức thắng)
+   * trên đúng symbol+side đó — không cần chờ hết thời gian nghỉ mới reset đếm.
+   */
+  momentumDirectCircuitBreakerCooldownMs: number;
+}
+
+/** TICKET-081 — trạng thái cầu dao cho 1 chiều (LONG hoặc SHORT) của 1 symbol. */
+export interface MomentumDirectCircuitBreakerSideState {
+  consecutiveSlLosses: number;
+  /** null = không đang trong thời gian nghỉ. */
+  cooldownUntilTimestamp: number | null;
 }

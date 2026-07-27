@@ -74,6 +74,8 @@ function parseArgs(): {
   momentumDirectMaxTotalConcurrent: number;
   momentumDirectCorrelationRiskThreshold: number;
   momentumDirectCorrelationRiskMultiplier: number;
+  momentumDirectCircuitBreakerLossThreshold: number;
+  momentumDirectCircuitBreakerCooldownMs: number;
   /** TICKET-061: diagnostic-only — skip this many calendar days at the start of the run (on top of
    * the existing warm-up startStep), so metrics needing longer history (e.g. macroDirection's 1D
    * ADX, TICKET-017) are already defined for every step. Default 0 — unchanged from every ticket
@@ -103,6 +105,8 @@ function parseArgs(): {
   const momentumDirectMaxTotalConcurrentArg = args.find((a) => a.startsWith('--momentum-direct-max-total-concurrent='));
   const momentumDirectCorrelationRiskThresholdArg = args.find((a) => a.startsWith('--momentum-direct-correlation-risk-threshold='));
   const momentumDirectCorrelationRiskMultiplierArg = args.find((a) => a.startsWith('--momentum-direct-correlation-risk-multiplier='));
+  const momentumDirectCircuitBreakerLossThresholdArg = args.find((a) => a.startsWith('--momentum-direct-circuit-breaker-loss-threshold='));
+  const momentumDirectCircuitBreakerCooldownMsArg = args.find((a) => a.startsWith('--momentum-direct-circuit-breaker-cooldown-ms='));
   const skipDaysArg = args.find((a) => a.startsWith('--skip-days='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
@@ -146,6 +150,15 @@ function parseArgs(): {
     momentumDirectCorrelationRiskThreshold: momentumDirectCorrelationRiskThresholdArg ? Number(momentumDirectCorrelationRiskThresholdArg.split('=')[1]) : 999,
     // TICKET-071: TODO_CONFIRM, PM suggested 0.5 — default 1.0 (no size change) unchanged unless CLI overrides.
     momentumDirectCorrelationRiskMultiplier: momentumDirectCorrelationRiskMultiplierArg ? Number(momentumDirectCorrelationRiskMultiplierArg.split('=')[1]) : 1.0,
+    // TICKET-081: TODO_CONFIRM, PM suggested 3 — default 999999 (never triggers) unchanged unless CLI overrides.
+    momentumDirectCircuitBreakerLossThreshold: momentumDirectCircuitBreakerLossThresholdArg
+      ? Number(momentumDirectCircuitBreakerLossThresholdArg.split('=')[1])
+      : 999999,
+    // TICKET-081: TODO_CONFIRM, PM suggested 7_200_000 (2h) — default 0 unchanged unless CLI overrides
+    // (never reached in practice since the loss threshold above already blocks activation by default).
+    momentumDirectCircuitBreakerCooldownMs: momentumDirectCircuitBreakerCooldownMsArg
+      ? Number(momentumDirectCircuitBreakerCooldownMsArg.split('=')[1])
+      : 0,
     // TICKET-061: default 0 unchanged from before this ticket.
     skipDays: skipDaysArg ? Number(skipDaysArg.split('=')[1]) : 0,
   };
@@ -308,10 +321,12 @@ async function main(): Promise<void> {
     momentumDirectMaxTotalConcurrent,
     momentumDirectCorrelationRiskThreshold,
     momentumDirectCorrelationRiskMultiplier,
+    momentumDirectCircuitBreakerLossThreshold,
+    momentumDirectCircuitBreakerCooldownMs,
     skipDays,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, skipDays=${skipDays}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, skipDays=${skipDays}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -355,6 +370,8 @@ async function main(): Promise<void> {
     momentumDirectMaxTotalConcurrent, // TICKET-068: TODO_CONFIRM, default 999 (no real-world cap) unchanged unless CLI overrides.
     momentumDirectCorrelationRiskThreshold, // TICKET-071: TODO_CONFIRM, default 999 (trigger never fires) unchanged unless CLI overrides.
     momentumDirectCorrelationRiskMultiplier, // TICKET-071: TODO_CONFIRM, default 1.0 (no size change) unchanged unless CLI overrides.
+    momentumDirectCircuitBreakerLossThreshold, // TICKET-081: TODO_CONFIRM, default 999999 (never triggers) unchanged unless CLI overrides.
+    momentumDirectCircuitBreakerCooldownMs, // TICKET-081: TODO_CONFIRM, default 0 unchanged unless CLI overrides.
   };
 
   let accountBalance = START_BALANCE;
@@ -675,6 +692,8 @@ async function main(): Promise<void> {
     `- momentumDirectMaxTotalConcurrent: ${momentumDirectMaxTotalConcurrent} (TICKET-068, TODO_CONFIRM, CLI-overridable, default 999 = không giới hạn, giới hạn tổng vị thế MOMENTUM_DIRECT toàn hệ thống, song song với maxConcurrentPositionsPerSymbol)`,
     `- momentumDirectCorrelationRiskThreshold: ${momentumDirectCorrelationRiskThreshold} (TICKET-071, TODO_CONFIRM, CLI-overridable, default 999 = trigger không bao giờ kích hoạt, điều kiện kết hợp: correlatedRiskRatio cao + đã có lệnh cùng chiều khác coin)`,
     `- momentumDirectCorrelationRiskMultiplier: ${momentumDirectCorrelationRiskMultiplier} (TICKET-071, TODO_CONFIRM, CLI-overridable, default 1.0 = không đổi size, nhân vào riskMultiplier khi trigger kích hoạt — thay thế cơ chế chặn hẳn của TICKET-070)`,
+    `- momentumDirectCircuitBreakerLossThreshold: ${momentumDirectCircuitBreakerLossThreshold} (TICKET-081, TODO_CONFIRM, CLI-overridable, default 999999 = không bao giờ kích hoạt — tạm dừng MOMENTUM_DIRECT cho đúng symbol+side sau N lần thua SL liên tiếp)`,
+    `- momentumDirectCircuitBreakerCooldownMs: ${momentumDirectCircuitBreakerCooldownMs}ms (TICKET-081, TODO_CONFIRM, CLI-overridable, default 0 — thời gian tạm dừng sau khi cầu dao kích hoạt, reset khi có 1 lệnh thắng)`,
     `- planAutoSelectionEnabled: ${planAutoSelectionEnabled} (TICKET-052, AI-driven Plan A/B selection, TREND only, threshold=${config.planAutoSelectionConfig.planAutoSelectionMomentumThreshold})`,
     `- Runner trailing: ATR (2.5×ATR), không dùng Structure trailing`,
     `- takerFeeRate: 0.0004 (TODO_CONFIRM — Trader chưa cung cấp số thật)`,

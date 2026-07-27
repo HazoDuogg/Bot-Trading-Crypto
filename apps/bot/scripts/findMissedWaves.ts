@@ -294,6 +294,8 @@ async function traceNeededWindows(neededWindows: NeededWindow[]): Promise<Map<st
     momentumDirectMaxTotalConcurrent: 999, // TICKET-068: TODO_CONFIRM default — never read since momentumDirectEnabled is false here.
     momentumDirectCorrelationRiskThreshold: 999, // TICKET-071: TODO_CONFIRM default — never read since momentumDirectEnabled is false here.
     momentumDirectCorrelationRiskMultiplier: 1.0, // TICKET-071: TODO_CONFIRM default — never read since momentumDirectEnabled is false here.
+    momentumDirectCircuitBreakerLossThreshold: 999999, // TICKET-081: TODO_CONFIRM default — never read since momentumDirectEnabled is false here.
+    momentumDirectCircuitBreakerCooldownMs: 0, // TICKET-081: TODO_CONFIRM default — never read since momentumDirectEnabled is false here.
   };
 
   let accountBalance = 400;
