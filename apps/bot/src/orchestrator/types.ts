@@ -1,5 +1,5 @@
 import type { MarketRegime } from '../regime/types.js';
-import type { ManagedPositionState, TpPlan } from '../risk/slTpManager.js';
+import type { ManagedPositionState, TpLevel, TpPlan } from '../risk/slTpManager.js';
 import type { EntryRouterConfig } from '../entry/types.js';
 import type { MomentumFilterConfig, NeutralTransitionGateConfig, PlanAutoSelectionConfig } from '../xgbFilter/config.js';
 
@@ -65,6 +65,18 @@ export interface OpenTradeEvent {
   riskMultiplier: number;
   actualRiskDollar: number;
   marginRequired: number;
+  /** TICKET-078 — surfaced for Telegram notifications, already computed at open time, no new formula. */
+  slPrice: number;
+  /** TICKET-078 — the position's own computed TP tiers (TREND: TP1/TP2/TP3_RUNNER, COUNTER_TREND: single COUNTER_TREND_TP). */
+  tpLevels: TpLevel[];
+  /** TICKET-078 — undefined when regime's own ATR/ADX history was insufficient (same as everywhere else in this codebase). */
+  adx1h?: number;
+  atrPercentile5m?: number;
+  /** TICKET-078 — undefined unless momentumFilterConfig/planAutoSelectionConfig/MOMENTUM_DIRECT actually needed the score this candle. */
+  momentumScore?: number;
+  /** TICKET-078 — this symbol's existing risk pool usage (% of accountBalance) before/after this position, from the exact same numbers wouldExceedRiskPool() already checked. */
+  riskPoolPctBefore: number;
+  riskPoolPctAfter: number;
 }
 
 export interface CloseTradeEvent {
@@ -84,6 +96,29 @@ export interface CloseTradeEvent {
   pnlPct: number;
   riskMultiplier: number;
   accountBalanceAfter: number;
+  /** TICKET-078 — surfaced for Telegram notifications; undefined when insufficient ATR/ADX history. */
+  adx1h?: number;
+}
+
+/**
+ * TICKET-078 — fires when TP1/TP2 fills WITHOUT closing the position (SL choreography moves but
+ * `closed` stays false) — surfaces an already-happening internal state transition (onTp1Hit/onTp2Hit
+ * in slTpManager.ts), no new decision logic. pnlUsd is GROSS for just this tier's slice (fees are
+ * only finalized once at full close, per computeRealizedPnl's own doc comment — never split per tier).
+ */
+export interface PartialCloseEvent {
+  type: 'PARTIAL_CLOSE';
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  tier: 'TP1' | 'TP2';
+  closePercent: number;
+  pnlUsd: number;
+  newSlPrice: number;
+  /** Fraction (0-1) of the ORIGINAL positionSize still open after this tier. */
+  remainingPercent: number;
+  /** Unchanged from before this fill — PNL isn't credited to accountBalance until the position fully closes. */
+  accountBalanceAfter: number;
+  timestamp: number;
 }
 
 export interface SkippedEntryEvent {
@@ -94,7 +129,7 @@ export interface SkippedEntryEvent {
   reason: 'RISK_POOL_EXCEEDED' | 'NEUTRAL_GATE_REJECTED';
 }
 
-export type OrchestratorEvent = OpenTradeEvent | CloseTradeEvent | SkippedEntryEvent;
+export type OrchestratorEvent = OpenTradeEvent | CloseTradeEvent | PartialCloseEvent | SkippedEntryEvent;
 
 export interface OrchestratorConfig {
   entryRouterConfig: EntryRouterConfig;

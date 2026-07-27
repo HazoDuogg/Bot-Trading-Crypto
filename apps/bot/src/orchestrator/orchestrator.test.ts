@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { processCandle, selectTpPlan, type ProcessCandleInput } from './orchestrator.js';
-import { INITIAL_SYMBOL_STATE, type OpenTradeMeta, type OrchestratorConfig, type SymbolState } from './types.js';
+import { INITIAL_SYMBOL_STATE, type OpenTradeEvent, type OpenTradeMeta, type OrchestratorConfig, type SymbolState } from './types.js';
 import { MarketRegime, type CandleData } from '../regime/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../entry/entryRouter.js';
 import type { FunnelEvent } from '../entry/types.js';
@@ -178,7 +178,18 @@ describe('processCandle — Step 3: managing an already-open TREND position', ()
     expect(result.symbolState.openPositions[0].position.closed).toBe(false);
     expect(result.symbolState.openPositions[0].position.filledTiers).toContain('TP1');
     expect(result.symbolState.openPositions[0].position.currentSlPrice).toBeGreaterThan(99); // moved to breakeven+fee
-    expect(result.events).toHaveLength(0);
+    // TICKET-078: TP1 fill without a full close now surfaces a PARTIAL_CLOSE event.
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({
+      type: 'PARTIAL_CLOSE',
+      side: 'LONG',
+      tier: 'TP1',
+      closePercent: 0.4, // PLAN_A tp1Pct
+      pnlUsd: 0.4 * 990 * ((101.2 - 100) / 100), // gross, no fee — matches computeTierGrossPnl's own formula
+      remainingPercent: 0.6, // 1 - tp1Pct
+      accountBalanceAfter: 400, // unchanged — PNL not credited until full close
+    });
+    expect(result.events[0]).toMatchObject({ newSlPrice: result.symbolState.openPositions[0].position.currentSlPrice });
   });
 
   it('fills TP2 (moves SL to TP1 price) once TP1 already filled and TP2 is touched', async () => {
@@ -193,7 +204,9 @@ describe('processCandle — Step 3: managing an already-open TREND position', ()
     expect(result.symbolState.openPositions[0].position.closed).toBe(false);
     expect(result.symbolState.openPositions[0].position.filledTiers).toContain('TP2');
     expect(result.symbolState.openPositions[0].position.currentSlPrice).toBe(101.2); // TP1 price
-    expect(result.events).toHaveLength(0);
+    // TICKET-078: TP2 fill without a full close now surfaces a PARTIAL_CLOSE event.
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({ type: 'PARTIAL_CLOSE', tier: 'TP2' });
   });
 
   // TICKET-016: this SL is the post-TP1 breakeven+fee stop (TP1 already realized), not a raw loss
@@ -275,6 +288,9 @@ describe('processCandle — Step 3: COUNTER_TREND position', () => {
     const result = await processCandle(baseInput({ candles5m }), state, baseConfig);
 
     expect(result.events[0]).toMatchObject({ type: 'CLOSE', exitReason: 'COUNTER_TREND_TP' });
+    // TICKET-078: CloseTradeEvent now surfaces adx1h straight from regimeOutput.computedMetrics —
+    // whatever that already computed this candle, no new formula.
+    expect((result.events[0] as { adx1h?: number }).adx1h).toBe(100);
   });
 });
 
@@ -342,6 +358,28 @@ describe('processCandle — no open position, entry pipeline wiring', () => {
     expect(result.symbolState.openPositions[0].position.side).toBe('LONG');
     expect(result.symbolState.openPositions[0].meta.actualRiskDollar).toBeGreaterThan(0);
     expect(result.symbolState.openPositions[0].meta.marginRequired).toBeLessThanOrEqual(baseConfig.maxMarginCap);
+  });
+
+  // TICKET-078 — OpenTradeEvent now surfaces slPrice/tpLevels/adx1h/atrPercentile5m/riskPoolPct
+  // fields for Telegram notifications, pure surfacing of numbers already computed above.
+  it('OpenTradeEvent surfaces slPrice, tpLevels, regime metrics, and risk pool before/after %', async () => {
+    const fixture = fullOpenFlowFixture();
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, baseConfig);
+
+    const openEvent = result.events[0] as OpenTradeEvent;
+    expect(openEvent.type).toBe('OPEN');
+    expect(openEvent.slPrice).toBe(result.symbolState.openPositions[0].position.initialSlPrice);
+    expect(openEvent.tpLevels).toEqual(result.symbolState.openPositions[0].position.tpLevels);
+    expect(openEvent.tpLevels.length).toBeGreaterThan(0);
+    // adx1h/atrPercentile5m come from regimeOutput.computedMetrics — always defined once regime is TREND_RIDER.
+    expect(openEvent.adx1h).toBeGreaterThan(0);
+    expect(openEvent.atrPercentile5m).toBeGreaterThanOrEqual(0);
+    // No other symbol has any open risk in this test — pool starts at 0% and rises after this position.
+    expect(openEvent.riskPoolPctBefore).toBe(0);
+    expect(openEvent.riskPoolPctAfter).toBeGreaterThan(0);
+    expect(openEvent.riskPoolPctAfter).toBeCloseTo((openEvent.actualRiskDollar / 400) * 100, 6);
+    // momentumFilterConfig/planAutoSelectionConfig are both disabled in baseConfig — score never computed.
+    expect(openEvent.momentumScore).toBeUndefined();
   });
 
   it('skips the entry (SKIPPED event, no position) when the risk pool is already full for other symbols', async () => {
@@ -823,7 +861,12 @@ describe('processCandle — multi-position per symbol (TICKET-056)', () => {
     expect(funnelEvents).toHaveLength(0);
     expect(result.symbolState.openPositions).toHaveLength(1); // still just the original
     expect(result.symbolState.openPositions[0].position.entryPrice).toBe(50);
-    expect(result.events).toHaveLength(0); // no OPEN/SKIPPED event at all
+    // TICKET-078: this fixture's last candle (high=106) also happens to touch the farAway
+    // position's own TP1 (51.2, far below the fixture's ~94-106 price range but still in its
+    // favorable direction for a LONG) — a real PARTIAL_CLOSE fires for THAT position; no OPEN/SKIPPED
+    // event fires, which is what this test actually verifies (Step 2 never attempted at the limit).
+    expect(result.events).toHaveLength(1);
+    expect(result.events[0]).toMatchObject({ type: 'PARTIAL_CLOSE', tier: 'TP1' });
   });
 
   it('maxConcurrentPositionsPerSymbol=2: opens a 2nd position on the same symbol while the 1st stays open', async () => {
@@ -903,13 +946,15 @@ describe('processCandle — multi-position per symbol (TICKET-056)', () => {
         { position: posB, meta: makeMeta({ actualRiskDollar: 5 }) },
       ],
     };
-    const candles5m = [...sufficientDummyCandles().candles5m.slice(0, -1), c(100, 100, 102, 98)]; // touches posA's SL(99), irrelevant to posB
+    const candles5m = [...sufficientDummyCandles().candles5m.slice(0, -1), c(100, 100, 102, 98)]; // touches posA's SL(99); also touches posB's own TP1(51.2, far below but still in its favorable direction)
     const config: OrchestratorConfig = { ...baseConfig, maxConcurrentPositionsPerSymbol: 2 };
 
     const result = await processCandle(baseInput({ candles5m }), state, config);
 
-    expect(result.events).toHaveLength(1);
+    // TICKET-078: posA's full close AND posB's own TP1 partial fill both surface as events now.
+    expect(result.events).toHaveLength(2);
     expect(result.events[0]).toMatchObject({ type: 'CLOSE', exitReason: 'SL' });
+    expect(result.events[1]).toMatchObject({ type: 'PARTIAL_CLOSE', tier: 'TP1' });
     expect(result.symbolState.openPositions).toHaveLength(1); // posB still tracked
     expect(result.symbolState.openPositions[0].position.entryPrice).toBe(50);
     expect(result.symbolState.openPositions[0].position.closed).toBe(false);

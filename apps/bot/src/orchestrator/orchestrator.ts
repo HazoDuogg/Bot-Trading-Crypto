@@ -17,10 +17,11 @@ import { scoreMomentum } from '../xgbFilter/momentumScorer.js';
 import { computeMomentumMultiplier } from '../xgbFilter/momentumMultiplier.js';
 import { MOMENTUM_MODEL_PATH, MOMENTUM_SCHEMA_PATH, MOMENTUM_BEARISH_MODEL_PATH, MOMENTUM_BEARISH_SCHEMA_PATH, type PlanAutoSelectionConfig } from '../xgbFilter/config.js';
 import { DynamicRMarginSizer } from '../risk/dynamicRMarginSizer.js';
-import { wouldExceedRiskPool, type OpenPositionRisk } from '../risk/riskPool.js';
+import { checkRiskPool, wouldExceedRiskPool, type OpenPositionRisk } from '../risk/riskPool.js';
 import {
   applyAtrTrailing,
   computeRealizedPnl,
+  computeTierGrossPnl,
   isSlHitAtPrice,
   isTpHit,
   onCounterTrendTpHit,
@@ -32,6 +33,7 @@ import {
   updateGivebackProtection,
   type ManagedPositionState,
   type SlTpManagerInput,
+  type TpLevel,
   type TpPlan,
 } from '../risk/slTpManager.js';
 import type {
@@ -599,6 +601,15 @@ async function tryOpenNewPosition(
         };
   const newPosition = openPosition(openInput);
 
+  // TICKET-078 — pure surfacing of numbers already computed above (checkRiskPool reused exactly as
+  // wouldExceedRiskPool already uses it, no new formula), for Telegram's "Risk Pool trước% → sau%" line.
+  const riskPoolBefore = checkRiskPool(input.allOpenPositionsRisk, accountBalance, { riskPoolMaxPct: config.riskPoolMaxPct });
+  const riskPoolAfter = checkRiskPool(
+    [...input.allOpenPositionsRisk, { id: '__new__', actualRiskDollar: sizingOutput.actualRiskDollar }],
+    accountBalance,
+    { riskPoolMaxPct: config.riskPoolMaxPct },
+  );
+
   const event: OpenTradeEvent = {
     type: 'OPEN',
     symbol: input.symbol,
@@ -611,6 +622,13 @@ async function tryOpenNewPosition(
     riskMultiplier: combinedRiskMultiplier,
     actualRiskDollar: sizingOutput.actualRiskDollar,
     marginRequired: sizingOutput.marginRequired,
+    slPrice: effectiveDraftSetup.slPrice,
+    tpLevels: newPosition.tpLevels,
+    adx1h: regimeOutput.computedMetrics.adx1h,
+    atrPercentile5m: regimeOutput.computedMetrics.atrPercentile5m,
+    momentumScore,
+    riskPoolPctBefore: (riskPoolBefore.totalRiskDollar / accountBalance) * 100,
+    riskPoolPctAfter: (riskPoolAfter.totalRiskDollar / accountBalance) * 100,
   };
 
   return {
@@ -710,6 +728,24 @@ export async function processCandle(
     const { position, exitReason, exitPrice } = advancePosition(entry.position, currentCandle, input.candles5m, config.isLowConfidenceOrLowLiquidity);
 
     if (!position.closed) {
+      // TICKET-078 — TP1/TP2 just filled without closing the position: surfaces the state
+      // transition slTpManager.ts's onTp1Hit/onTp2Hit already made, no new decision logic.
+      const newlyFilledTier = position.filledTiers.length > entry.position.filledTiers.length ? position.filledTiers[position.filledTiers.length - 1] : undefined;
+      if (newlyFilledTier === 'TP1' || newlyFilledTier === 'TP2') {
+        const tier = position.tpLevels.find((t) => t.label === newlyFilledTier) as TpLevel;
+        events.push({
+          type: 'PARTIAL_CLOSE',
+          symbol: input.symbol,
+          side: position.side,
+          tier: newlyFilledTier,
+          closePercent: tier.closePercent,
+          pnlUsd: computeTierGrossPnl(position, newlyFilledTier),
+          newSlPrice: position.currentSlPrice,
+          remainingPercent: position.remainingPositionSize / position.positionSize,
+          accountBalanceAfter: accountBalance,
+          timestamp: currentCandle.timestamp,
+        });
+      }
       remainingPositions.push({ position, meta: entry.meta });
       continue;
     }
@@ -734,6 +770,7 @@ export async function processCandle(
       pnlPct,
       riskMultiplier: entry.meta.riskMultiplier,
       accountBalanceAfter: accountBalance,
+      adx1h: regimeOutput.computedMetrics.adx1h,
     });
 
     // TICKET-081 — only MOMENTUM_DIRECT's own loss history drives this side's circuit breaker;

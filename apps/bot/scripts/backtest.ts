@@ -31,7 +31,6 @@ import { emptyFunnelStats, fmtInt, funnelReportMarkdown, pct, STATE_PASS_REGIMES
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
 const OHLCV_DIR = path.resolve(process.cwd(), 'data/ohlcv');
-const START_BALANCE = 400; // docs/vicion-bot-quan-ly-vi-the-v1.md Mục 1
 
 // Bounded sliding windows — enough for every metric's own lookback (ATR_PCT_LOOKBACK_5M=300 etc.),
 // but NOT the full growing history. detectRegime()/routeEntry() always recompute their indicator
@@ -76,6 +75,17 @@ function parseArgs(): {
   momentumDirectCorrelationRiskMultiplier: number;
   momentumDirectCircuitBreakerLossThreshold: number;
   momentumDirectCircuitBreakerCooldownMs: number;
+  /** CLI-overridable fixed risk$/lệnh (OrchestratorConfig.riskDollarOrPercent) — added to verify the
+   * official baseline config against real $100 capital (risk$5) without touching the default $20/$400
+   * combo the official 8-flag command relies on. Default 20 unchanged. */
+  riskDollarOrPercent: number;
+  /** CLI-overridable backtest starting balance, same purpose as riskDollarOrPercent above. Default
+   * 400 unchanged (docs/vicion-bot-quan-ly-vi-the-v1.md Mục 1). */
+  startBalance: number;
+  /** CLI-overridable margin cap (OrchestratorConfig.maxMarginCap), same purpose as riskDollarOrPercent
+   * above — must scale down proportionally with riskDollarOrPercent/startBalance for the real-capital
+   * verification, or it stops binding at the same relative rate. Default 50 unchanged. */
+  maxMarginCap: number;
   /** TICKET-061: diagnostic-only — skip this many calendar days at the start of the run (on top of
    * the existing warm-up startStep), so metrics needing longer history (e.g. macroDirection's 1D
    * ADX, TICKET-017) are already defined for every step. Default 0 — unchanged from every ticket
@@ -107,6 +117,9 @@ function parseArgs(): {
   const momentumDirectCorrelationRiskMultiplierArg = args.find((a) => a.startsWith('--momentum-direct-correlation-risk-multiplier='));
   const momentumDirectCircuitBreakerLossThresholdArg = args.find((a) => a.startsWith('--momentum-direct-circuit-breaker-loss-threshold='));
   const momentumDirectCircuitBreakerCooldownMsArg = args.find((a) => a.startsWith('--momentum-direct-circuit-breaker-cooldown-ms='));
+  const riskDollarOrPercentArg = args.find((a) => a.startsWith('--risk-dollar-or-percent='));
+  const startBalanceArg = args.find((a) => a.startsWith('--start-balance='));
+  const maxMarginCapArg = args.find((a) => a.startsWith('--max-margin-cap='));
   const skipDaysArg = args.find((a) => a.startsWith('--skip-days='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
@@ -159,6 +172,12 @@ function parseArgs(): {
     momentumDirectCircuitBreakerCooldownMs: momentumDirectCircuitBreakerCooldownMsArg
       ? Number(momentumDirectCircuitBreakerCooldownMsArg.split('=')[1])
       : 0,
+    // Default 20 unchanged unless CLI overrides — matches every ticket before this one exactly.
+    riskDollarOrPercent: riskDollarOrPercentArg ? Number(riskDollarOrPercentArg.split('=')[1]) : 20,
+    // Default 400 unchanged unless CLI overrides — matches every ticket before this one exactly.
+    startBalance: startBalanceArg ? Number(startBalanceArg.split('=')[1]) : 400,
+    // Default 50 unchanged unless CLI overrides — matches every ticket before this one exactly.
+    maxMarginCap: maxMarginCapArg ? Number(maxMarginCapArg.split('=')[1]) : 50,
     // TICKET-061: default 0 unchanged from before this ticket.
     skipDays: skipDaysArg ? Number(skipDaysArg.split('=')[1]) : 0,
   };
@@ -323,10 +342,13 @@ async function main(): Promise<void> {
     momentumDirectCorrelationRiskMultiplier,
     momentumDirectCircuitBreakerLossThreshold,
     momentumDirectCircuitBreakerCooldownMs,
+    riskDollarOrPercent,
+    startBalance,
+    maxMarginCap,
     skipDays,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, skipDays=${skipDays}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, skipDays=${skipDays}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -345,8 +367,8 @@ async function main(): Promise<void> {
     },
     tpPlan,
     takerFeeRate: 0.0004, // TODO_CONFIRM per docs Mục 8 — Trader chưa cung cấp số thật theo VIP tier
-    riskDollarOrPercent: 20,
-    maxMarginCap: 50,
+    riskDollarOrPercent, // CLI-overridable — default (20) unchanged from before this ticket.
+    maxMarginCap, // CLI-overridable — default (50) unchanged from before this ticket.
     leverage: 30,
     riskPoolMaxPct, // TICKET-037: CLI-overridable A/B testing — default (10 -> 0.1) unchanged from before this ticket.
     isLowConfidenceOrLowLiquidity: false,
@@ -374,10 +396,10 @@ async function main(): Promise<void> {
     momentumDirectCircuitBreakerCooldownMs, // TICKET-081: TODO_CONFIRM, default 0 unchanged unless CLI overrides.
   };
 
-  let accountBalance = START_BALANCE;
+  let accountBalance = startBalance;
   // TICKET-056: Max Drawdown — the "cost" of allowing concentrated multi-position risk, tracked
   // alongside PNL/winrate so a PNL increase can't hide a bigger drawdown behind it.
-  let peakBalance = START_BALANCE;
+  let peakBalance = startBalance;
   let maxDrawdownPct = 0;
   let maxDrawdownUsd = 0;
   const trades: CloseTradeEvent[] = [];
@@ -652,7 +674,7 @@ async function main(): Promise<void> {
     '',
     `Sinh tự động từ \`npm run backtest -- --entry-style=${entryStyleForNeutral} --tp-plan=${tpPlan} --macro-trend-filter=${macroTrendFilterEnabled} --ob-disabled-symbols=${obDisabledSymbols.join(',')} --macro-trend-box-breakout=${macroTrendFilterAppliesToBoxBreakout} --momentum-filter=${momentumFilterEnabled}\` — dữ liệu thật ${new Date().toISOString()}.`,
     '',
-    `- Vốn ban đầu: $${START_BALANCE}, vốn cuối: $${accountBalance.toFixed(2)}`,
+    `- Vốn ban đầu: $${startBalance}, vốn cuối: $${accountBalance.toFixed(2)}`,
     `- Tổng số lệnh đóng: ${totalTrades}`,
     `- Winrate: ${winrate.toFixed(1)}%`,
     `- Tổng PNL: ${totalPnl >= 0 ? '+' : ''}${totalPnl.toFixed(2)} USD`,
@@ -673,7 +695,7 @@ async function main(): Promise<void> {
     '',
     '## Cấu hình đã dùng',
     '',
-    `- Position sizing: DynamicRMarginSizer, riskDollarOrPercent=20, maxMarginCap=50, leverage=30`,
+    `- Position sizing: DynamicRMarginSizer, riskDollarOrPercent=${riskDollarOrPercent} (CLI-overridable, default 20), maxMarginCap=${maxMarginCap} (CLI-overridable, default 50), leverage=30`,
     `- tpPlan: ${tpPlan}`,
     `- entryStyleForNeutral: ${entryStyleForNeutral}`,
     `- macroTrendFilterEnabled: ${macroTrendFilterEnabled} (TICKET-017 Phần A)`,

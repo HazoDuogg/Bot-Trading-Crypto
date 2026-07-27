@@ -317,6 +317,21 @@ export function isSlHitAtPrice(side: Side, currentPrice: number, slPrice: number
  * Total fees = positionSize × takerFeeRate × 2 regardless of tier count (proven in Mục 6's
  * mandatory test), so they're subtracted once at the end rather than per leg.
  */
+/**
+ * TICKET-078 — gross P&L (no fees, matching computeRealizedPnl's own doc comment: fees are only
+ * subtracted once at full close, never split per tier) for exactly ONE already-filled tier's slice.
+ * Same term already used inside computeRealizedPnl's loop below, just isolated for a single tier —
+ * for surfacing a partial-fill notification, not a new formula.
+ */
+export function computeTierGrossPnl(state: ManagedPositionState, tierLabel: FilledTier): number {
+  const tier = state.tpLevels.find((t) => t.label === tierLabel);
+  if (!tier || tier.price === null) {
+    throw new Error(`SlTpManager: no fixed-price tier '${tierLabel}' on this position`);
+  }
+  const sideMultiplier = state.side === 'LONG' ? 1 : -1;
+  return tier.closePercent * state.positionSize * ((tier.price - state.entryPrice) / state.entryPrice) * sideMultiplier;
+}
+
 export function computeRealizedPnl(state: ManagedPositionState, finalExitPrice: number): number {
   const sideMultiplier = state.side === 'LONG' ? 1 : -1;
   let grossPnl = 0;
