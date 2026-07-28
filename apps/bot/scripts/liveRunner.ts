@@ -52,16 +52,17 @@ import { formatBotStartMessage, formatFullCloseMessage, formatPartialCloseMessag
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
 const TICK_INTERVAL_MS = 5_000; // how often we check "has a new 5m candle closed" — cheap, reads already-polled in-memory buffers only
 
-// Official confirmed live config — TICKET-084/085's 8-flag baseline + risk-dollar-or-percent=5/
-// max-margin-cap=12.5 (real $100 capital scale). Do NOT change any value here without a PM-confirmed
-// backtest re-verification (see memory/project_official_backtest_config.md) — this file only WIRES
-// the already-decided config into a live loop, it doesn't decide the config.
+// Official confirmed live config — TICKET-084/085's 8-flag baseline + risk-dollar-or-percent=15/
+// max-margin-cap=37.5 (real $100 capital scale, PM-confirmed risk$15/lệnh) + obSlBufferAtrMultiplier=0.87
+// (TICKET-091) + momentumDirectMinSlPercent=1.27 (TICKET-093). Do NOT change any value here without a
+// PM-confirmed backtest re-verification (see memory/project_official_backtest_config.md) — this file
+// only WIRES the already-decided config into a live loop, it doesn't decide the config.
 const CONFIG: OrchestratorConfig = {
-  entryRouterConfig: { ...DEFAULT_ENTRY_ROUTER_CONFIG },
+  entryRouterConfig: { ...DEFAULT_ENTRY_ROUTER_CONFIG, obSlBufferAtrMultiplier: 0.87 },
   tpPlan: 'PLAN_A',
   takerFeeRate: 0.0004,
-  riskDollarOrPercent: 5,
-  maxMarginCap: 12.5,
+  riskDollarOrPercent: 15,
+  maxMarginCap: 37.5,
   leverage: 30,
   riskPoolMaxPct: 0.15,
   isLowConfidenceOrLowLiquidity: false,
@@ -72,7 +73,7 @@ const CONFIG: OrchestratorConfig = {
   momentumDirectEnabled: true,
   momentumDirectThreshold: 0.5,
   momentumDirectMaxAtrPercentile: 100,
-  momentumDirectMinSlPercent: 1.0,
+  momentumDirectMinSlPercent: 1.27,
   momentumDirectTpRMultiple: 3.0,
   momentumDirectMaxTotalConcurrent: 999,
   momentumDirectCorrelationRiskThreshold: 999,
