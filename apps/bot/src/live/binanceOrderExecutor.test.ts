@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { BinanceOrderExecutor } from './binanceOrderExecutor.js';
+import { BinanceOrderExecutor, initializeLeverageForSymbols } from './binanceOrderExecutor.js';
 
 const CREDS = { apiKey: 'test-key', apiSecret: 'test-secret', baseUrl: 'https://testnet.example' };
 const TEST_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
@@ -120,6 +120,87 @@ describe('BinanceOrderExecutor — syncClock', () => {
     const [url] = fetchFn.mock.calls[0];
     expect(url).toContain(`timestamp=${2_000_000}`);
     vi.useRealTimers();
+  });
+});
+
+describe('BinanceOrderExecutor — TICKET-100: setLeverage (POST /fapi/v1/leverage)', () => {
+  it('dryRun blocks setLeverage from ever hitting the network, same as every other mutating call', async () => {
+    const fetchFn = vi.fn();
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, fetchFn }); // dryRun defaults true
+    const result = await exec.setLeverage('BTCUSDT', 30);
+    expect(result).toMatchObject({ dryRun: true, method: 'POST', path: '/fapi/v1/leverage', params: { symbol: 'BTCUSDT', leverage: 30 } });
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('signs the request and returns the confirmed leverage', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(200, { symbol: 'BTCUSDT', leverage: 30, maxNotionalValue: '1000000' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    const result = await exec.setLeverage('BTCUSDT', 30);
+    expect(result).toMatchObject({ symbol: 'BTCUSDT', leverage: 30 });
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toContain('/fapi/v1/leverage');
+    expect(url).toContain('symbol=BTCUSDT');
+    expect(url).toContain('leverage=30');
+    expect(url).toContain('signature=');
+    expect(init.method).toBe('POST');
+  });
+
+  it('does NOT require loadExchangeInfo first — leverage has no quantity/price to round', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(200, { symbol: 'XRPUSDT', leverage: 30 }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await expect(exec.setLeverage('XRPUSDT', 30)).resolves.toMatchObject({ leverage: 30 });
+  });
+});
+
+describe('BinanceOrderExecutor — TICKET-100: initializeLeverageForSymbols (startup orchestration)', () => {
+  it('calls setLeverage exactly once per symbol, with leverage=30, in order', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(200, { leverage: 30 }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    const logger = { log: vi.fn(), warn: vi.fn() };
+
+    await initializeLeverageForSymbols(exec, TEST_SYMBOLS, 30, logger);
+
+    expect(fetchFn).toHaveBeenCalledTimes(4);
+    for (let i = 0; i < TEST_SYMBOLS.length; i++) {
+      const [url] = fetchFn.mock.calls[i];
+      expect(url).toContain(`symbol=${TEST_SYMBOLS[i]}`);
+      expect(url).toContain('leverage=30');
+    }
+    expect(logger.log).toHaveBeenCalledTimes(4);
+    expect(logger.log).toHaveBeenCalledWith('Đã đặt đòn bẩy 30x cho BTCUSDT — OK');
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('"đang có vị thế mở" rejection for one symbol -> warns, does NOT throw, continues to remaining symbols', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { leverage: 30 })) // BTCUSDT ok
+      .mockResolvedValueOnce(jsonResponse(400, { code: -4161, msg: 'Leverage reduction is not supported in Isolated Margin Mode with open positions.' })) // ETHUSDT rejected
+      .mockResolvedValue(jsonResponse(200, { leverage: 30 })); // SOLUSDT/XRPUSDT ok
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    const logger = { log: vi.fn(), warn: vi.fn() };
+
+    await expect(initializeLeverageForSymbols(exec, TEST_SYMBOLS, 30, logger)).resolves.toBeUndefined();
+
+    expect(fetchFn).toHaveBeenCalledTimes(4); // all 4 symbols attempted, not stopped
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('ETHUSDT'));
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('open positions'));
+    expect(logger.log).toHaveBeenCalledTimes(3); // BTCUSDT, SOLUSDT, XRPUSDT succeeded
+  });
+
+  it('a non-position-open error (e.g. auth) is NOT silently swallowed — throws and stops (does not attempt remaining symbols)', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { leverage: 30 })) // BTCUSDT ok
+      .mockResolvedValueOnce(jsonResponse(401, { code: -2015, msg: 'Invalid API-key, IP, or permissions for action.' })); // ETHUSDT auth failure
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    const logger = { log: vi.fn(), warn: vi.fn() };
+
+    await expect(initializeLeverageForSymbols(exec, TEST_SYMBOLS, 30, logger)).rejects.toThrow(/ETHUSDT/);
+
+    expect(fetchFn).toHaveBeenCalledTimes(2); // BTCUSDT attempted, ETHUSDT attempted+failed, SOLUSDT/XRPUSDT never reached
+    expect(logger.warn).not.toHaveBeenCalled(); // not treated as the "open position" soft-fail case
   });
 });
 

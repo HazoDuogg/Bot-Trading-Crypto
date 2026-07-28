@@ -28,7 +28,7 @@
  */
 import 'dotenv/config';
 import { LiveCandleFeed, type CandleData } from '../dist/live/liveCandleFeed.js';
-import { BinanceOrderExecutor, type PositionSide } from '../dist/live/binanceOrderExecutor.js';
+import { BinanceOrderExecutor, initializeLeverageForSymbols, type PositionSide } from '../dist/live/binanceOrderExecutor.js';
 import { StateReconciler, type InternalStateSnapshot } from '../dist/live/stateReconciler.js';
 import { loadBinanceEnvConfig } from '../dist/live/envConfig.js';
 import { processCandle, type ProcessCandleInput } from '../dist/orchestrator/orchestrator.js';
@@ -130,6 +130,11 @@ async function main(): Promise<void> {
   // now throws if a symbol's filters aren't cached yet, rather than falling back to a guessed rounding.
   await executor.loadExchangeInfo(SYMBOLS);
   console.log('exchangeInfo (LOT_SIZE/PRICE_FILTER/MIN_NOTIONAL) đã tải cho 4 coin.');
+
+  // TICKET-100: CHỦ ĐỘNG đặt đúng CONFIG.leverage cho cả 4 symbol — không tin tưởng cấu hình có sẵn
+  // trên sàn (có thể lệch, gây sai risk$ thật ở mọi phép tính size sau này). "Đang có vị thế mở" ->
+  // cảnh báo + tiếp tục (không crash); lỗi khác -> dừng khởi động (initializeLeverageForSymbols ném lại).
+  await initializeLeverageForSymbols(executor, SYMBOLS, CONFIG.leverage);
 
   const accountInfo = (await executor.getAccountInfo()) as { totalWalletBalance?: string };
   let accountBalance = Number(accountInfo.totalWalletBalance);

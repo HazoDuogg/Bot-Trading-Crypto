@@ -416,6 +416,22 @@ export class BinanceOrderExecutor {
 
   // --- Mutating endpoints (gated by dryRun) ---
 
+  /**
+   * TICKET-100 — PHÁT HIỆN: code trước đây KHÔNG BAO GIỜ gọi POST /fapi/v1/leverage — chỉ GIẢ ĐỊNH
+   * tài khoản đã sẵn đúng đòn bẩy cấu hình (30x), lấy nguyên từ setting có sẵn trên sàn (có thể bị
+   * đổi tay, đổi nhầm, hoặc chưa từng set cho symbol đó — sàn mặc định 20x cho tài khoản mới). Nếu
+   * đòn bẩy thật trên sàn khác CONFIG.leverage, mọi phép tính size/risk$ (DynamicRMarginSizer) đều
+   * SAI mà không có cách nào tự phát hiện. Hàm này CHỦ ĐỘNG đặt đúng đòn bẩy, gọi 1 lần/symbol lúc
+   * khởi động — same dryRun-gated convention như mọi mutating call khác trong class này.
+   */
+  async setLeverage(symbol: string, leverage: number): Promise<{ leverage: number; symbol: string; raw: unknown } | DryRunResult> {
+    const params = { symbol, leverage };
+    const dry = this.logOrDryRun('POST', '/fapi/v1/leverage', params, `setLeverage(${symbol},${leverage})`);
+    if (dry) return dry;
+    const raw = (await this.signedMutate('POST', '/fapi/v1/leverage', params, `setLeverage(${symbol},${leverage})`)) as { leverage: number; symbol: string };
+    return { leverage: raw.leverage, symbol, raw };
+  }
+
   async openMarketPosition(symbol: string, side: PositionSide, quantity: number): Promise<OrderResult | DryRunResult> {
     // TICKET-099 Phần A: no price param on a MARKET order, so minNotional can't be checked here —
     // the caller sizes from the candle close price and checkMinNotional() there before calling.
@@ -512,6 +528,38 @@ export class BinanceOrderExecutor {
       const urgentErr = new Error(`[updateStopOrder(${symbol})] SL CŨ ĐÃ HỦY NHƯNG SL MỚI ĐẶT LỖI — VỊ THẾ ĐANG KHÔNG CÓ SL TRÊN SÀN: ${(err as Error).message}`);
       this.onOrderFailure?.(`updateStopOrder(${symbol}) URGENT_NO_SL`, urgentErr);
       throw urgentErr;
+    }
+  }
+}
+
+/**
+ * TICKET-100 — gọi setLeverage() 1 lần cho MỖI symbol lúc khởi động (liveRunner.ts, sau
+ * loadExchangeInfo(), trước vòng lặp chính). Binance từ chối đổi đòn bẩy khi đang có vị thế mở trên
+ * symbol đó (thông báo lỗi luôn chứa từ "position") — trường hợp này KHÔNG được coi là lỗi khởi động:
+ * log cảnh báo, coi như đòn bẩy hiện tại đã đúng (không ép buộc), tiếp tục sang symbol tiếp theo. Bất
+ * kỳ lỗi nào KHÁC (mạng/auth/không xác định — signedMutate() đã tự retry-bounded phần lỗi mạng
+ * trước-khi-có-response) KHÔNG được âm thầm bỏ qua — ném lại để dừng khởi động, cùng nguyên tắc "an
+ * toàn" (không bao giờ mặc định coi 1 lỗi mơ hồ là "chắc ổn") đã dùng xuyên suốt codebase này.
+ */
+export async function initializeLeverageForSymbols(
+  executor: BinanceOrderExecutor,
+  symbols: string[],
+  leverage: number,
+  logger: { log: (msg: string) => void; warn: (msg: string) => void } = console,
+): Promise<void> {
+  for (const symbol of symbols) {
+    try {
+      await executor.setLeverage(symbol, leverage);
+      logger.log(`Đã đặt đòn bẩy ${leverage}x cho ${symbol} — OK`);
+    } catch (err) {
+      const message = (err as Error).message;
+      if (/position/i.test(message)) {
+        logger.warn(
+          `[CẢNH BÁO] Không đổi được đòn bẩy cho ${symbol} — sàn từ chối vì đang có vị thế mở. Coi như đòn bẩy hiện tại đã đúng, không ép buộc, tiếp tục khởi động. Chi tiết: ${message}`,
+        );
+        continue;
+      }
+      throw new Error(`initializeLeverageForSymbols(${symbol}): đặt đòn bẩy thất bại (không phải do vị thế mở) — dừng khởi động: ${message}`);
     }
   }
 }
