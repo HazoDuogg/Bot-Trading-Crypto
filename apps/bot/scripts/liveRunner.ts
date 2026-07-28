@@ -257,10 +257,23 @@ async function main(): Promise<void> {
       const momentumDirectOpenPositions: Array<{ symbol: string; side: 'LONG' | 'SHORT' }> = SYMBOLS.flatMap((s) =>
         runnerState[s].symbolState.openPositions.filter((e) => e.meta.setupType === 'MOMENTUM_DIRECT').map((e) => ({ symbol: s, side: e.position.side })),
       );
-      const allOpenPositionsRisk = SYMBOLS.map((s) => ({
-        id: s,
-        actualRiskDollar: runnerState[s].symbolState.openPositions.reduce((sum, e) => sum + e.meta.actualRiskDollar, 0),
-      })).filter((r) => r.actualRiskDollar > 0);
+      // TICKET-101 Việc 1 — BUG FIX: was a single snapshot computed ONCE before this loop, so if
+      // symbol A opened a NEW position earlier in THIS SAME tick, symbol B's risk-pool check later
+      // in the same tick still saw the pre-tick total — under-counting real concentrated risk within
+      // a single tick. Now a mutable map, refreshed immediately after each symbol's own
+      // processCandle() call (below) so the NEXT symbol in this tick's loop sees the up-to-date total.
+      const openRiskBySymbol: Record<string, number> = {};
+      // TICKET-101 Việc 2 — same live-updated-within-tick pattern as openRiskBySymbol above, but
+      // tracks real margin$ (marginRequired) instead of risk$ — a SEPARATE, independent cap
+      // (config.maxTotalMarginPct), bounding total capital committed across all 4 coins, not the
+      // loss-if-SL-hits figure the Risk Pool bounds.
+      const openMarginBySymbol: Record<string, number> = {};
+      for (const s of SYMBOLS) {
+        const total = runnerState[s].symbolState.openPositions.reduce((sum, e) => sum + e.meta.actualRiskDollar, 0);
+        if (total > 0) openRiskBySymbol[s] = total;
+        const totalMargin = runnerState[s].symbolState.openPositions.reduce((sum, e) => sum + e.meta.marginRequired, 0);
+        if (totalMargin > 0) openMarginBySymbol[s] = totalMargin;
+      }
 
       for (const symbol of SYMBOLS) {
         const rs = runnerState[symbol];
@@ -277,6 +290,14 @@ async function main(): Promise<void> {
         const window1m = slice(feed.getClosedCandles(symbol, '1m', now), WINDOW_1M);
         const window1d = slice(feed.getClosedCandles(symbol, '1d', now), WINDOW_1D);
 
+        // TICKET-101 Việc 1: built fresh from the live-updated openRiskBySymbol map, right before
+        // THIS symbol's own processCandle() call — includes any new position(s) opened by an earlier
+        // symbol in this same tick.
+        const allOpenPositionsRisk = SYMBOLS.filter((s) => openRiskBySymbol[s] !== undefined).map((s) => ({ id: s, actualRiskDollar: openRiskBySymbol[s] }));
+        // TICKET-101 Việc 2: single aggregate across ALL 4 symbols (not a per-symbol breakdown) —
+        // wouldExceedMaxTotalMargin() only ever needs the total.
+        const totalOpenMarginDollar = Object.values(openMarginBySymbol).reduce((sum, m) => sum + m, 0);
+
         const input: ProcessCandleInput = {
           symbol,
           candles5m: window5m,
@@ -288,6 +309,7 @@ async function main(): Promise<void> {
           correlatedRiskRatio,
           accountBalance,
           allOpenPositionsRisk,
+          totalOpenMarginDollar,
           momentumDirectOpenPositionsTotal,
           momentumDirectOpenPositions,
         };
@@ -297,6 +319,16 @@ async function main(): Promise<void> {
         const result = await processCandle(input, rs.symbolState, CONFIG, undefined, undefined, undefined, undefined, (m) => {
           lastComputedMetrics = m;
         });
+
+        // TICKET-101 Việc 1: refresh immediately so the NEXT symbol in this tick's loop sees this
+        // symbol's up-to-date total (see openRiskBySymbol declaration above).
+        const newTotalRisk = result.symbolState.openPositions.reduce((sum, e) => sum + e.meta.actualRiskDollar, 0);
+        if (newTotalRisk > 0) openRiskBySymbol[symbol] = newTotalRisk;
+        else delete openRiskBySymbol[symbol];
+        // TICKET-101 Việc 2: same live refresh for margin (see openMarginBySymbol declaration above).
+        const newTotalMargin = result.symbolState.openPositions.reduce((sum, e) => sum + e.meta.marginRequired, 0);
+        if (newTotalMargin > 0) openMarginBySymbol[symbol] = newTotalMargin;
+        else delete openMarginBySymbol[symbol];
 
         const newRegime = result.symbolState.regimeState.previousRegime;
         if (previousRegime !== null && newRegime !== null && previousRegime !== newRegime) {

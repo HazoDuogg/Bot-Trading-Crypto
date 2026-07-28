@@ -112,6 +112,13 @@ function parseArgs(): {
    * paths when omitted).
    */
   momentumModelVersion: 'v1' | 'v3';
+  /**
+   * TICKET-101 Việc 2 — TODO_CONFIRM (PM gợi ý 50-60%, chưa chốt số): trần TỔNG MARGIN thật đang mở
+   * cùng lúc trên cả 4 coin gộp lại, dạng phần trăm THUẦN (VD 50, không phải 0.5) — chia cho 100 ở
+   * đây rồi truyền tiếp dạng phân số vào OrchestratorConfig.maxTotalMarginPct, cùng convention
+   * riskPoolMaxPct. undefined (mặc định, không truyền cờ) = không giới hạn, khớp mọi ticket trước.
+   */
+  maxTotalMarginPct?: number;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -146,6 +153,7 @@ function parseArgs(): {
   const maxMarginCapArg = args.find((a) => a.startsWith('--max-margin-cap='));
   const skipDaysArg = args.find((a) => a.startsWith('--skip-days='));
   const momentumModelVersionArg = args.find((a) => a.startsWith('--momentum-model-version='));
+  const maxTotalMarginPctArg = args.find((a) => a.startsWith('--max-total-margin-pct='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -212,6 +220,8 @@ function parseArgs(): {
     skipDays: skipDaysArg ? Number(skipDaysArg.split('=')[1]) : 0,
     // TICKET-098: default 'v1' unchanged unless CLI overrides — matches every ticket before this one exactly.
     momentumModelVersion: (momentumModelVersionArg ? momentumModelVersionArg.split('=')[1] : 'v1') as 'v1' | 'v3',
+    // TICKET-101 Việc 2: undefined (no cap) unless CLI overrides — matches every ticket before this one exactly.
+    maxTotalMarginPct: maxTotalMarginPctArg ? Number(maxTotalMarginPctArg.split('=')[1]) / 100 : undefined,
   };
 }
 
@@ -382,9 +392,10 @@ async function main(): Promise<void> {
     dateTo,
     skipDays,
     momentumModelVersion,
+    maxTotalMarginPct,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}, momentumModelVersion=${momentumModelVersion}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}, momentumModelVersion=${momentumModelVersion}, maxTotalMarginPct=${maxTotalMarginPct !== undefined ? `${(maxTotalMarginPct * 100).toFixed(1)}%` : '(không giới hạn)'}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -431,6 +442,7 @@ async function main(): Promise<void> {
     momentumDirectCorrelationRiskMultiplier, // TICKET-071: TODO_CONFIRM, default 1.0 (no size change) unchanged unless CLI overrides.
     momentumDirectCircuitBreakerLossThreshold, // TICKET-081: TODO_CONFIRM, default 999999 (never triggers) unchanged unless CLI overrides.
     momentumDirectCircuitBreakerCooldownMs, // TICKET-081: TODO_CONFIRM, default 0 unchanged unless CLI overrides.
+    maxTotalMarginPct, // TICKET-101 Việc 2: TODO_CONFIRM, undefined (no cap) unless CLI overrides.
     // TICKET-098: undefined for 'v1' (default) — orchestrator.ts falls back to xgbFilter/config.ts's
     // production v1 paths unchanged. 'v3' points at TICKET-097's experimental model files.
     ...(momentumModelVersion === 'v3'
@@ -502,10 +514,18 @@ async function main(): Promise<void> {
     // TICKET-056 Phần C: sum ALL of a symbol's currently open positions (was a single value assuming
     // at most 1) — the risk pool check below now needs the total across every open position, not
     // just "whichever one" a symbol happened to have.
+    // TICKET-101 Việc 1: seeded fresh each step from state ENTERING the step, then kept live-updated
+    // (mutated in place, see below) as each symbol in this step's own loop opens/closes — no longer a
+    // pure step-start snapshot.
     const openRiskBySymbol: Record<string, number> = {};
+    // TICKET-101 Việc 2: same live-updated-within-step pattern as openRiskBySymbol above, but tracks
+    // real margin$ (marginRequired) instead of risk$ — a SEPARATE, independent cap.
+    const openMarginBySymbol: Record<string, number> = {};
     for (const symbol of SYMBOLS) {
       const totalRisk = symbolsData[symbol].state.openPositions.reduce((sum, entry) => sum + entry.meta.actualRiskDollar, 0);
       if (totalRisk > 0) openRiskBySymbol[symbol] = totalRisk;
+      const totalMargin = symbolsData[symbol].state.openPositions.reduce((sum, entry) => sum + entry.meta.marginRequired, 0);
+      if (totalMargin > 0) openMarginBySymbol[symbol] = totalMargin;
     }
 
     // TICKET-068: total setupType='MOMENTUM_DIRECT' open positions across ALL 4 symbols, same
@@ -566,6 +586,9 @@ async function main(): Promise<void> {
         id: s,
         actualRiskDollar: openRiskBySymbol[s],
       }));
+      // TICKET-101 Việc 2: single aggregate across ALL 4 symbols (not a per-symbol breakdown like
+      // allOpenPositionsRisk above) — wouldExceedMaxTotalMargin() only ever needs the total.
+      const totalOpenMarginDollar = Object.values(openMarginBySymbol).reduce((sum, m) => sum + m, 0);
 
       const input: ProcessCandleInput = {
         symbol,
@@ -577,6 +600,7 @@ async function main(): Promise<void> {
         candles1hMomentum: w1hMomentum.window,
         candles5mSessionVolume: windowSessionVolume5m,
         correlatedRiskRatio,
+        totalOpenMarginDollar,
         accountBalance,
         allOpenPositionsRisk,
         momentumDirectOpenPositionsTotal,
@@ -603,6 +627,19 @@ async function main(): Promise<void> {
       );
       sd.state = result.symbolState;
       accountBalance = result.accountBalance;
+
+      // TICKET-101 Việc 1 — BUG FIX: openRiskBySymbol was a snapshot taken ONCE before this step's
+      // per-symbol loop (the old "one-step-lag convention"), so if symbol A opened a NEW position
+      // earlier in THIS SAME step, symbol B's risk-pool check later in the same loop still saw the
+      // pre-step total — under-counting real concentrated risk within a single step. Refresh
+      // immediately after each symbol's own processCandle() so the NEXT symbol in this step's loop
+      // sees this symbol's up-to-date total.
+      const newTotalRisk = sd.state.openPositions.reduce((sum, entry) => sum + entry.meta.actualRiskDollar, 0);
+      if (newTotalRisk > 0) openRiskBySymbol[symbol] = newTotalRisk;
+      else delete openRiskBySymbol[symbol];
+      const newTotalMargin = sd.state.openPositions.reduce((sum, entry) => sum + entry.meta.marginRequired, 0);
+      if (newTotalMargin > 0) openMarginBySymbol[symbol] = newTotalMargin;
+      else delete openMarginBySymbol[symbol];
 
       totalStepsEvaluated++;
       const confirmedRegime = result.symbolState.regimeState.previousRegime;
@@ -769,6 +806,7 @@ async function main(): Promise<void> {
     `- mssStalenessToleranceCandles: ${config.entryRouterConfig.mssStalenessToleranceCandles} (TICKET-040, CLI-overridable, default 5)`,
     `- obBosLookforwardK: ${config.entryRouterConfig.obBosLookforwardK} (TICKET-041, CLI-overridable, default 10)`,
     `- obSlBufferAtrMultiplier: ${config.entryRouterConfig.obSlBufferAtrMultiplier} (TICKET-089, TODO_CONFIRM, CLI-overridable, default 0.1, chỉ áp dụng cho OB — FVG/Sweep vẫn dùng EntryConfig.SL_BUFFER_ATR_MULTIPLIER)`,
+    `- maxTotalMarginPct: ${config.maxTotalMarginPct !== undefined ? `${(config.maxTotalMarginPct * 100).toFixed(1)}%` : '(không giới hạn)'} (TICKET-101 Việc 2, TODO_CONFIRM, CLI-overridable, default không giới hạn — trần TỔNG MARGIN thật đang mở trên cả 4 coin, độc lập với Risk Pool)`,
     `- maxConcurrentPositionsPerSymbol: ${config.maxConcurrentPositionsPerSymbol} (TICKET-056, CLI-overridable, default 1)`,
     `- momentumDirectEnabled: ${momentumDirectEnabled} (TICKET-059, AI momentum score dùng thẳng làm tín hiệu vào lệnh, song song với cascade OB/FVG/Sweep/Breakout, threshold=${momentumDirectThreshold})`,
     `- momentumDirectMaxAtrPercentile: ${momentumDirectMaxAtrPercentile} (TICKET-062, TODO_CONFIRM, CLI-overridable, default 100 = không giới hạn)`,

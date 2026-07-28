@@ -56,3 +56,24 @@ export function wouldExceedRiskPool(
   );
   return !result.withinLimit;
 }
+
+/**
+ * TICKET-101 Việc 2 — a SEPARATE cap from the Risk Pool above: Risk Pool bounds the SUM of what
+ * would actually be LOST if every open position's SL hit (actualRiskDollar). This bounds the SUM of
+ * real MARGIN currently committed across ALL 4 symbols combined (marginRequired — capital actually
+ * tied up on the exchange, not the loss-if-SL-hits figure) — a position can pass the Risk Pool check
+ * (its risk$ is small, e.g. a wide-SL low-risk-multiple trade) while still committing a large chunk
+ * of margin, so this cap catches concentration the Risk Pool alone can't see. `maxTotalMarginPct` is
+ * a DECIMAL FRACTION (0.5 == 50%, same convention as `RiskPoolConfig.riskPoolMaxPct` — the CLI layer
+ * divides a plain percentage by 100 before it ever reaches this function, this function never does).
+ * `undefined` = no cap (unreachable, matches every ticket before TICKET-101 exactly) — PM has NOT
+ * picked a number yet (TODO_CONFIRM, gợi ý 50-60%), so callers must not silently default to one.
+ */
+export function wouldExceedMaxTotalMargin(totalOpenMarginDollar: number, candidateMarginDollar: number, accountBalance: number, maxTotalMarginPct: number | undefined): boolean {
+  if (maxTotalMarginPct === undefined) return false;
+  if (accountBalance <= 0) {
+    throw new Error(`wouldExceedMaxTotalMargin: accountBalance must be > 0, got ${accountBalance}`);
+  }
+  const maxTotalMarginDollar = accountBalance * maxTotalMarginPct;
+  return totalOpenMarginDollar + candidateMarginDollar > maxTotalMarginDollar;
+}

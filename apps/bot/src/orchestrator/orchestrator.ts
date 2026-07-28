@@ -18,7 +18,7 @@ import { scoreMomentum } from '../xgbFilter/momentumScorer.js';
 import { computeMomentumMultiplier } from '../xgbFilter/momentumMultiplier.js';
 import { MOMENTUM_MODEL_PATH, MOMENTUM_SCHEMA_PATH, MOMENTUM_BEARISH_MODEL_PATH, MOMENTUM_BEARISH_SCHEMA_PATH, type PlanAutoSelectionConfig } from '../xgbFilter/config.js';
 import { DynamicRMarginSizer } from '../risk/dynamicRMarginSizer.js';
-import { checkRiskPool, wouldExceedRiskPool, type OpenPositionRisk } from '../risk/riskPool.js';
+import { checkRiskPool, wouldExceedRiskPool, wouldExceedMaxTotalMargin, type OpenPositionRisk } from '../risk/riskPool.js';
 import {
   applyAtrTrailing,
   computeRealizedPnl,
@@ -108,6 +108,16 @@ export interface ProcessCandleInput {
    * as no other same-side positions open).
    */
   momentumDirectOpenPositions?: Array<{ symbol: string; side: 'LONG' | 'SHORT' }>;
+  /**
+   * TICKET-101 Việc 2 — sum of `meta.marginRequired` across every currently open position on ALL 4
+   * symbols combined (not just this one) — a SINGLE aggregate number, unlike `allOpenPositionsRisk`'s
+   * per-symbol breakdown, since `wouldExceedMaxTotalMargin()` only ever needs the total. Caller is
+   * responsible for keeping this live-updated WITHIN a single step/tick as earlier symbols open new
+   * positions (same fix TICKET-101 Việc 1 applied to `allOpenPositionsRisk`) — a stale pre-step
+   * snapshot would under-count real concentration exactly like the Việc 1 bug did. Optional: omit to
+   * leave `config.maxTotalMarginPct` permanently non-blocking (treated as 0 margin in use).
+   */
+  totalOpenMarginDollar?: number;
 }
 
 export interface ProcessCandleResult {
@@ -595,6 +605,16 @@ async function tryOpenNewPosition(
   if (wouldExceedRiskPool(input.allOpenPositionsRisk, sizingOutput.actualRiskDollar, accountBalance, { riskPoolMaxPct: config.riskPoolMaxPct })) {
     return {
       event: { type: 'SKIPPED', symbol: input.symbol, timestamp: currentCandle.timestamp, reason: 'RISK_POOL_EXCEEDED' },
+      newEntry: null,
+    };
+  }
+
+  // TICKET-101 Việc 2 — SEPARATE cap from Risk Pool above: bounds real margin$ committed across ALL
+  // 4 symbols combined, independent of the risk$-if-SL-hits figure Risk Pool bounds. A candidate can
+  // pass the Risk Pool check yet still be rejected here if it would push total margin over the cap.
+  if (wouldExceedMaxTotalMargin(input.totalOpenMarginDollar ?? 0, sizingOutput.marginRequired, accountBalance, config.maxTotalMarginPct)) {
+    return {
+      event: { type: 'SKIPPED', symbol: input.symbol, timestamp: currentCandle.timestamp, reason: 'MAX_TOTAL_MARGIN_EXCEEDED' },
       newEntry: null,
     };
   }

@@ -411,6 +411,59 @@ describe('processCandle — no open position, entry pipeline wiring', () => {
     expect(result.events[0]).toMatchObject({ type: 'SKIPPED', reason: 'RISK_POOL_EXCEEDED' });
     expect(result.accountBalance).toBe(400);
   });
+
+  // TICKET-101 Việc 2 — a SEPARATE cap from Risk Pool: even when Risk Pool has plenty of headroom
+  // (a candidate's risk$-if-SL-hits is small), the entry must still be rejected if it would push the
+  // sum of real margin$ across ALL 4 symbols over config.maxTotalMarginPct.
+  it('rejects (MAX_TOTAL_MARGIN_EXCEEDED) when an existing position already commits most of the total-margin cap, even though Risk Pool has room', async () => {
+    const fixture = fullOpenFlowFixture();
+    const config = { ...baseConfig, riskPoolMaxPct: 1.0, maxTotalMarginPct: 1.0 }; // riskPoolMaxPct=100% -> Risk Pool can never block here; maxTotalMarginPct=100% of $400 = $400 cap
+    const result = await processCandle(
+      baseInput({
+        ...fixture,
+        allOpenPositionsRisk: [], // Risk Pool: 0 used, cap=$400 -> nowhere close to exceeded
+        totalOpenMarginDollar: 390, // an existing position elsewhere already commits $390 of the $400 margin cap
+      }),
+      INITIAL_SYMBOL_STATE,
+      config,
+    );
+
+    expect(result.symbolState.openPositions).toHaveLength(0);
+    expect(result.events[0]).toMatchObject({ type: 'SKIPPED', reason: 'MAX_TOTAL_MARGIN_EXCEEDED' });
+    expect(result.accountBalance).toBe(400);
+  });
+
+  // TICKET-101 Việc 2 — same setup, but with headroom under the margin cap: confirms the check is a
+  // real >/<= boundary, not an always-block bug.
+  it('opens normally when total margin (existing + candidate) stays within maxTotalMarginPct', async () => {
+    const fixture = fullOpenFlowFixture();
+    const config = { ...baseConfig, maxTotalMarginPct: 1.0 }; // cap=$400, plenty of headroom
+    const result = await processCandle(
+      baseInput({
+        ...fixture,
+        allOpenPositionsRisk: [],
+        totalOpenMarginDollar: 100, // $100 already committed elsewhere, well under $400
+      }),
+      INITIAL_SYMBOL_STATE,
+      config,
+    );
+
+    expect(result.events[0]).toMatchObject({ type: 'OPEN', symbol: 'BTCUSDT', side: 'LONG' });
+    expect(result.symbolState.openPositions).toHaveLength(1);
+  });
+
+  // TICKET-101 Việc 2 — undefined (the default, matches every ticket before this one) must never
+  // block, regardless of how much margin is already reported as in use.
+  it('maxTotalMarginPct=undefined (default) never blocks, no matter how large totalOpenMarginDollar is', async () => {
+    const fixture = fullOpenFlowFixture();
+    const result = await processCandle(
+      baseInput({ ...fixture, allOpenPositionsRisk: [], totalOpenMarginDollar: 1_000_000 }),
+      INITIAL_SYMBOL_STATE,
+      baseConfig, // maxTotalMarginPct not set
+    );
+
+    expect(result.events[0]).toMatchObject({ type: 'OPEN' });
+  });
 });
 
 // TICKET-025 Phần C: SHORT setups now score via the DEDICATED bearish model — no more 1-p(bullish)

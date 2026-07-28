@@ -125,8 +125,15 @@ export interface SkippedEntryEvent {
   type: 'SKIPPED';
   symbol: string;
   timestamp: number;
-  /** TICKET-036: NEUTRAL_GATE_REJECTED = the mandatory Momentum Gate rejected a NEUTRAL_TRANSITION DraftSetup — a distinct reason from risk-pool capacity, never conflated. */
-  reason: 'RISK_POOL_EXCEEDED' | 'NEUTRAL_GATE_REJECTED';
+  /**
+   * TICKET-036: NEUTRAL_GATE_REJECTED = the mandatory Momentum Gate rejected a NEUTRAL_TRANSITION
+   * DraftSetup — a distinct reason from risk-pool capacity, never conflated.
+   * TICKET-101 Việc 2: MAX_TOTAL_MARGIN_EXCEEDED = a SEPARATE cap from RISK_POOL_EXCEEDED — the sum
+   * of real margin$ committed across ALL 4 symbols (not the risk$-if-SL-hits figure Risk Pool bounds)
+   * would exceed config.maxTotalMarginPct × accountBalance. A candidate can clear the Risk Pool check
+   * (small risk$) yet still be rejected here (large margin$) — both checks are independent.
+   */
+  reason: 'RISK_POOL_EXCEEDED' | 'NEUTRAL_GATE_REJECTED' | 'MAX_TOTAL_MARGIN_EXCEEDED';
 }
 
 export type OrchestratorEvent = OpenTradeEvent | CloseTradeEvent | PartialCloseEvent | SkippedEntryEvent;
@@ -241,6 +248,14 @@ export interface OrchestratorConfig {
   momentumSchemaPath?: string;
   momentumBearishModelPath?: string;
   momentumBearishSchemaPath?: string;
+  /**
+   * TICKET-101 Việc 2 — TODO_CONFIRM (PM gợi ý 50-60%, chưa chốt số): trần TỔNG MARGIN thật đang mở
+   * cùng lúc trên CẢ 4 coin gộp lại, dạng phân số thập phân (0.5 == 50%, cùng convention
+   * `riskPoolMaxPct`). Kiểm tra ĐỘC LẬP với Risk Pool (Risk Pool bound risk$-nếu-SL-chạm, cái này
+   * bound margin$ thật đã dùng — 1 lệnh có thể qua được Risk Pool nhưng vẫn bị chặn ở đây nếu margin
+   * quá lớn). `undefined` = không giới hạn (unreachable), khớp mọi ticket trước ticket này.
+   */
+  maxTotalMarginPct?: number;
 }
 
 /** TICKET-081 — trạng thái cầu dao cho 1 chiều (LONG hoặc SHORT) của 1 symbol. */
