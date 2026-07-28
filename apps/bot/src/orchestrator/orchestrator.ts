@@ -12,6 +12,7 @@ import { routeEntry } from '../entry/entryRouter.js';
 import { EntryConfig } from '../entry/config.js';
 import { detectMomentumDirect } from '../entry/momentumDirect.js';
 import type { DraftSetup, FunnelCallback } from '../entry/types.js';
+import { detectSwingPoints, latestSwingPointBefore } from '../entry/detectors/swingPoints.js';
 import { buildFeatureVector, computeMomentumCrossFeatures, loadFeatureSchema, type FeatureSchema } from '../xgbFilter/featureBuilder.js';
 import { scoreMomentum } from '../xgbFilter/momentumScorer.js';
 import { computeMomentumMultiplier } from '../xgbFilter/momentumMultiplier.js';
@@ -230,20 +231,17 @@ export function advancePosition(
 // candle. Schema content itself is still always read fresh from disk on first use, never
 // hard-coded in TS. Bullish (LONG) and bearish (SHORT) are separately-trained models — their
 // schemas are NOT assumed identical (category order can legitimately differ) and are cached apart.
-let cachedMomentumSchema: FeatureSchema | undefined;
-function getMomentumSchema(): FeatureSchema {
-  if (cachedMomentumSchema === undefined) {
-    cachedMomentumSchema = loadFeatureSchema(MOMENTUM_SCHEMA_PATH);
+// TICKET-098: keyed by path (Map, same pattern momentumScorer.ts's own sessionCache already uses)
+// since config.momentumSchemaPath/momentumBearishSchemaPath can now vary per OrchestratorConfig
+// (--momentum-model-version A/B testing) — a single cached value would go stale across configs.
+const schemaCache = new Map<string, FeatureSchema>();
+function getSchemaCached(schemaPath: string): FeatureSchema {
+  let cached = schemaCache.get(schemaPath);
+  if (cached === undefined) {
+    cached = loadFeatureSchema(schemaPath);
+    schemaCache.set(schemaPath, cached);
   }
-  return cachedMomentumSchema;
-}
-
-let cachedMomentumBearishSchema: FeatureSchema | undefined;
-function getMomentumBearishSchema(): FeatureSchema {
-  if (cachedMomentumBearishSchema === undefined) {
-    cachedMomentumBearishSchema = loadFeatureSchema(MOMENTUM_BEARISH_SCHEMA_PATH);
-  }
-  return cachedMomentumBearishSchema;
+  return cached;
 }
 
 /**
@@ -252,6 +250,31 @@ function getMomentumBearishSchema(): FeatureSchema {
  * Undefined = insufficient EMA/ATR history for computeMomentumCrossFeatures (never itself an error;
  * each caller decides what "no score" means for its own purpose).
  */
+/**
+ * TICKET-098: correlatedRiskRatio + distanceToNearestSwingAtr are only ever READ by
+ * buildFeatureVector() when the loaded schema's feature_order actually references them (model V3+
+ * — schema-driven, never hardcoded per TICKET-024's original design) — computing them unconditionally
+ * here is cheap and keeps this function oblivious to which model version is active.
+ * distanceToNearestSwingAtr reuses detectSwingPoints/latestSwingPointBefore exactly as
+ * entry/detectors/orderBlock.ts does: candles5m here is already the caller's own window truncated to
+ * "now" (this function's own contract, unchanged), so — unlike generateMomentumTrainingDataV2/V3.ts's
+ * precompute-over-full-history case — no `i - fractalN` offset is needed; detectSwingPoints's own
+ * loop bound already refuses to confirm a point too close to the end of a "now"-truncated window.
+ */
+function computeDistanceToNearestSwingAtr(candles5m: CandleData[]): number | undefined {
+  const atr = lastDefined(wilderATRSeries(candles5m, RegimeConfig.ATR_PERIOD_5M));
+  if (atr === undefined || atr <= 0) return undefined;
+  const swingPoints = detectSwingPoints(candles5m, EntryConfig.FRACTAL_N);
+  const lastIndex = candles5m.length - 1;
+  const nearestHigh = latestSwingPointBefore(swingPoints, 'HIGH', lastIndex);
+  const nearestLow = latestSwingPointBefore(swingPoints, 'LOW', lastIndex);
+  if (nearestHigh === null && nearestLow === null) return undefined;
+  const close = candles5m[lastIndex].close;
+  const distHigh = nearestHigh !== null ? Math.abs(close - nearestHigh.price) : Infinity;
+  const distLow = nearestLow !== null ? Math.abs(close - nearestLow.price) : Infinity;
+  return Math.min(distHigh, distLow) / atr;
+}
+
 async function scoreMomentumForSide(
   side: 'LONG' | 'SHORT',
   symbol: string,
@@ -259,12 +282,17 @@ async function scoreMomentumForSide(
   candles1hMomentum: CandleData[],
   regimeOutput: RegimeOutput,
   macroDirection: 'UP' | 'DOWN' | 'FLAT' | undefined,
+  correlatedRiskRatio: number | undefined,
+  config: OrchestratorConfig,
 ): Promise<number | undefined> {
   const crossFeatures = computeMomentumCrossFeatures(candles5m, candles1hMomentum);
   if (crossFeatures === undefined) return undefined;
   const isLong = side === 'LONG';
-  const modelPath = isLong ? MOMENTUM_MODEL_PATH : MOMENTUM_BEARISH_MODEL_PATH;
-  const schema = isLong ? getMomentumSchema() : getMomentumBearishSchema();
+  // TICKET-098: defaults to the production v1 paths (xgbFilter/config.ts) when config doesn't
+  // override them — matches every ticket before this one exactly.
+  const modelPath = isLong ? (config.momentumModelPath ?? MOMENTUM_MODEL_PATH) : (config.momentumBearishModelPath ?? MOMENTUM_BEARISH_MODEL_PATH);
+  const schemaPath = isLong ? (config.momentumSchemaPath ?? MOMENTUM_SCHEMA_PATH) : (config.momentumBearishSchemaPath ?? MOMENTUM_BEARISH_SCHEMA_PATH);
+  const schema = getSchemaCached(schemaPath);
   const featureVector = buildFeatureVector(
     {
       symbol,
@@ -275,6 +303,8 @@ async function scoreMomentumForSide(
       atrTrend5m: regimeOutput.computedMetrics.atrTrend5m as string,
       adxDirection1h: regimeOutput.adxDirection1h as string,
       macroDirection,
+      correlatedRiskRatio,
+      distanceToNearestSwingAtr: computeDistanceToNearestSwingAtr(candles5m),
       ...crossFeatures,
     },
     schema,
@@ -345,8 +375,8 @@ async function tryMomentumDirect(
   const atrPercentile5m = regimeOutput.computedMetrics.atrPercentile5m;
   if (atrPercentile5m === undefined || atrPercentile5m > config.momentumDirectMaxAtrPercentile) return null;
 
-  const longScore = await scoreMomentumForSide('LONG', input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
-  const shortScore = await scoreMomentumForSide('SHORT', input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
+  const longScore = await scoreMomentumForSide('LONG', input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection, input.correlatedRiskRatio, config);
+  const shortScore = await scoreMomentumForSide('SHORT', input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection, input.correlatedRiskRatio, config);
   const longPasses = longScore !== undefined && detectMomentumDirect(longScore, 'LONG', config.momentumDirectThreshold);
   const shortPasses = shortScore !== undefined && detectMomentumDirect(shortScore, 'SHORT', config.momentumDirectThreshold);
   if (!longPasses && !shortPasses) return null;
@@ -504,7 +534,7 @@ async function tryOpenNewPosition(
     if (!config.neutralTransitionGateConfig.neutralTransitionTradingEnabled) {
       return { event: null, newEntry: null };
     }
-    const gateScore = await scoreMomentumForSide(effectiveDraftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
+    const gateScore = await scoreMomentumForSide(effectiveDraftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection, input.correlatedRiskRatio, config);
     // Missing score (insufficient EMA/ATR history) -> gateScore undefined -> comparison is false ->
     // rejected, same as an explicit low score. Never defaults to passing (PM's explicit "an toàn" requirement).
     const gatePassed = gateScore !== undefined && gateScore >= config.neutralTransitionGateConfig.neutralTransitionMomentumGateThreshold;
@@ -541,7 +571,7 @@ async function tryOpenNewPosition(
   if (config.momentumFilterConfig.momentumFilterEnabled || config.planAutoSelectionConfig.planAutoSelectionEnabled) {
     // TICKET-036: reuses the same scoreMomentumForSide() helper the Gate above calls — no
     // re-derivation of the LONG/SHORT model split or feature vector construction.
-    momentumScore = await scoreMomentumForSide(effectiveDraftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection);
+    momentumScore = await scoreMomentumForSide(effectiveDraftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection, input.correlatedRiskRatio, config);
   }
   let momentumMultiplier = 1.0;
   if (config.momentumFilterConfig.momentumFilterEnabled && momentumScore !== undefined) {

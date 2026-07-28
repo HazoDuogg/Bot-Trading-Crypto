@@ -67,6 +67,10 @@ export interface RawMomentumFeatures {
   volAdjReturn5m: number;
   emaRatioFast: number;
   emaRatioSlow: number;
+  /** TICKET-098: only required when schema.feature_order references it (model V3+) — undefined is fine for V1/V2 schemas, which never look it up. */
+  correlatedRiskRatio?: number;
+  /** TICKET-098: only required when schema.feature_order references it (model V3+) — undefined is fine for V1/V2 schemas, which never look it up. */
+  distanceToNearestSwingAtr?: number;
 }
 
 /**
@@ -87,6 +91,8 @@ export function buildFeatureVector(raw: RawMomentumFeatures, schema: FeatureSche
     emaRatioFast: raw.emaRatioFast,
     emaRatioSlow: raw.emaRatioSlow,
   };
+  if (raw.correlatedRiskRatio !== undefined) numericValues.correlatedRiskRatio = raw.correlatedRiskRatio;
+  if (raw.distanceToNearestSwingAtr !== undefined) numericValues.distanceToNearestSwingAtr = raw.distanceToNearestSwingAtr;
   const categoricalValues: Record<string, string> = {
     atrTrend5m: raw.atrTrend5m,
     adxDirection1h: raw.adxDirection1h,

@@ -13,9 +13,11 @@
  * auto-corrects, per its own TICKET-076 Phần D design) — not the primary signal source.
  *
  * KNOWN LIMITATIONS (honest, not hidden — see README before flipping dryRun=false):
- *   - Order quantity/price are rounded to a fixed decimal count, NOT validated against each symbol's
- *     real LOT_SIZE/PRICE_FILTER from GET /fapi/v1/exchangeInfo — a real (if usually small) rejection
- *     risk at true scale. Follow-up ticket needed before dryRun=false at full size.
+ *   - TICKET-099 Phần A FIXED the old "rounded to a fixed decimal count" gap: BinanceOrderExecutor now
+ *     loads real LOT_SIZE/PRICE_FILTER/MIN_NOTIONAL per symbol via loadExchangeInfo() at startup and
+ *     rounds every real order's quantity/price to the correct stepSize/tickSize before sending — the
+ *     roundQty()/roundPrice() helpers below are only a rough PRE-rounding for internal sizing math
+ *     (e.g. tpQty = roundQty(quantity * tp.closePercent)); the executor's own rounding is authoritative.
  *   - No slippage simulated between a candle's close (what sizing/SL/TP prices are computed from) and
  *     the real MARKET fill price — same simplification backtest.ts's own report already documents.
  *   - LOW_LIQUIDITY regime is permanently unreachable here (candles5mSessionVolume omitted) — same
@@ -123,6 +125,10 @@ async function main(): Promise<void> {
     },
   });
   await executor.syncClock();
+  // TICKET-099 Phần A: MUST load before any real order — every mutating BinanceOrderExecutor method
+  // now throws if a symbol's filters aren't cached yet, rather than falling back to a guessed rounding.
+  await executor.loadExchangeInfo(SYMBOLS);
+  console.log('exchangeInfo (LOT_SIZE/PRICE_FILTER/MIN_NOTIONAL) đã tải cho 4 coin.');
 
   const accountInfo = (await executor.getAccountInfo()) as { totalWalletBalance?: string };
   let accountBalance = Number(accountInfo.totalWalletBalance);

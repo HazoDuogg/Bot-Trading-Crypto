@@ -230,6 +230,17 @@ export interface OrchestratorConfig {
    * trên đúng symbol+side đó — không cần chờ hết thời gian nghỉ mới reset đếm.
    */
   momentumDirectCircuitBreakerCooldownMs: number;
+  /**
+   * TICKET-098 — CLI-overridable momentum model file paths (bullish + bearish, .onnx + feature
+   * schema), so backtest.ts's --momentum-model-version=v1|v3 flag can A/B a retrained model without
+   * touching xgbFilter/config.ts's production paths or hardcoding a version anywhere. undefined =
+   * use xgbFilter/config.ts's MOMENTUM_MODEL_PATH/MOMENTUM_SCHEMA_PATH/MOMENTUM_BEARISH_* (default
+   * v1 production paths), matching every ticket before this one exactly.
+   */
+  momentumModelPath?: string;
+  momentumSchemaPath?: string;
+  momentumBearishModelPath?: string;
+  momentumBearishSchemaPath?: string;
 }
 
 /** TICKET-081 — trạng thái cầu dao cho 1 chiều (LONG hoặc SHORT) của 1 symbol. */

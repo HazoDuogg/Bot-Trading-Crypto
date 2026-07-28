@@ -31,6 +31,7 @@ import { emptyFunnelStats, fmtInt, funnelReportMarkdown, pct, STATE_PASS_REGIMES
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
 const OHLCV_DIR = path.resolve(process.cwd(), 'data/ohlcv');
+const MODELS_DIR = path.resolve(process.cwd(), 'models');
 
 // Bounded sliding windows — enough for every metric's own lookback (ATR_PCT_LOOKBACK_5M=300 etc.),
 // but NOT the full growing history. detectRegime()/routeEntry() always recompute their indicator
@@ -102,6 +103,15 @@ function parseArgs(): {
    * ADX, TICKET-017) are already defined for every step. Default 0 — unchanged from every ticket
    * before this one unless the CLI explicitly opts in. */
   skipDays: number;
+  /**
+   * TICKET-098 — CLI-overridable momentum model version, 'v1' (production, default, unchanged
+   * behavior) or 'v3' (TICKET-097's experimental model: same % label, +correlatedRiskRatio
+   * +distanceToNearestSwingAtr features). Never wired anywhere else — only backtest.ts's own A/B
+   * comparison, orchestrator.ts stays oblivious to "versions" (just reads whatever
+   * OrchestratorConfig.momentumModelPath/etc points to, defaulting to xgbFilter/config.ts's v1
+   * paths when omitted).
+   */
+  momentumModelVersion: 'v1' | 'v3';
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -135,6 +145,7 @@ function parseArgs(): {
   const dateToArg = args.find((a) => a.startsWith('--date-to='));
   const maxMarginCapArg = args.find((a) => a.startsWith('--max-margin-cap='));
   const skipDaysArg = args.find((a) => a.startsWith('--skip-days='));
+  const momentumModelVersionArg = args.find((a) => a.startsWith('--momentum-model-version='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -199,6 +210,8 @@ function parseArgs(): {
     dateTo: dateToArg ? dateToArg.split('=')[1] : undefined,
     // TICKET-061: default 0 unchanged from before this ticket.
     skipDays: skipDaysArg ? Number(skipDaysArg.split('=')[1]) : 0,
+    // TICKET-098: default 'v1' unchanged unless CLI overrides — matches every ticket before this one exactly.
+    momentumModelVersion: (momentumModelVersionArg ? momentumModelVersionArg.split('=')[1] : 'v1') as 'v1' | 'v3',
   };
 }
 
@@ -368,9 +381,10 @@ async function main(): Promise<void> {
     dateFrom,
     dateTo,
     skipDays,
+    momentumModelVersion,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}, momentumModelVersion=${momentumModelVersion}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -417,6 +431,16 @@ async function main(): Promise<void> {
     momentumDirectCorrelationRiskMultiplier, // TICKET-071: TODO_CONFIRM, default 1.0 (no size change) unchanged unless CLI overrides.
     momentumDirectCircuitBreakerLossThreshold, // TICKET-081: TODO_CONFIRM, default 999999 (never triggers) unchanged unless CLI overrides.
     momentumDirectCircuitBreakerCooldownMs, // TICKET-081: TODO_CONFIRM, default 0 unchanged unless CLI overrides.
+    // TICKET-098: undefined for 'v1' (default) — orchestrator.ts falls back to xgbFilter/config.ts's
+    // production v1 paths unchanged. 'v3' points at TICKET-097's experimental model files.
+    ...(momentumModelVersion === 'v3'
+      ? {
+          momentumModelPath: path.join(MODELS_DIR, 'xgb_momentum_v3_bullish_experimental.onnx'),
+          momentumSchemaPath: path.join(MODELS_DIR, 'xgb_momentum_v3_bullish_experimental_feature_schema.json'),
+          momentumBearishModelPath: path.join(MODELS_DIR, 'xgb_momentum_v3_bearish_experimental.onnx'),
+          momentumBearishSchemaPath: path.join(MODELS_DIR, 'xgb_momentum_v3_bearish_experimental_feature_schema.json'),
+        }
+      : {}),
   };
 
   let accountBalance = startBalance;

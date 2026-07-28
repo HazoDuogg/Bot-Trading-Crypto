@@ -67,6 +67,30 @@ export interface DryRunResult {
   params: Record<string, string | number | boolean>;
 }
 
+/**
+ * TICKET-099 Phần A — real per-symbol precision/size limits from GET /fapi/v1/exchangeInfo (LOT_SIZE,
+ * PRICE_FILTER, MIN_NOTIONAL). Fixes a real limitation liveRunner.ts's module doc had flagged since
+ * TICKET-086: quantity/price were rounded to a fixed decimal count (3/2), not each symbol's actual
+ * stepSize/tickSize — a real rejection risk once size/price magnitude differs enough across symbols
+ * (e.g. XRP's price needs 4 decimals, BTC's quantity needs far fewer than 3).
+ */
+export interface SymbolFilters {
+  stepSize: number;
+  tickSize: number;
+  minQty: number;
+  minNotional: number;
+  /** Decimal digit count derived directly from Binance's raw string (e.g. "0.00100000" -> 3), not re-derived from the parsed float — avoids floating-point round-trip error. */
+  stepSizeDecimals: number;
+  tickSizeDecimals: number;
+}
+
+/** Counts decimal digits from Binance's own string representation (e.g. "0.00100000" -> 3) — avoids floating-point round-trip error from parsing then re-deriving decimals numerically. */
+function decimalsFromFilterString(value: string): number {
+  const trimmed = value.replace(/0+$/, '').replace(/\.$/, '');
+  const dotIndex = trimmed.indexOf('.');
+  return dotIndex === -1 ? 0 : trimmed.length - dotIndex - 1;
+}
+
 const DEFAULT_RECV_WINDOW_MS = 5000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const MAX_MUTATING_RETRIES = 3; // only for pre-response network failures, see module doc
@@ -116,6 +140,8 @@ export class BinanceOrderExecutor {
   // TICKET-077 1.2 follow-up: latest ground-truthed ORDERS usage from X-MBX-ORDER-COUNT-* headers.
   private lastKnownOrderCount10s = 0;
   private lastKnownOrderCount1m = 0;
+  // TICKET-099 Phần A: loaded once via loadExchangeInfo() at startup, before any real order.
+  private symbolFilters = new Map<string, SymbolFilters>();
 
   constructor(config: BinanceOrderExecutorConfig) {
     this.creds = config.credentials;
@@ -293,6 +319,93 @@ export class BinanceOrderExecutor {
     throw lastError;
   }
 
+  /**
+   * TICKET-099 Phần A — public (unsigned), read-only, same retry policy as getServerTime() above.
+   * Caller MUST call this once at startup (for every symbol it will ever trade) BEFORE issuing any
+   * real order — every mutating method below throws if a symbol's filters aren't loaded yet, rather
+   * than silently falling back to a guessed precision.
+   */
+  async loadExchangeInfo(symbols: string[]): Promise<void> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < MAX_READ_RETRIES; attempt++) {
+      try {
+        const res = await this.fetchWithTimeout(`${this.creds.baseUrl}/fapi/v1/exchangeInfo`, { method: 'GET' });
+        if (res.status === 429) {
+          if (attempt === MAX_READ_RETRIES - 1) throw new Error(`429 rate-limited after ${MAX_READ_RETRIES} attempts: /fapi/v1/exchangeInfo`);
+          await sleep(1000 * 2 ** attempt);
+          continue;
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} on /fapi/v1/exchangeInfo`);
+        const body = (await res.json()) as { symbols: Array<{ symbol: string; filters: Array<Record<string, string>> }> };
+        const wanted = new Set(symbols);
+        for (const s of body.symbols) {
+          if (!wanted.has(s.symbol)) continue;
+          const lotSize = s.filters.find((f) => f.filterType === 'LOT_SIZE');
+          const priceFilter = s.filters.find((f) => f.filterType === 'PRICE_FILTER');
+          // Binance Futures uses filterType='MIN_NOTIONAL' with field `notional` (not `minNotional` like Spot).
+          const minNotionalFilter = s.filters.find((f) => f.filterType === 'MIN_NOTIONAL');
+          if (!lotSize || !priceFilter) {
+            throw new Error(`loadExchangeInfo: thiếu LOT_SIZE/PRICE_FILTER cho ${s.symbol} trong response /fapi/v1/exchangeInfo`);
+          }
+          this.symbolFilters.set(s.symbol, {
+            stepSize: Number(lotSize.stepSize),
+            minQty: Number(lotSize.minQty),
+            tickSize: Number(priceFilter.tickSize),
+            minNotional: minNotionalFilter ? Number(minNotionalFilter.notional) : 0,
+            stepSizeDecimals: decimalsFromFilterString(lotSize.stepSize),
+            tickSizeDecimals: decimalsFromFilterString(priceFilter.tickSize),
+          });
+        }
+        const missing = symbols.filter((sym) => !this.symbolFilters.has(sym));
+        if (missing.length > 0) {
+          throw new Error(`loadExchangeInfo: không tìm thấy symbol trong response: ${missing.join(', ')}`);
+        }
+        return;
+      } catch (err) {
+        lastError = err;
+        if (attempt === MAX_READ_RETRIES - 1) throw err;
+        await sleep(1000 * 2 ** attempt);
+      }
+    }
+    throw lastError;
+  }
+
+  getSymbolFilters(symbol: string): SymbolFilters {
+    const f = this.symbolFilters.get(symbol);
+    if (f === undefined) {
+      throw new Error(`getSymbolFilters(${symbol}): chưa load — gọi loadExchangeInfo([...]) một lần lúc khởi động trước khi đặt lệnh thật.`);
+    }
+    return f;
+  }
+
+  /** TICKET-099 Phần A: rounds DOWN to stepSize (never rounds up past the caller's intended size) and rejects below minQty rather than silently sending an invalid tiny order. */
+  /** `enforceMinQty=false` for reduceOnly closes — a small leftover position remainder is legitimate to close even below the exchange's minQty for OPENING a new position. */
+  private roundQtyToStepSize(symbol: string, qty: number, enforceMinQty = true): number {
+    const { stepSize, minQty, stepSizeDecimals } = this.getSymbolFilters(symbol);
+    const steps = Math.floor(qty / stepSize + 1e-9); // +epsilon guards against qty/stepSize landing just under an integer due to float error
+    const rounded = Number((steps * stepSize).toFixed(stepSizeDecimals));
+    if (enforceMinQty && rounded < minQty) {
+      throw new Error(`roundQtyToStepSize(${symbol}): quantity ${rounded} (từ ${qty}) < minQty ${minQty} — không gửi lệnh.`);
+    }
+    return rounded;
+  }
+
+  /** TICKET-099 Phần A: rounds to the nearest tickSize (Binance rejects any price not an exact multiple). */
+  private roundPriceToTickSize(symbol: string, price: number): number {
+    const { tickSize, tickSizeDecimals } = this.getSymbolFilters(symbol);
+    const ticks = Math.round(price / tickSize);
+    return Number((ticks * tickSize).toFixed(tickSizeDecimals));
+  }
+
+  /** TICKET-099 Phần A: MIN_NOTIONAL check — Binance rejects an order below this dollar value outright. */
+  private checkMinNotional(symbol: string, price: number, qty: number): void {
+    const { minNotional } = this.getSymbolFilters(symbol);
+    const notional = price * qty;
+    if (minNotional > 0 && notional < minNotional) {
+      throw new Error(`checkMinNotional(${symbol}): giá trị lệnh $${notional.toFixed(2)} (price=${price} × qty=${qty}) < minNotional $${minNotional} — không gửi lệnh.`);
+    }
+  }
+
   async getAccountInfo(): Promise<unknown> {
     return this.signedGet('/fapi/v2/account');
   }
@@ -304,7 +417,10 @@ export class BinanceOrderExecutor {
   // --- Mutating endpoints (gated by dryRun) ---
 
   async openMarketPosition(symbol: string, side: PositionSide, quantity: number): Promise<OrderResult | DryRunResult> {
-    const params = { symbol, side: side === 'LONG' ? 'BUY' : 'SELL', type: 'MARKET', quantity };
+    // TICKET-099 Phần A: no price param on a MARKET order, so minNotional can't be checked here —
+    // the caller sizes from the candle close price and checkMinNotional() there before calling.
+    const roundedQty = this.roundQtyToStepSize(symbol, quantity);
+    const params = { symbol, side: side === 'LONG' ? 'BUY' : 'SELL', type: 'MARKET', quantity: roundedQty };
     const dry = this.logOrDryRun('POST', '/fapi/v1/order', params, `openMarketPosition(${symbol},${side})`);
     if (dry) return dry;
     const raw = (await this.signedMutate('POST', '/fapi/v1/order', params, `openMarketPosition(${symbol},${side})`)) as { orderId: number; status: string };
@@ -313,7 +429,10 @@ export class BinanceOrderExecutor {
 
   /** TICKET-077 1.3: LIMIT order to open a position (GTC — stays on the book until filled or cancelled). */
   async placeLimitOrder(symbol: string, side: PositionSide, price: number, quantity: number): Promise<OrderResult | DryRunResult> {
-    const params = { symbol, side: side === 'LONG' ? 'BUY' : 'SELL', type: 'LIMIT', timeInForce: 'GTC', price, quantity };
+    const roundedPrice = this.roundPriceToTickSize(symbol, price);
+    const roundedQty = this.roundQtyToStepSize(symbol, quantity);
+    this.checkMinNotional(symbol, roundedPrice, roundedQty);
+    const params = { symbol, side: side === 'LONG' ? 'BUY' : 'SELL', type: 'LIMIT', timeInForce: 'GTC', price: roundedPrice, quantity: roundedQty };
     const dry = this.logOrDryRun('POST', '/fapi/v1/order', params, `placeLimitOrder(${symbol},${side})`);
     if (dry) return dry;
     const raw = (await this.signedMutate('POST', '/fapi/v1/order', params, `placeLimitOrder(${symbol},${side})`)) as { orderId: number; status: string };
@@ -322,7 +441,8 @@ export class BinanceOrderExecutor {
 
   /** TICKET-077 1.3: MARKET close (full or partial via `quantity`) — reduceOnly so it can never accidentally open/flip a position. */
   async closePositionMarket(symbol: string, positionSide: PositionSide, quantity: number): Promise<OrderResult | DryRunResult> {
-    const params = { symbol, side: positionSide === 'LONG' ? 'SELL' : 'BUY', type: 'MARKET', quantity, reduceOnly: true };
+    const roundedQty = this.roundQtyToStepSize(symbol, quantity, false); // reduceOnly close — don't reject a small dust remainder
+    const params = { symbol, side: positionSide === 'LONG' ? 'SELL' : 'BUY', type: 'MARKET', quantity: roundedQty, reduceOnly: true };
     const dry = this.logOrDryRun('POST', '/fapi/v1/order', params, `closePositionMarket(${symbol},${positionSide})`);
     if (dry) return dry;
     const raw = (await this.signedMutate('POST', '/fapi/v1/order', params, `closePositionMarket(${symbol},${positionSide})`)) as { orderId: number; status: string };
@@ -331,7 +451,9 @@ export class BinanceOrderExecutor {
 
   /** TICKET-077 1.3: đi qua `/fapi/v1/algoOrder` (bắt buộc từ 09/12/2025) — trả về `algoId`, KHÔNG PHẢI `orderId`. */
   async placeStopMarket(symbol: string, positionSide: PositionSide, triggerPrice: number, quantity: number): Promise<AlgoOrderResult | DryRunResult> {
-    const params = { symbol, side: positionSide === 'LONG' ? 'SELL' : 'BUY', algoType: 'CONDITIONAL', type: 'STOP_MARKET', triggerPrice, quantity, reduceOnly: true };
+    const roundedPrice = this.roundPriceToTickSize(symbol, triggerPrice);
+    const roundedQty = this.roundQtyToStepSize(symbol, quantity, false); // reduceOnly (SL) — don't reject a small dust remainder
+    const params = { symbol, side: positionSide === 'LONG' ? 'SELL' : 'BUY', algoType: 'CONDITIONAL', type: 'STOP_MARKET', triggerPrice: roundedPrice, quantity: roundedQty, reduceOnly: true };
     const dry = this.logOrDryRun('POST', '/fapi/v1/algoOrder', params, `placeStopMarket(${symbol},${positionSide})`);
     if (dry) return dry;
     const raw = (await this.signedMutate('POST', '/fapi/v1/algoOrder', params, `placeStopMarket(${symbol},${positionSide})`)) as { algoId: number; algoStatus: string };
@@ -340,7 +462,9 @@ export class BinanceOrderExecutor {
 
   /** TICKET-077 1.3: đi qua `/fapi/v1/algoOrder` (bắt buộc từ 09/12/2025) — trả về `algoId`, KHÔNG PHẢI `orderId`. */
   async placeTakeProfitMarket(symbol: string, positionSide: PositionSide, triggerPrice: number, quantity: number): Promise<AlgoOrderResult | DryRunResult> {
-    const params = { symbol, side: positionSide === 'LONG' ? 'SELL' : 'BUY', algoType: 'CONDITIONAL', type: 'TAKE_PROFIT_MARKET', triggerPrice, quantity, reduceOnly: true };
+    const roundedPrice = this.roundPriceToTickSize(symbol, triggerPrice);
+    const roundedQty = this.roundQtyToStepSize(symbol, quantity, false); // reduceOnly (TP) — don't reject a small dust remainder
+    const params = { symbol, side: positionSide === 'LONG' ? 'SELL' : 'BUY', algoType: 'CONDITIONAL', type: 'TAKE_PROFIT_MARKET', triggerPrice: roundedPrice, quantity: roundedQty, reduceOnly: true };
     const dry = this.logOrDryRun('POST', '/fapi/v1/algoOrder', params, `placeTakeProfitMarket(${symbol},${positionSide})`);
     if (dry) return dry;
     const raw = (await this.signedMutate('POST', '/fapi/v1/algoOrder', params, `placeTakeProfitMarket(${symbol},${positionSide})`)) as { algoId: number; algoStatus: string };
