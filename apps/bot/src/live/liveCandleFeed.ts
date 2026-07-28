@@ -275,7 +275,7 @@ export class LiveCandleFeed {
     }
   }
 
-  private async pollOnce(symbol: string, interval: Interval): Promise<void> {
+  private async pollOnce(symbol: string, interval: Interval, limitOverride?: number): Promise<void> {
     // TICKET-077 1.2: "tự động giãn interval khi gần chạm ngưỡng" — skipping this tick has the same
     // rate-reducing effect as widening the interval, without needing a scheduling refactor (weight
     // resets every rolling minute on Binance's side, so the next tick re-checks fresh).
@@ -284,7 +284,7 @@ export class LiveCandleFeed {
       return;
     }
     try {
-      const result = await fetchKlines(this.config.baseUrl, symbol, interval, this.config.klineLimit);
+      const result = await fetchKlines(this.config.baseUrl, symbol, interval, limitOverride ?? this.config.klineLimit);
       this.noteWeight(result);
       const key = this.key(symbol, interval);
       const windowSize = this.config.windowSizes[interval] ?? DEFAULT_WINDOW_SIZES[interval];
@@ -297,13 +297,27 @@ export class LiveCandleFeed {
     }
   }
 
-  /** Kicks off one immediate poll per symbol/interval (fills the buffer before start() returns), then starts the recurring timers. */
+  /**
+   * Kicks off one immediate poll per symbol/interval BEFORE start() returns, requesting each
+   * interval's FULL configured windowSize (not the regular per-poll klineLimit, default 3) — so a
+   * caller has a complete history buffer immediately, instead of waiting real-time (potentially
+   * hours, for a 320-candle 5m window at the default 2s poll) for the rolling poll to build it up
+   * one batch at a time. Then starts the recurring timers at the regular klineLimit.
+   */
   async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
     const intervals = Object.keys(INTERVAL_MS) as Interval[];
+    const BINANCE_MAX_KLINES_LIMIT = 1500;
 
-    await Promise.all(this.config.symbols.flatMap((symbol) => intervals.map((interval) => this.pollOnce(symbol, interval))));
+    await Promise.all(
+      this.config.symbols.flatMap((symbol) =>
+        intervals.map((interval) => {
+          const windowSize = this.config.windowSizes[interval] ?? DEFAULT_WINDOW_SIZES[interval];
+          return this.pollOnce(symbol, interval, Math.min(windowSize, BINANCE_MAX_KLINES_LIMIT));
+        }),
+      ),
+    );
 
     for (const symbol of this.config.symbols) {
       for (const interval of intervals) {

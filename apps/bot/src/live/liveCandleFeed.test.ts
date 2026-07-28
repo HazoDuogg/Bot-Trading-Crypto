@@ -113,6 +113,22 @@ describe('LiveCandleFeed', () => {
     expect(fetchMock).toHaveBeenCalledTimes(5);
   });
 
+  // TICKET-086 — start() must request each interval's FULL windowSize on the initial poll, not the
+  // (much smaller, default 3) regular per-poll klineLimit — otherwise a caller only has a couple of
+  // candles immediately and has to wait real-time (hours, for a 320-candle 5m window at the default
+  // 2s cadence) for the rolling poll to build up a usable history one small batch at a time.
+  it("start()'s initial poll requests the full configured windowSize as the limit, ignoring klineLimit", async () => {
+    fetchMock.mockResolvedValue(mockOkResponse([candle(1000)]));
+    const feed = new LiveCandleFeed({ symbols: ['BTCUSDT'], baseUrl: 'https://example.test', klineLimit: 3, windowSizes: { '5m': 320, '1h': 40 } });
+    await feed.start();
+    feed.stop();
+
+    const fiveMinCall = fetchMock.mock.calls.find(([url]) => (url as string).includes('interval=5m'));
+    expect(fiveMinCall?.[0]).toContain('limit=320');
+    const oneHourCall = fetchMock.mock.calls.find(([url]) => (url as string).includes('interval=1h'));
+    expect(oneHourCall?.[0]).toContain('limit=40');
+  });
+
   it('calls onError (does not throw) when a poll fails, and does not touch the buffer', async () => {
     fetchMock.mockRejectedValue(new Error('network down'));
     const onError = vi.fn();

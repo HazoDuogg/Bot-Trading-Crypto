@@ -123,4 +123,6 @@ export interface EntryRouterConfig {
   mssStalenessToleranceCandles: number;
   /** TICKET-041: same value as EntryConfig.OB_BOS_LOOKFORWARD_K by default (TICKET-008) — threaded through here so backtest.ts's CLI can A/B test it without touching that constant. */
   obBosLookforwardK: number;
+  /** TICKET-089: same value as EntryConfig.SL_BUFFER_ATR_MULTIPLIER_OB by default — threaded through here so backtest.ts's CLI can A/B test OB's SL buffer independently of FVG/Sweep's (which keep using EntryConfig.SL_BUFFER_ATR_MULTIPLIER directly). */
+  obSlBufferAtrMultiplier: number;
 }

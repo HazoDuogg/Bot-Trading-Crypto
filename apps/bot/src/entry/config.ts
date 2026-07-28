@@ -38,8 +38,16 @@ export const EntryConfig = {
   /** PM's own suggestion (TODO_CONFIRM on the exact number, but the >0 direction and ballpark are given). */
   BOX_BREAKOUT_MIN_VOLUME_ZSCORE: 1.0,
 
-  /** PM's own suggestion: SL buffer outside an OB/FVG zone = this × ATR(14) 5m. TODO_CONFIRM. */
+  /** PM's own suggestion: SL buffer outside an FVG/Sweep zone = this × ATR(14) 5m. TODO_CONFIRM. */
   SL_BUFFER_ATR_MULTIPLIER: 0.1,
+
+  /**
+   * TICKET-089: separate OB-only SL buffer multiplier (was sharing SL_BUFFER_ATR_MULTIPLIER with
+   * FVG/Sweep) — TICKET-088 found 64.7% of OB's SL losses were "SL OAN" (price returned in the
+   * predicted direction within 2h), suggesting the OB SL sits too tight. Same default (0.1) as
+   * SL_BUFFER_ATR_MULTIPLIER so behavior is unchanged unless overridden. TODO_CONFIRM.
+   */
+  SL_BUFFER_ATR_MULTIPLIER_OB: 0.1,
 
   /** TICKET-017: period for the 1D macro-trend direction (wilderDIDirectionSeries on daily candles, same function as adxDirection1h). PM didn't specify a 1D-specific period — defaults to RegimeConfig.ADX_PERIOD_1H's value. TODO_CONFIRM. */
   MACRO_TREND_ADX_PERIOD_1D: 14,

@@ -40,6 +40,25 @@ describe('BinanceOrderExecutor — dryRun (default)', () => {
     expect(time).toBe(1000);
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
+
+  // TICKET-086 — found via a real dry-run soak test: getServerTime() (called first, by syncClock())
+  // used to have no retry at all, so a single transient network error killed the whole process at
+  // startup. Now retries on network error / 429, same policy as every other GET in this class.
+  it('getServerTime retries on a transient network error, then succeeds', async () => {
+    const fetchFn = vi.fn().mockRejectedValueOnce(new Error('ECONNRESET')).mockResolvedValueOnce(jsonResponse(200, { serverTime: 5000 }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, fetchFn });
+    const time = await exec.getServerTime();
+    expect(time).toBe(5000);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('getServerTime retries on 429, honoring the same backoff policy as signedGet', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(jsonResponse(429, {})).mockResolvedValueOnce(jsonResponse(200, { serverTime: 6000 }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, fetchFn });
+    const time = await exec.getServerTime();
+    expect(time).toBe(6000);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('BinanceOrderExecutor — syncClock', () => {

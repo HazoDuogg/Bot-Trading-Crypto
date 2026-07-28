@@ -22,6 +22,9 @@ export const DEFAULT_ENTRY_ROUTER_CONFIG: EntryRouterConfig = {
   // TICKET-041: matches EntryConfig.OB_BOS_LOOKFORWARD_K (10, TICKET-008) — baseline behavior
   // unchanged unless a caller (backtest.ts CLI) opts into a different value.
   obBosLookforwardK: EntryConfig.OB_BOS_LOOKFORWARD_K,
+  // TICKET-089: matches EntryConfig.SL_BUFFER_ATR_MULTIPLIER_OB (0.1, same as the shared FVG/Sweep
+  // default) — baseline behavior unchanged unless a caller (backtest.ts CLI) opts into a different value.
+  obSlBufferAtrMultiplier: EntryConfig.SL_BUFFER_ATR_MULTIPLIER_OB,
   regimeRiskMultiplier: {
     [MarketRegime.TREND_RIDER]: 1.0,
     [MarketRegime.SIDEWAY_SCALPER]: 1.0,
@@ -192,7 +195,9 @@ function runTrendStyle(input: EntryRouterInput, config: EntryRouterConfig, regim
   const atr = lastDefined(wilderATRSeries(input.candles5m, RegimeConfig.ATR_PERIOD_5M));
   if (atr === undefined) return null; // not enough 5m history to size the SL buffer
 
-  const buffer = EntryConfig.SL_BUFFER_ATR_MULTIPLIER * atr;
+  // TICKET-089: OB uses its own configurable buffer multiplier; FVG/Sweep keep the shared constant.
+  const bufferMultiplier = setupType === 'OB' ? config.obSlBufferAtrMultiplier : EntryConfig.SL_BUFFER_ATR_MULTIPLIER;
+  const buffer = bufferMultiplier * atr;
   const slPrice = direction === 'BULLISH' ? rawSlPrice - buffer : rawSlPrice + buffer;
 
   return { side, entryPrice, slPrice, setupType, regime, riskMultiplier: config.regimeRiskMultiplier[regime] };

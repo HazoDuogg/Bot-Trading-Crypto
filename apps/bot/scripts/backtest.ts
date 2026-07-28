@@ -62,6 +62,10 @@ function parseArgs(): {
   neutralGateThreshold: number;
   mssStalenessTolerance: number;
   obBosLookback: number;
+  /** TICKET-089: CLI-overridable OB-only SL buffer multiplier (EntryRouterConfig.obSlBufferAtrMultiplier)
+   * — FVG/Sweep are unaffected (still use EntryConfig.SL_BUFFER_ATR_MULTIPLIER directly). Default
+   * matches EntryConfig.SL_BUFFER_ATR_MULTIPLIER_OB (0.1) unchanged unless CLI overrides. */
+  obSlBufferAtrMultiplier: number;
   planAutoSelectionEnabled: boolean;
   planAutoSelectionThreshold: number;
   maxConcurrentPositionsPerSymbol: number;
@@ -82,6 +86,13 @@ function parseArgs(): {
   /** CLI-overridable backtest starting balance, same purpose as riskDollarOrPercent above. Default
    * 400 unchanged (docs/vicion-bot-quan-ly-vi-the-v1.md Mục 1). */
   startBalance: number;
+  /** TICKET-087 — CLI-overridable calendar-date trading window, same warm-up-then-trade mechanism as
+   * skipDays (TICKET-061) but pinned to an absolute date instead of a day-count from the dataset's
+   * start. Indicator history BEFORE dateFrom is still fed through detectRegime()/etc as normal (same
+   * warm-up every backtest run already needs) — only entry/position tracking is bounded to
+   * [dateFrom, dateTo]. Undefined (omitted) = unbounded, unchanged from every ticket before this one. */
+  dateFrom?: string;
+  dateTo?: string;
   /** CLI-overridable margin cap (OrchestratorConfig.maxMarginCap), same purpose as riskDollarOrPercent
    * above — must scale down proportionally with riskDollarOrPercent/startBalance for the real-capital
    * verification, or it stops binding at the same relative rate. Default 50 unchanged. */
@@ -104,6 +115,7 @@ function parseArgs(): {
   const neutralGateArg = args.find((a) => a.startsWith('--neutral-gate-threshold='));
   const mssStalenessArg = args.find((a) => a.startsWith('--mss-staleness-tolerance='));
   const obBosLookbackArg = args.find((a) => a.startsWith('--ob-bos-lookback='));
+  const obSlBufferAtrMultiplierArg = args.find((a) => a.startsWith('--ob-sl-buffer-atr-multiplier='));
   const planAutoSelectionArg = args.find((a) => a.startsWith('--plan-auto-selection-enabled='));
   const planAutoSelectionThresholdArg = args.find((a) => a.startsWith('--plan-auto-selection-threshold='));
   const maxConcurrentPositionsArg = args.find((a) => a.startsWith('--max-concurrent-positions-per-symbol='));
@@ -119,6 +131,8 @@ function parseArgs(): {
   const momentumDirectCircuitBreakerCooldownMsArg = args.find((a) => a.startsWith('--momentum-direct-circuit-breaker-cooldown-ms='));
   const riskDollarOrPercentArg = args.find((a) => a.startsWith('--risk-dollar-or-percent='));
   const startBalanceArg = args.find((a) => a.startsWith('--start-balance='));
+  const dateFromArg = args.find((a) => a.startsWith('--date-from='));
+  const dateToArg = args.find((a) => a.startsWith('--date-to='));
   const maxMarginCapArg = args.find((a) => a.startsWith('--max-margin-cap='));
   const skipDaysArg = args.find((a) => a.startsWith('--skip-days='));
   const obValue = obArg ? obArg.split('=')[1] : '';
@@ -140,6 +154,8 @@ function parseArgs(): {
     mssStalenessTolerance: mssStalenessArg ? Number(mssStalenessArg.split('=')[1]) : 5,
     // TICKET-041: defaults to 10 unchanged (matches EntryConfig.OB_BOS_LOOKFORWARD_K) when omitted.
     obBosLookback: obBosLookbackArg ? Number(obBosLookbackArg.split('=')[1]) : 10,
+    // TICKET-089: defaults to 0.1 unchanged (matches EntryConfig.SL_BUFFER_ATR_MULTIPLIER_OB) when omitted.
+    obSlBufferAtrMultiplier: obSlBufferAtrMultiplierArg ? Number(obSlBufferAtrMultiplierArg.split('=')[1]) : 0.1,
     // TICKET-052: off by default — matches DEFAULT_PLAN_AUTO_SELECTION_CONFIG.
     planAutoSelectionEnabled: planAutoSelectionArg ? planAutoSelectionArg.split('=')[1] === 'true' : false,
     // TICKET-052: defaults to 0.7 unchanged (matches DEFAULT_PLAN_AUTO_SELECTION_CONFIG, TODO_CONFIRM) when omitted.
@@ -178,6 +194,9 @@ function parseArgs(): {
     startBalance: startBalanceArg ? Number(startBalanceArg.split('=')[1]) : 400,
     // Default 50 unchanged unless CLI overrides — matches every ticket before this one exactly.
     maxMarginCap: maxMarginCapArg ? Number(maxMarginCapArg.split('=')[1]) : 50,
+    // TICKET-087: undefined unless CLI overrides — matches every ticket before this one exactly.
+    dateFrom: dateFromArg ? dateFromArg.split('=')[1] : undefined,
+    dateTo: dateToArg ? dateToArg.split('=')[1] : undefined,
     // TICKET-061: default 0 unchanged from before this ticket.
     skipDays: skipDaysArg ? Number(skipDaysArg.split('=')[1]) : 0,
   };
@@ -329,6 +348,7 @@ async function main(): Promise<void> {
     neutralGateThreshold,
     mssStalenessTolerance,
     obBosLookback,
+    obSlBufferAtrMultiplier,
     planAutoSelectionEnabled,
     planAutoSelectionThreshold,
     maxConcurrentPositionsPerSymbol,
@@ -345,10 +365,12 @@ async function main(): Promise<void> {
     riskDollarOrPercent,
     startBalance,
     maxMarginCap,
+    dateFrom,
+    dateTo,
     skipDays,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, skipDays=${skipDays}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -364,6 +386,7 @@ async function main(): Promise<void> {
       macroTrendFilterAppliesToBoxBreakout,
       mssStalenessToleranceCandles: mssStalenessTolerance, // TICKET-040: CLI-overridable A/B testing — default (5) unchanged from before this ticket.
       obBosLookforwardK: obBosLookback, // TICKET-041: CLI-overridable A/B testing — default (10) unchanged from before this ticket.
+      obSlBufferAtrMultiplier, // TICKET-089: CLI-overridable A/B testing — default (0.1) unchanged from before this ticket, FVG/Sweep unaffected.
     },
     tpPlan,
     takerFeeRate: 0.0004, // TODO_CONFIRM per docs Mục 8 — Trader chưa cung cấp số thật theo VIP tier
@@ -425,14 +448,29 @@ async function main(): Promise<void> {
   const funnelStats: Record<string, RegimeFunnelStats> = {};
   for (const regime of STATE_PASS_REGIMES) funnelStats[regime] = emptyFunnelStats();
 
-  const totalSteps = Math.min(...SYMBOLS.map((s) => symbolsData[s].candles5m.length));
+  const rawTotalSteps = Math.min(...SYMBOLS.map((s) => symbolsData[s].candles5m.length));
   // startStep must guarantee enough REAL TIME has elapsed for every timeframe's window to be full,
   // not just the 5m one — 325 15m candles takes 3.4 real days (975 5m-candle-equivalents), which
   // dominates over the 5m window's own 320-candle (26.7h) requirement.
   // TICKET-061: skipDays lets a diagnostic run additionally skip N calendar days on top of the
   // usual warm-up margin — e.g. so 1D-history-dependent metrics (macroDirection, TICKET-017) are
   // already defined from step 0 onward. 288 = number of 5m candles per day. Default 0 -> unchanged.
-  const startStep = Math.max(WINDOW_5M - 1, WINDOW_15M * 3, WINDOW_1H * 12) + 5 + skipDays * 288; // +5 safety margin
+  const warmupStartStep = Math.max(WINDOW_5M - 1, WINDOW_15M * 3, WINDOW_1H * 12) + 5 + skipDays * 288; // +5 safety margin
+
+  // TICKET-087 — dateFrom/dateTo bound the TRADING window (entry attempts + trade log) to a specific
+  // calendar range, while still feeding every OLDER candle through detectRegime()/etc as normal so
+  // hysteresis/indicator history is warmed up exactly like every backtest run already needs — same
+  // "warm up, then trade" mechanism as skipDays above, just pinned to an absolute date instead of a
+  // day-count from the dataset's start. Uses BTCUSDT's own 5m timestamps as the reference axis (all
+  // 4 symbols' 5m series are aligned 1:1 by construction — same fetchOhlcv.ts run for all of them).
+  const referenceCandles = symbolsData.BTCUSDT.candles5m;
+  const dateFromMs = dateFrom ? Date.parse(`${dateFrom}T00:00:00.000Z`) : undefined;
+  const dateToExclusiveMs = dateTo ? Date.parse(`${dateTo}T00:00:00.000Z`) + 24 * 60 * 60_000 : undefined; // exclusive upper bound, covers the whole dateTo calendar day
+  const dateFromStep = dateFromMs !== undefined ? referenceCandles.findIndex((c) => c.timestamp >= dateFromMs) : 0;
+  const dateToStepExclusive = dateToExclusiveMs !== undefined ? referenceCandles.findIndex((c) => c.timestamp >= dateToExclusiveMs) : rawTotalSteps;
+
+  const startStep = Math.max(warmupStartStep, dateFromStep < 0 ? rawTotalSteps : dateFromStep);
+  const totalSteps = dateToStepExclusive < 0 ? rawTotalSteps : Math.min(rawTotalSteps, dateToStepExclusive);
 
   console.log(`Chạy ${totalSteps - startStep} bước x ${SYMBOLS.length} coin (từ nến 5m #${startStep})...`);
 
@@ -706,6 +744,7 @@ async function main(): Promise<void> {
     `- riskPoolMaxPct: ${(riskPoolMaxPct * 100).toFixed(0)}% (TICKET-037, CLI-overridable, default 10%)`,
     `- mssStalenessToleranceCandles: ${config.entryRouterConfig.mssStalenessToleranceCandles} (TICKET-040, CLI-overridable, default 5)`,
     `- obBosLookforwardK: ${config.entryRouterConfig.obBosLookforwardK} (TICKET-041, CLI-overridable, default 10)`,
+    `- obSlBufferAtrMultiplier: ${config.entryRouterConfig.obSlBufferAtrMultiplier} (TICKET-089, TODO_CONFIRM, CLI-overridable, default 0.1, chỉ áp dụng cho OB — FVG/Sweep vẫn dùng EntryConfig.SL_BUFFER_ATR_MULTIPLIER)`,
     `- maxConcurrentPositionsPerSymbol: ${config.maxConcurrentPositionsPerSymbol} (TICKET-056, CLI-overridable, default 1)`,
     `- momentumDirectEnabled: ${momentumDirectEnabled} (TICKET-059, AI momentum score dùng thẳng làm tín hiệu vào lệnh, song song với cascade OB/FVG/Sweep/Breakout, threshold=${momentumDirectThreshold})`,
     `- momentumDirectMaxAtrPercentile: ${momentumDirectMaxAtrPercentile} (TICKET-062, TODO_CONFIRM, CLI-overridable, default 100 = không giới hạn)`,

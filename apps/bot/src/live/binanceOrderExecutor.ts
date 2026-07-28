@@ -264,11 +264,33 @@ export class BinanceOrderExecutor {
 
   // --- Public read-only endpoints (never gated by dryRun — no money at risk) ---
 
+  /**
+   * TICKET-086 — found via a real dry-run soak test: a single transient network blip
+   * (ECONNRESET) here killed the whole process at startup (syncClock() calls this first, before
+   * anything else). This is a plain read-only GET, same retry policy as signedGet()'s own —
+   * "GET requests... retried with backoff on 429 and on network errors" per this file's own doc
+   * comment — just missed here since it predates signedGet()'s retry loop.
+   */
   async getServerTime(): Promise<number> {
-    const res = await this.fetchWithTimeout(`${this.creds.baseUrl}/fapi/v1/time`, { method: 'GET' });
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} on /fapi/v1/time`);
-    const body = (await res.json()) as { serverTime: number };
-    return body.serverTime;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < MAX_READ_RETRIES; attempt++) {
+      try {
+        const res = await this.fetchWithTimeout(`${this.creds.baseUrl}/fapi/v1/time`, { method: 'GET' });
+        if (res.status === 429) {
+          if (attempt === MAX_READ_RETRIES - 1) throw new Error(`429 rate-limited after ${MAX_READ_RETRIES} attempts: /fapi/v1/time`);
+          await sleep(1000 * 2 ** attempt);
+          continue;
+        }
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} on /fapi/v1/time`);
+        const body = (await res.json()) as { serverTime: number };
+        return body.serverTime;
+      } catch (err) {
+        lastError = err;
+        if (attempt === MAX_READ_RETRIES - 1) throw err;
+        await sleep(1000 * 2 ** attempt);
+      }
+    }
+    throw lastError;
   }
 
   async getAccountInfo(): Promise<unknown> {
