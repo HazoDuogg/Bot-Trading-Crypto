@@ -45,7 +45,12 @@ const WINDOW_1M = 200;
 const WINDOW_1D = 40; // >> EntryConfig.MACRO_TREND_ADX_PERIOD_1D(14), matches WINDOW_1H's margin
 // TICKET-024: separate, much larger 1h window for the momentum model's emaRatioSlow (EMA 50/200) —
 // intentionally NOT used for regime/entry (see ProcessCandleInput.candles1hMomentum doc comment for why).
-const WINDOW_1H_MOMENTUM = 250;
+// TICKET-106 (TODO_CONFIRM): was 250 — TICKET-104 proved emaSeries()'s SMA-seeded EMA(200) is still
+// ~61% seed-weighted at 250 candles (only 50 candles of decay past the period-200 seed), making
+// emaRatioSlow/momentumScore sensitive to exactly which candles land in the window. Empirically
+// converges by ~400; bumped to 500 for margin. MUST stay identical to liveRunner.ts's WINDOW_1H_MOMENTUM
+// — the live-vs-offline window-boundary mismatch this masked is exactly TICKET-104's root cause.
+const WINDOW_1H_MOMENTUM = 500;
 // TICKET-028: separate, much larger 5m window for LOW_LIQUIDITY's session-relative volume ratio —
 // RegimeConfig.LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS(14) * 288 candles/day + 1 for the current candle
 // itself. Intentionally NOT used for regime/entry's own ATR/ADX (see ProcessCandleInput.candles5mSessionVolume doc comment for why).

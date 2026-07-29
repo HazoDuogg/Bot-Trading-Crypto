@@ -29,7 +29,7 @@
 import 'dotenv/config';
 import { LiveCandleFeed, type CandleData } from '../dist/live/liveCandleFeed.js';
 import { BinanceOrderExecutor, initializeLeverageForSymbols, type PositionSide } from '../dist/live/binanceOrderExecutor.js';
-import { StateReconciler, type InternalStateSnapshot } from '../dist/live/stateReconciler.js';
+import { StateReconciler, resolveAccountBalanceAfterReconcile, type InternalStateSnapshot } from '../dist/live/stateReconciler.js';
 import { loadBinanceEnvConfig } from '../dist/live/envConfig.js';
 import { processCandle, type ProcessCandleInput } from '../dist/orchestrator/orchestrator.js';
 import {
@@ -87,7 +87,13 @@ const WINDOW_15M = 325;
 const WINDOW_1H = 40;
 const WINDOW_1M = 200;
 const WINDOW_1D = 40;
-const WINDOW_1H_MOMENTUM = 250; // LiveCandleFeed's own 1h buffer is configured to this size below; we slice the last 40 of it for candles1h.
+// TICKET-106 (TODO_CONFIRM): was 250 — TICKET-104 proved emaSeries()'s SMA-seeded EMA(200) is still
+// ~61% seed-weighted at 250 candles, making emaRatioSlow/momentumScore sensitive to exactly which
+// candles land in the window (this is what caused the live-vs-offline momentumScore mismatch).
+// Empirically converges by ~400; bumped to 500 for margin. MUST stay identical to backtest.ts's
+// WINDOW_1H_MOMENTUM — a mismatch here is exactly the root cause TICKET-104 found.
+// LiveCandleFeed's own 1h buffer is configured to this size below; we slice the last 40 of it for candles1h.
+const WINDOW_1H_MOMENTUM = 500;
 
 /** Per-open-position bookkeeping needed to keep the exchange's real algo orders in sync with the simulated ManagedPositionState. */
 interface LiveOrderIds {
@@ -149,7 +155,7 @@ async function main(): Promise<void> {
   const feed = new LiveCandleFeed({
     symbols: SYMBOLS,
     baseUrl: envConfig.baseUrl,
-    windowSizes: { '1h': WINDOW_1H_MOMENTUM }, // covers both candles1h (last 40) and candles1hMomentum (full 250) from the SAME buffer
+    windowSizes: { '1h': WINDOW_1H_MOMENTUM }, // covers both candles1h (last 40) and candles1hMomentum (full 500) from the SAME buffer
     onError: (err, symbol, interval) => console.error(`[FEED_ERROR] ${symbol} ${interval}: ${err.message}`),
     onGapFilled: (symbol, interval, gaps) => console.log(`[FEED] ${symbol} ${interval}: đã vá ${gaps.length} khoảng trống`),
     onThrottled: (symbol, interval) => console.warn(`[FEED_THROTTLE] ${symbol} ${interval}: bỏ qua poll (gần chạm ngưỡng weight)`),
@@ -372,7 +378,14 @@ async function main(): Promise<void> {
 
   const tickTimer = setInterval(() => void tick(), TICK_INTERVAL_MS);
 
-  // TICKET-077 Phần D — safety-net reconciliation, log-only, never auto-corrects (per its own design).
+  // TICKET-077 Phần D — safety-net reconciliation. stateReconciler.ts ITSELF stays pure/log-only (its
+  // own design principle, unchanged — it never writes anything, only reports). TICKET-102: the CALLER
+  // here now acts on BALANCE_MISMATCH specifically — every other mismatch type (position missing/side/
+  // size) stays log-only exactly as before, since those can come from several different real causes
+  // (manual trade, bot bug, SL/TP filled but not yet observed) that must NOT be silently auto-resolved.
+  // Balance is different: there is only ever ONE correct number (the exchange's), so once a mismatch is
+  // confirmed, overwriting accountBalance from the stale internal value is unambiguously correct —
+  // every size/risk$/Telegram calculation downstream must use the real number, not a drifted one.
   const reconciler = new StateReconciler({
     executor,
     getInternalState: (): InternalStateSnapshot => ({
@@ -384,6 +397,17 @@ async function main(): Promise<void> {
     onMismatch: (result) => {
       console.warn(`[RECONCILE_MISMATCH] ${result.mismatches.length} lệch được phát hiện:`);
       for (const m of result.mismatches) console.warn(`  - ${m.type}: ${m.detail}`);
+
+      // TICKET-102 — ưu tiên cao nhất: BALANCE_MISMATCH không chỉ log, ghi đè NGAY accountBalance
+      // bằng đúng số Sàn (result.exchangeBalanceUsd) trước khi tick tiếp theo dùng số này để tính
+      // size/risk$/gửi Telegram. resolveAccountBalanceAfterReconcile() là hàm thuần (testable riêng),
+      // trả về currentBalance không đổi nếu không có BALANCE_MISMATCH.
+      const oldBalance = accountBalance;
+      accountBalance = resolveAccountBalanceAfterReconcile(accountBalance, result);
+      if (accountBalance !== oldBalance) {
+        console.warn(`[RECONCILE_BALANCE_OVERRIDE] accountBalance ghi đè theo đúng số Sàn: $${oldBalance.toFixed(2)} → $${accountBalance.toFixed(2)}`);
+      }
+
       console.log(`[SUMMARY] regimeChangeCount=${regimeChangeCount}, willOpenCount(dryRun)=${willOpenCount}, tickErrorCount=${tickErrorCount}`);
     },
     onClean: () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { StateReconciler, compareStates, type InternalStateSnapshot, type ExchangePositionSnapshot } from './stateReconciler.js';
+import { StateReconciler, compareStates, resolveAccountBalanceAfterReconcile, type InternalStateSnapshot, type ExchangePositionSnapshot, type ReconciliationResult } from './stateReconciler.js';
 
 function makeExecutor(accountInfo: unknown, positionRisk: unknown) {
   return {
@@ -62,6 +62,38 @@ describe('compareStates', () => {
     const mismatches = compareStates(500, exchangePositions, internal, 0.01, 1e-8);
     const types = mismatches.map((m) => m.type).sort();
     expect(types).toEqual(['BALANCE_MISMATCH', 'POSITION_MISSING_INTERNALLY', 'POSITION_MISSING_ON_EXCHANGE'].sort());
+  });
+});
+
+describe('resolveAccountBalanceAfterReconcile (TICKET-102)', () => {
+  function makeResult(mismatches: ReconciliationResult['mismatches'], exchangeBalanceUsd: number): ReconciliationResult {
+    return { timestamp: 0, mismatches, exchangeBalanceUsd, internalBalanceUsd: 0, exchangePositions: [], internalPositions: [] };
+  }
+
+  it('overrides with the exchange balance when BALANCE_MISMATCH is present', () => {
+    const result = makeResult([{ type: 'BALANCE_MISMATCH', detail: 'Sàn=900.00 USD, nội bộ=1000.00 USD, lệch=100.00 USD' }], 900);
+    expect(resolveAccountBalanceAfterReconcile(1000, result)).toBe(900);
+  });
+
+  it('leaves currentBalance unchanged when there is no BALANCE_MISMATCH', () => {
+    const result = makeResult([{ type: 'POSITION_MISSING_ON_EXCHANGE', detail: 'BTCUSDT: ...' }], 1000);
+    expect(resolveAccountBalanceAfterReconcile(1000, result)).toBe(1000);
+  });
+
+  it('leaves currentBalance unchanged when there are no mismatches at all', () => {
+    const result = makeResult([], 1000);
+    expect(resolveAccountBalanceAfterReconcile(1000, result)).toBe(1000);
+  });
+
+  it('overrides balance from a mixed mismatch list, ignoring the other mismatch types', () => {
+    const result = makeResult(
+      [
+        { type: 'BALANCE_MISMATCH', detail: 'Sàn=750.50 USD, nội bộ=1000.00 USD, lệch=249.50 USD' },
+        { type: 'POSITION_SIDE_MISMATCH', detail: 'XRPUSDT: sàn=SHORT, nội bộ=LONG' },
+      ],
+      750.5,
+    );
+    expect(resolveAccountBalanceAfterReconcile(1000, result)).toBe(750.5);
   });
 });
 

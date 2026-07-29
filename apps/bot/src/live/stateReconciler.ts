@@ -131,6 +131,19 @@ export function compareStates(
   return mismatches;
 }
 
+/**
+ * TICKET-102 — pure helper the CALLER (liveRunner.ts) uses to decide the corrected accountBalance
+ * after a reconcile result: BALANCE_MISMATCH means the internal number has drifted from reality —
+ * there is only ever ONE correct value (the exchange's), so returning `result.exchangeBalanceUsd`
+ * unambiguously fixes it. No BALANCE_MISMATCH present -> returns `currentBalance` unchanged. This
+ * module (StateReconciler/compareStates) itself stays pure/log-only per its original design — this
+ * function doesn't mutate anything, it's the caller's job to assign the returned value.
+ */
+export function resolveAccountBalanceAfterReconcile(currentBalance: number, result: ReconciliationResult): number {
+  const hasBalanceMismatch = result.mismatches.some((m) => m.type === 'BALANCE_MISMATCH');
+  return hasBalanceMismatch ? result.exchangeBalanceUsd : currentBalance;
+}
+
 /** Đối soát định kỳ — chỉ đọc (getAccountInfo/getPositionRisk luôn được phép, không bị chặn bởi dryRun) và log, không bao giờ ghi/sửa gì. */
 export class StateReconciler {
   private readonly config: Required<Pick<StateReconcilerConfig, 'executor' | 'getInternalState' | 'intervalMs' | 'balanceTolerancePct' | 'quantityTolerance' | 'setIntervalFn' | 'clearIntervalFn'>> &
