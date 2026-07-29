@@ -22,7 +22,7 @@ import { checkRiskPool, wouldExceedRiskPool, wouldExceedMaxTotalMargin, type Ope
 import {
   applyAtrTrailing,
   computeRealizedPnl,
-  computeTierGrossPnl,
+  computeTierNetPnl,
   isSlHitAtPrice,
   isTpHit,
   onCounterTrendTpHit,
@@ -796,7 +796,10 @@ export async function processCandle(
           side: position.side,
           tier: newlyFilledTier,
           closePercent: tier.closePercent,
-          pnlUsd: computeTierGrossPnl(position, newlyFilledTier),
+          // TICKET-107: was computeTierGrossPnl() (no fee deducted) — Telegram "Đã chốt X%" never
+          // matched Binance's real net number. computeTierNetPnl() subtracts an ESTIMATED
+          // proportional fee (workaround, not the root fix — see its own doc comment).
+          pnlUsd: computeTierNetPnl(position, newlyFilledTier),
           newSlPrice: position.currentSlPrice,
           remainingPercent: position.remainingPositionSize / position.positionSize,
           accountBalanceAfter: accountBalance,

@@ -414,6 +414,20 @@ export class BinanceOrderExecutor {
     return this.signedGet('/fapi/v2/positionRisk', symbol ? { symbol } : {});
   }
 
+  /**
+   * TICKET-107 — GET /fapi/v1/income: real REALIZED_PNL/COMMISSION/FUNDING_FEE entries Binance
+   * itself recorded, per symbol/time-window. Read-only, never gated by dryRun (same convention as
+   * getAccountInfo/getPositionRisk). Building block for reconciling Telegram PNL/accountBalance
+   * against the exchange's actual numbers instead of the hand-computed takerFeeRate-based estimate
+   * in computeRealizedPnl()/computeTierNetPnl() — NOT wired into any automatic override yet (see
+   * computeTierNetPnl's doc comment: attributing income entries to one specific logical position is
+   * ambiguous when config.maxConcurrentPositionsPerSymbol > 1, needs PM to confirm position mode
+   * first). `limit` caps the page size Binance returns (max 1000 per their docs).
+   */
+  async getIncome(symbol: string, startTime: number, endTime: number, limit = 1000): Promise<unknown> {
+    return this.signedGet('/fapi/v1/income', { symbol, startTime, endTime, limit });
+  }
+
   // --- Mutating endpoints (gated by dryRun) ---
 
   /**

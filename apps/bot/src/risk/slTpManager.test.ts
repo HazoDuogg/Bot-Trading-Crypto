@@ -3,6 +3,8 @@ import {
   computeBreakevenPlusFeeSlPrice,
   computeFeeBufferDollar,
   computeRealizedPnl,
+  computeTierGrossPnl,
+  computeTierNetPnl,
   onCounterTrendTpHit,
   onSlHit,
   onTp1Hit,
@@ -93,5 +95,25 @@ describe('computeRealizedPnl', () => {
     const closed = onSlHit(opened);
     // gross=990*(99.3-100)/100=-6.93; fees=0.792; net=-7.722
     expect(computeRealizedPnl(closed, closed.currentSlPrice)).toBeCloseTo(-7.722, 6);
+  });
+});
+
+// TICKET-107 — computeTierNetPnl: WORKAROUND fix for Telegram "Đã chốt X%" showing gross (no fee)
+// PNL that never matched Binance. Subtracts the same proportional-fee estimate computeRealizedPnl
+// already uses for the full-close number.
+describe('computeTierNetPnl', () => {
+  it('subtracts an estimated proportional fee (open+close leg) from the tier\'s gross P&L', () => {
+    const afterTp1 = onTp1Hit(openPosition(trendLongPlanA));
+    const gross = computeTierGrossPnl(afterTp1, 'TP1');
+    const net = computeTierNetPnl(afterTp1, 'TP1');
+    // gross=0.4*990*0.012=4.752; fee=0.4*990*0.0004*2=0.3168; net=4.4352
+    expect(gross).toBeCloseTo(4.752, 6);
+    expect(net).toBeCloseTo(4.4352, 6);
+    expect(net).toBeLessThan(gross);
+  });
+
+  it('throws for a tier that has no fixed price (TP3_RUNNER) same as computeTierGrossPnl', () => {
+    const opened = openPosition(trendLongPlanA);
+    expect(() => computeTierNetPnl(opened, 'TP3_RUNNER')).toThrow(/no fixed-price tier/);
   });
 });

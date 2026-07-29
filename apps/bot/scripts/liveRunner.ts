@@ -58,7 +58,7 @@ const TICK_INTERVAL_MS = 5_000; // how often we check "has a new 5m candle close
 // PM-confirmed backtest re-verification (see memory/project_official_backtest_config.md) — this file
 // only WIRES the already-decided config into a live loop, it doesn't decide the config.
 const CONFIG: OrchestratorConfig = {
-  entryRouterConfig: { ...DEFAULT_ENTRY_ROUTER_CONFIG, obSlBufferAtrMultiplier: 0.87 },
+  entryRouterConfig: { ...DEFAULT_ENTRY_ROUTER_CONFIG, obSlBufferAtrMultiplier: 0.87, macroTrendFilterEnabled: true },
   tpPlan: 'PLAN_A',
   takerFeeRate: 0.0004,
   riskDollarOrPercent: 15,

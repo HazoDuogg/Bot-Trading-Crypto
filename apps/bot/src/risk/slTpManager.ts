@@ -332,6 +332,30 @@ export function computeTierGrossPnl(state: ManagedPositionState, tierLabel: Fill
   return tier.closePercent * state.positionSize * ((tier.price - state.entryPrice) / state.entryPrice) * sideMultiplier;
 }
 
+/**
+ * TICKET-107 — WORKAROUND, not a root-cause fix: "Đã chốt X%" Telegram messages were showing
+ * computeTierGrossPnl()'s gross number with no fee deducted, which real users read as "money I
+ * actually got" and it never matched Binance. This subtracts an ESTIMATED proportional fee (open +
+ * close leg, same takerFeeRate assumption computeRealizedPnl() already uses for the full-close
+ * number) for just this tier's closed slice. Still an approximation: takerFeeRate is a configured
+ * constant (TODO_CONFIRM — needs PM to confirm the account's real fee tier/BNB-discount status),
+ * and this never reflects real slippage or funding fees. The correct root fix (pulling real
+ * commission from Binance, e.g. GET /fapi/v1/income) is tracked separately — see
+ * BinanceOrderExecutor.getIncome() — not wired in here yet because attributing income entries to a
+ * specific logical position is ambiguous when config.maxConcurrentPositionsPerSymbol allows more
+ * than one open position on the same symbol at once (needs PM confirmation of position mode before
+ * it's safe to auto-apply).
+ */
+export function computeTierNetPnl(state: ManagedPositionState, tierLabel: FilledTier): number {
+  const tier = state.tpLevels.find((t) => t.label === tierLabel);
+  if (!tier || tier.price === null) {
+    throw new Error(`SlTpManager: no fixed-price tier '${tierLabel}' on this position`);
+  }
+  const grossPnl = computeTierGrossPnl(state, tierLabel);
+  const estimatedFee = tier.closePercent * state.positionSize * state.takerFeeRate * 2;
+  return grossPnl - estimatedFee;
+}
+
 export function computeRealizedPnl(state: ManagedPositionState, finalExitPrice: number): number {
   const sideMultiplier = state.side === 'LONG' ? 1 : -1;
   let grossPnl = 0;

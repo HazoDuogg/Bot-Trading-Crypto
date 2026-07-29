@@ -185,7 +185,8 @@ describe('processCandle — Step 3: managing an already-open TREND position', ()
       side: 'LONG',
       tier: 'TP1',
       closePercent: 0.4, // PLAN_A tp1Pct
-      pnlUsd: 0.4 * 990 * ((101.2 - 100) / 100), // gross, no fee — matches computeTierGrossPnl's own formula
+      // TICKET-107: was gross (no fee); now net of an estimated proportional fee (computeTierNetPnl).
+      pnlUsd: 0.4 * 990 * ((101.2 - 100) / 100) - 0.4 * 990 * 0.0004 * 2,
       remainingPercent: 0.6, // 1 - tp1Pct
       accountBalanceAfter: 400, // unchanged — PNL not credited until full close
     });

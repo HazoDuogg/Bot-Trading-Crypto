@@ -89,6 +89,42 @@ describe('BinanceOrderExecutor — dryRun (default)', () => {
   });
 });
 
+describe('BinanceOrderExecutor — TICKET-107: getIncome (GET /fapi/v1/income)', () => {
+  it('is NOT gated by dryRun (read-only, same convention as getAccountInfo/getPositionRisk)', async () => {
+    const incomeRows = [
+      { symbol: 'BTCUSDT', incomeType: 'REALIZED_PNL', income: '4.4352', asset: 'USDT', time: 1700000005000 },
+      { symbol: 'BTCUSDT', incomeType: 'COMMISSION', income: '-0.3168', asset: 'USDT', time: 1700000005000 },
+    ];
+    const fetchFn = vi.fn().mockResolvedValueOnce(jsonResponse(200, incomeRows));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, fetchFn }); // dryRun defaults true
+    const result = await exec.getIncome('BTCUSDT', 1700000000000, 1700000010000);
+    expect(result).toEqual(incomeRows);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    const url = fetchFn.mock.calls[0][0] as string;
+    expect(url).toContain('/fapi/v1/income?');
+    expect(url).toContain('symbol=BTCUSDT');
+    expect(url).toContain('startTime=1700000000000');
+    expect(url).toContain('endTime=1700000010000');
+    expect(url).toContain('limit=1000');
+  });
+
+  it('defaults limit to 1000 but accepts an override', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(jsonResponse(200, []));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, fetchFn });
+    await exec.getIncome('ETHUSDT', 1000, 2000, 50);
+    const url = fetchFn.mock.calls[0][0] as string;
+    expect(url).toContain('limit=50');
+  });
+
+  it('retries on 429 like every other signed GET', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(jsonResponse(429, {})).mockResolvedValueOnce(jsonResponse(200, []));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, fetchFn });
+    const result = await exec.getIncome('SOLUSDT', 0, 1);
+    expect(result).toEqual([]);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('BinanceOrderExecutor — syncClock', () => {
   it('computes the offset from server time and applies it to subsequent signed timestamps', async () => {
     vi.useFakeTimers();
