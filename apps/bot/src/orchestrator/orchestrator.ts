@@ -170,6 +170,32 @@ export interface SetupNotFiredDiagnostic {
   adxDirection1h: 'UP' | 'DOWN' | 'FLAT' | undefined;
 }
 
+/**
+ * TICKET-109 — diagnostic-only payload for EVERY momentum-gate score computed, both PASSED and
+ * REJECTED (unlike OpenTradeEvent, which only ever shows the eventual accepted trade). Fires at the
+ * two existing gate points that already compute a score + pass/fail every relevant step:
+ * tryMomentumDirect() (both LONG and SHORT scored every call) and the NEUTRAL_TRANSITION regime's
+ * mandatory momentum gate (routeEntry()'s own DraftSetup.side only). Same pattern as
+ * ManipulatedDiagnostic/DangerZoneDiagnostic/SetupNotFiredDiagnostic above — pure pass-through, never
+ * read here, never affects any decision. Only built/delivered when the caller passes
+ * onMomentumGateEvaluation to processCandle.
+ */
+export interface MomentumGateEvaluation {
+  symbol: string;
+  timestamp: number;
+  side: 'LONG' | 'SHORT';
+  gateType: 'MOMENTUM_DIRECT' | 'NEUTRAL_TRANSITION';
+  /** Underlying DraftSetup setupType: always 'MOMENTUM_DIRECT' for gateType='MOMENTUM_DIRECT'; one of OB/FVG/BOX_BREAKOUT/SWEEP for gateType='NEUTRAL_TRANSITION' (routeEntry() never builds a NEUTRAL_TRANSITION DraftSetup with setupType='MOMENTUM_DIRECT' — that path is handled entirely by tryMomentumDirect()). */
+  setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP' | 'MOMENTUM_DIRECT';
+  score: number;
+  threshold: number;
+  passed: boolean;
+  /** The candle close price at this timestamp — the hypothetical entry if this candidate had been taken. */
+  entryPriceCandidate: number;
+  /** The SL price this candidate WOULD have used, computed via the exact same existing formula the real setup uses for this gateType (never a new formula). */
+  slPriceCandidate: number;
+}
+
 function touchesFavorable(side: 'LONG' | 'SHORT', candle: CandleData, price: number): boolean {
   return side === 'LONG' ? isTpHit(side, candle.high, price) : isTpHit(side, candle.low, price);
 }
@@ -353,6 +379,29 @@ const MOMENTUM_DIRECT_BLOCKED_REGIMES: readonly MarketRegime[] = [
 ];
 
 /**
+ * TICKET-109 — extracted verbatim from tryMomentumDirect()'s inline SL computation below (no
+ * behavior change to the real path) so the same exact formula can also produce a hypothetical SL
+ * price for the diagnostic-only MomentumGateEvaluation of the SIDE THAT DIDN'T become the actual
+ * candidate (tryMomentumDirect only ever computed this for its one chosen `side` before this ticket).
+ */
+function computeMomentumDirectSlPrice(side: 'LONG' | 'SHORT', entryPrice: number, currentCandle: CandleData, atr: number, config: OrchestratorConfig): number {
+  // Sweep-style SL: nearest extreme point (current candle's own low/high, since MOMENTUM_DIRECT has
+  // no OB/FVG/Sweep zone to anchor to) ± ATR buffer.
+  const rawSlPrice = side === 'LONG' ? currentCandle.low : currentCandle.high;
+  const buffer = EntryConfig.SL_BUFFER_ATR_MULTIPLIER * atr;
+  let slPrice = side === 'LONG' ? rawSlPrice - buffer : rawSlPrice + buffer;
+
+  // TICKET-064 Phần A — widen the SL out to momentumDirectMinSlPercent when the ATR-based distance
+  // is narrower than that floor; leave it untouched when it's already wider.
+  const rawSlDistancePercent = (Math.abs(entryPrice - slPrice) / entryPrice) * 100;
+  if (rawSlDistancePercent < config.momentumDirectMinSlPercent) {
+    const flooredDistance = (config.momentumDirectMinSlPercent / 100) * entryPrice;
+    slPrice = side === 'LONG' ? entryPrice - flooredDistance : entryPrice + flooredDistance;
+  }
+  return slPrice;
+}
+
+/**
  * TICKET-059 Phần B — the AI momentum score used DIRECTLY as an entry signal, independent of
  * OB/FVG/Sweep/Box Breakout/MSS. Only ever tried by the caller when routeEntry()'s cascade already
  * returned null for this candle (see tryOpenNewPosition below) — never replaces or short-circuits it.
@@ -366,6 +415,7 @@ async function tryMomentumDirect(
   currentCandle: CandleData,
   macroDirection: 'UP' | 'DOWN' | 'FLAT' | undefined,
   circuitBreakerState: { LONG: MomentumDirectCircuitBreakerSideState; SHORT: MomentumDirectCircuitBreakerSideState },
+  onMomentumGateEvaluation: ((evaluation: MomentumGateEvaluation) => void) | undefined,
 ): Promise<DraftSetup | null> {
   if (MOMENTUM_DIRECT_BLOCKED_REGIMES.includes(regimeOutput.regime)) return null;
 
@@ -389,6 +439,46 @@ async function tryMomentumDirect(
   const shortScore = await scoreMomentumForSide('SHORT', input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection, input.correlatedRiskRatio, config);
   const longPasses = longScore !== undefined && detectMomentumDirect(longScore, 'LONG', config.momentumDirectThreshold);
   const shortPasses = shortScore !== undefined && detectMomentumDirect(shortScore, 'SHORT', config.momentumDirectThreshold);
+
+  // TICKET-109 — fire for EVERY score actually computed this call (both LONG and SHORT), passed or
+  // rejected, BEFORE any of the early returns below — this is the "runs regardless of outcome"
+  // capture point. Diagnostic-only: reading atr here just for the hypothetical SL candidate does not
+  // change anything the real code below still independently (re)checks.
+  if (onMomentumGateEvaluation) {
+    const gateAtr = lastDefined(wilderATRSeries(input.candles5m, RegimeConfig.ATR_PERIOD_5M));
+    if (gateAtr !== undefined) {
+      const entryPriceCandidate = currentCandle.close;
+      if (longScore !== undefined) {
+        onMomentumGateEvaluation({
+          symbol: input.symbol,
+          timestamp: currentCandle.timestamp,
+          side: 'LONG',
+          gateType: 'MOMENTUM_DIRECT',
+          setupType: 'MOMENTUM_DIRECT',
+          score: longScore,
+          threshold: config.momentumDirectThreshold,
+          passed: longPasses,
+          entryPriceCandidate,
+          slPriceCandidate: computeMomentumDirectSlPrice('LONG', entryPriceCandidate, currentCandle, gateAtr, config),
+        });
+      }
+      if (shortScore !== undefined) {
+        onMomentumGateEvaluation({
+          symbol: input.symbol,
+          timestamp: currentCandle.timestamp,
+          side: 'SHORT',
+          gateType: 'MOMENTUM_DIRECT',
+          setupType: 'MOMENTUM_DIRECT',
+          score: shortScore,
+          threshold: config.momentumDirectThreshold,
+          passed: shortPasses,
+          entryPriceCandidate,
+          slPriceCandidate: computeMomentumDirectSlPrice('SHORT', entryPriceCandidate, currentCandle, gateAtr, config),
+        });
+      }
+    }
+  }
+
   if (!longPasses && !shortPasses) return null;
 
   // Both sides rarely pass at once (opposite-direction models scoring the same candle) — if they
@@ -424,21 +514,9 @@ async function tryMomentumDirect(
   if (atr === undefined) return null; // not enough 5m history to size the SL buffer
 
   const entryPrice = currentCandle.close;
-  // Sweep-style SL: nearest extreme point (current candle's own low/high, since MOMENTUM_DIRECT has
-  // no OB/FVG/Sweep zone to anchor to) ± ATR buffer.
-  const rawSlPrice = side === 'LONG' ? currentCandle.low : currentCandle.high;
-  const buffer = EntryConfig.SL_BUFFER_ATR_MULTIPLIER * atr;
-  let slPrice = side === 'LONG' ? rawSlPrice - buffer : rawSlPrice + buffer;
-
-  // TICKET-064 Phần A — TICKET-063 found the raw ATR-based SL is often so narrow that the fixed
-  // 2-way taker fee eats a disproportionate share of it (median 32.64% of SL distance). Widen the
-  // SL out to momentumDirectMinSlPercent when the ATR-based distance is narrower than that floor;
-  // leave it untouched when it's already wider.
-  const rawSlDistancePercent = (Math.abs(entryPrice - slPrice) / entryPrice) * 100;
-  if (rawSlDistancePercent < config.momentumDirectMinSlPercent) {
-    const flooredDistance = (config.momentumDirectMinSlPercent / 100) * entryPrice;
-    slPrice = side === 'LONG' ? entryPrice - flooredDistance : entryPrice + flooredDistance;
-  }
+  // TICKET-109: extracted to computeMomentumDirectSlPrice() (verbatim, same formula) so the
+  // diagnostic-only MomentumGateEvaluation above can reuse it for the non-chosen side too.
+  const slPrice = computeMomentumDirectSlPrice(side, entryPrice, currentCandle, atr, config);
 
   // TICKET-064 Phần B — replaces the old fixed 0.5% TP (EntryConfig.MOMENTUM_DIRECT_TP_PCT, removed
   // by this ticket) with an R-multiple of the (possibly floored) SL distance above, reusing
@@ -483,6 +561,7 @@ async function tryOpenNewPosition(
   onFunnelEvent: FunnelCallback | undefined,
   onSetupNotFiredDiagnostic: ((diagnostic: SetupNotFiredDiagnostic) => void) | undefined,
   circuitBreakerState: { LONG: MomentumDirectCircuitBreakerSideState; SHORT: MomentumDirectCircuitBreakerSideState },
+  onMomentumGateEvaluation: ((evaluation: MomentumGateEvaluation) => void) | undefined,
 ): Promise<EntryAttemptResult> {
   // TICKET-017 Phần A: same direction function as adxDirection1h, applied to 1D candles instead.
   const macroDirectionSeries = wilderDIDirectionSeries(input.candles1d, EntryConfig.MACRO_TREND_ADX_PERIOD_1D);
@@ -526,7 +605,7 @@ async function tryOpenNewPosition(
   // straight through to the early return below, byte-identical to every ticket before this one.
   let effectiveDraftSetup: DraftSetup | null = draftSetup;
   if (effectiveDraftSetup === null && config.momentumDirectEnabled) {
-    effectiveDraftSetup = await tryMomentumDirect(input, config, regimeOutput, currentCandle, macroDirection, circuitBreakerState);
+    effectiveDraftSetup = await tryMomentumDirect(input, config, regimeOutput, currentCandle, macroDirection, circuitBreakerState, onMomentumGateEvaluation);
   }
 
   if (effectiveDraftSetup === null) return { event: null, newEntry: null };
@@ -548,6 +627,26 @@ async function tryOpenNewPosition(
     // Missing score (insufficient EMA/ATR history) -> gateScore undefined -> comparison is false ->
     // rejected, same as an explicit low score. Never defaults to passing (PM's explicit "an toàn" requirement).
     const gatePassed = gateScore !== undefined && gateScore >= config.neutralTransitionGateConfig.neutralTransitionMomentumGateThreshold;
+
+    // TICKET-109 — diagnostic-only, fires whenever a score was actually computed (same guard as
+    // the MOMENTUM_DIRECT capture point above). entryPriceCandidate/slPriceCandidate reuse
+    // effectiveDraftSetup's own entryPrice/slPrice verbatim — routeEntry() already computed them via
+    // this setupType's real OB/FVG/Sweep/Box-Breakout + ATR-buffer formula, no new formula here.
+    if (onMomentumGateEvaluation && gateScore !== undefined) {
+      onMomentumGateEvaluation({
+        symbol: input.symbol,
+        timestamp: currentCandle.timestamp,
+        side: effectiveDraftSetup.side,
+        gateType: 'NEUTRAL_TRANSITION',
+        setupType: effectiveDraftSetup.setupType,
+        score: gateScore,
+        threshold: config.neutralTransitionGateConfig.neutralTransitionMomentumGateThreshold,
+        passed: gatePassed,
+        entryPriceCandidate: effectiveDraftSetup.entryPrice,
+        slPriceCandidate: effectiveDraftSetup.slPrice,
+      });
+    }
+
     if (!gatePassed) {
       return {
         event: { type: 'SKIPPED', symbol: input.symbol, timestamp: currentCandle.timestamp, reason: 'NEUTRAL_GATE_REJECTED' },
@@ -713,6 +812,10 @@ export async function processCandle(
   // — never read here, never affects any decision. Lets a caller (e.g. Telegram notifications) show
   // the metrics behind a regime confirmation/change without recomputing detectRegime() itself.
   onRegimeMetrics?: (computedMetrics: ComputedMetrics) => void,
+  // TICKET-109 — pure pass-through, fires for EVERY momentum-gate score computed this call (both
+  // MOMENTUM_DIRECT sides + NEUTRAL_TRANSITION's own gate), passed AND rejected — never read here,
+  // never affects any decision. See MomentumGateEvaluation's own doc comment.
+  onMomentumGateEvaluation?: (evaluation: MomentumGateEvaluation) => void,
 ): Promise<ProcessCandleResult> {
   // Step 1 — regime, always runs.
   const regimeOutput = detectRegime({
@@ -865,6 +968,7 @@ export async function processCandle(
       onFunnelEvent,
       onSetupNotFiredDiagnostic,
       circuitBreakerState,
+      onMomentumGateEvaluation,
     );
     if (event) events.push(event);
     if (newEntry) remainingPositions.push(newEntry);
