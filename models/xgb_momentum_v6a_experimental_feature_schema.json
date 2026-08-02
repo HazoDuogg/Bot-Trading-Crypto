@@ -1,0 +1,14 @@
+{
+  "numeric_features": [
+    "atrPercentile5m",
+    "bbWidthPercentile15m"
+  ],
+  "categorical_feature_order": [],
+  "categorical_features": {},
+  "missing_categorical_value": null,
+  "feature_order": [
+    "atrPercentile5m",
+    "bbWidthPercentile15m"
+  ],
+  "monotone_constraints": null
+}
