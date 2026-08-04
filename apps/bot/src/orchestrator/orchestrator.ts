@@ -14,6 +14,7 @@ import { detectMomentumDirect } from '../entry/momentumDirect.js';
 import type { DraftSetup, FunnelCallback } from '../entry/types.js';
 import { detectSwingPoints, latestSwingPointBefore } from '../entry/detectors/swingPoints.js';
 import { computeDirection5m, type Direction5m } from './neutral5mDirectionSelector.js';
+import { computeDirection5mRelaxed } from './neutral5mDirectionGatedRouting.js';
 import { buildFeatureVector, computeMomentumCrossFeatures, loadFeatureSchema, type FeatureSchema } from '../xgbFilter/featureBuilder.js';
 import { scoreMomentum } from '../xgbFilter/momentumScorer.js';
 import { computeMomentumMultiplier } from '../xgbFilter/momentumMultiplier.js';
@@ -214,6 +215,30 @@ export interface MomentumGateEvaluation {
    * "candidates the selector actually rejected" from "candidates the AI gate itself rejected".
    */
   rejectedByDirectionSelector?: boolean;
+  /**
+   * TICKET-131 — diagnostic-only pass-through of the RELAXED (2-of-2 EMA+DI) Neutral 5m
+   * Direction-Gated Routing verdict at this call site (gateType='NEUTRAL_TRANSITION' rows only,
+   * setupType one of OB/FVG/BOX_BREAKOUT/SWEEP). `undefined` whenever the routing is inactive
+   * (config.neutral5mDirectionGatedRoutingEnabled !== true, or regime !== NEUTRAL_TRANSITION, or the
+   * candidate is MOMENTUM_DIRECT — this routing never applies to that setupType). Never itself read by
+   * any decision logic here — only for offline report breakdowns (distinguishing candidates blocked by
+   * NONE vs blocked by side mismatch vs let through).
+   */
+  direction5mGatedRouting?: Direction5m;
+  /**
+   * TICKET-131 — diagnostic-only: true when this candidate's own side matched direction5mGatedRouting
+   * and it was let through to the (unmodified) AI momentum gate check below; false when it was
+   * rejected by the new routing logic itself (direction5m===NONE, or direction5m disagreed with this
+   * candidate's side) before ever reaching that AI gate. Always undefined when the routing is inactive.
+   */
+  neutral5mRoutingAccepted?: boolean;
+  /**
+   * TICKET-131 — diagnostic-only pass-through of neutral5mDirectionGatedRouting.ts's structural break
+   * sub-computation, which NEVER affects direction5mGatedRouting's own verdict (structure is
+   * diagnostic-only for this ticket, unlike TICKET-130 where it's a hard 3rd requirement). Undefined
+   * whenever direction5mGatedRouting itself is undefined.
+   */
+  structuralBreakDiagnostic5m?: Direction5m;
 }
 
 function touchesFavorable(side: 'LONG' | 'SHORT', candle: CandleData, price: number): boolean {
@@ -696,8 +721,56 @@ async function tryOpenNewPosition(
   // own NEUTRAL_TRANSITION cascade path, a different mechanism from MOMENTUM_DIRECT's own threshold
   // check (tryMomentumDirect already applied its own gating above).
   if (effectiveDraftSetup.regime === MarketRegime.NEUTRAL_TRANSITION && effectiveDraftSetup.setupType !== 'MOMENTUM_DIRECT') {
+    // TICKET-131 — diagnostic values threaded through to the existing gateScore capture below (only
+    // ever set when neutral5mDirectionGatedRoutingEnabled===true AND the candidate was actually let
+    // through by the new routing path, i.e. neutralTransitionTradingEnabled was false but direction5m
+    // agreed with this candidate's side). Stay undefined on every other path (routing disabled, or
+    // neutralTransitionTradingEnabled itself already true — the original production-config path).
+    let direction5mGatedRoutingDiag: Direction5m | undefined;
+    let structuralBreakDiagnostic5mDiag: Direction5m | undefined;
+    let neutral5mRoutingAcceptedDiag: boolean | undefined;
+
     if (!config.neutralTransitionGateConfig.neutralTransitionTradingEnabled) {
-      return { event: null, newEntry: null };
+      // TICKET-131 — opt-in ALTERNATE way past this early-return, additional to (never a replacement
+      // for) neutralTransitionGateConfig.neutralTransitionTradingEnabled, whose own value is NEVER
+      // written to anywhere in this ticket. Only ever consulted when the flag is explicitly true.
+      let routingAccepted = false;
+      if (config.neutral5mDirectionGatedRoutingEnabled === true) {
+        const relaxed = computeDirection5mRelaxed(input.candles5m, input.candles1m);
+        direction5mGatedRoutingDiag = relaxed.direction5m;
+        structuralBreakDiagnostic5mDiag = relaxed.structuralBreakDiagnostic;
+        // direction5m===NONE never matches 'LONG'/'SHORT' -> naturally rejected, same as a side mismatch.
+        routingAccepted = relaxed.direction5m === effectiveDraftSetup.side;
+        neutral5mRoutingAcceptedDiag = routingAccepted;
+      }
+
+      if (!routingAccepted) {
+        // TICKET-131 — diagnostic-only: this candidate never reaches the AI gateScore check below (no
+        // score computed), so it needs its own capture point here, distinct from the TICKET-109 one.
+        // Only fires when the routing was actually active (direction5mGatedRoutingDiag !== undefined) —
+        // never fires on the byte-identical-to-before-this-ticket disabled path.
+        if (onMomentumGateEvaluation && direction5mGatedRoutingDiag !== undefined) {
+          onMomentumGateEvaluation({
+            symbol: input.symbol,
+            timestamp: currentCandle.timestamp,
+            side: effectiveDraftSetup.side,
+            gateType: 'NEUTRAL_TRANSITION',
+            setupType: effectiveDraftSetup.setupType,
+            score: 0,
+            threshold: 0,
+            passed: false,
+            entryPriceCandidate: effectiveDraftSetup.entryPrice,
+            slPriceCandidate: effectiveDraftSetup.slPrice,
+            regime: regimeOutput.regime,
+            direction5mGatedRouting: direction5mGatedRoutingDiag,
+            neutral5mRoutingAccepted: neutral5mRoutingAcceptedDiag,
+            structuralBreakDiagnostic5m: structuralBreakDiagnostic5mDiag,
+          });
+        }
+        return { event: null, newEntry: null };
+      }
+      // direction5m agreed with this candidate's side — falls through to the SAME unmodified AI gate
+      // check below (gateScore/gatePassed), never bypassing, weakening, or duplicating that check.
     }
     const gateScore = await scoreMomentumForSide(effectiveDraftSetup.side, input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection, input.correlatedRiskRatio, config);
     // Missing score (insufficient EMA/ATR history) -> gateScore undefined -> comparison is false ->
@@ -708,6 +781,8 @@ async function tryOpenNewPosition(
     // the MOMENTUM_DIRECT capture point above). entryPriceCandidate/slPriceCandidate reuse
     // effectiveDraftSetup's own entryPrice/slPrice verbatim — routeEntry() already computed them via
     // this setupType's real OB/FVG/Sweep/Box-Breakout + ATR-buffer formula, no new formula here.
+    // TICKET-131: also carries direction5mGatedRoutingDiag/etc pass-through (undefined unless this
+    // exact candidate reached here via the new routing path above).
     if (onMomentumGateEvaluation && gateScore !== undefined) {
       onMomentumGateEvaluation({
         symbol: input.symbol,
@@ -721,6 +796,9 @@ async function tryOpenNewPosition(
         entryPriceCandidate: effectiveDraftSetup.entryPrice,
         slPriceCandidate: effectiveDraftSetup.slPrice,
         regime: regimeOutput.regime,
+        direction5mGatedRouting: direction5mGatedRoutingDiag,
+        neutral5mRoutingAccepted: neutral5mRoutingAcceptedDiag,
+        structuralBreakDiagnostic5m: structuralBreakDiagnostic5mDiag,
       });
     }
 

@@ -160,6 +160,12 @@ function parseArgs(): {
    * undefined/false — fully inert, byte-identical to every ticket before this one.
    */
   neutral5mDirectionSelectorEnabled: boolean;
+  /**
+   * TICKET-131 — opt-in, default-inert Neutral 5m Direction-Gated Setup Routing CLI flag. `false`
+   * (default, or the flag omitted entirely) means OrchestratorConfig.neutral5mDirectionGatedRoutingEnabled
+   * stays undefined/false — fully inert, byte-identical to every ticket before this one.
+   */
+  neutral5mDirectionGatedRoutingEnabled: boolean;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -201,6 +207,7 @@ function parseArgs(): {
   const oodGuardScoreCapArg = args.find((a) => a.startsWith('--ood-guard-score-cap='));
   const oodGuardRiskReductionMultiplierArg = args.find((a) => a.startsWith('--ood-guard-risk-reduction-multiplier='));
   const neutral5mDirectionSelectorEnabledArg = args.find((a) => a.startsWith('--neutral-5m-direction-selector-enabled='));
+  const neutral5mDirectionGatedRoutingEnabledArg = args.find((a) => a.startsWith('--neutral-5m-direction-gated-routing-enabled='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -286,6 +293,8 @@ function parseArgs(): {
     oodGuardRiskReductionMultiplier: oodGuardRiskReductionMultiplierArg ? Number(oodGuardRiskReductionMultiplierArg.split('=')[1]) : 1.0,
     // TICKET-130: off by default — matches OrchestratorConfig.neutral5mDirectionSelectorEnabled's default.
     neutral5mDirectionSelectorEnabled: neutral5mDirectionSelectorEnabledArg ? neutral5mDirectionSelectorEnabledArg.split('=')[1] === 'true' : false,
+    // TICKET-131: off by default — matches OrchestratorConfig.neutral5mDirectionGatedRoutingEnabled's default.
+    neutral5mDirectionGatedRoutingEnabled: neutral5mDirectionGatedRoutingEnabledArg ? neutral5mDirectionGatedRoutingEnabledArg.split('=')[1] === 'true' : false,
   };
 }
 
@@ -463,9 +472,10 @@ async function main(): Promise<void> {
     oodGuardScoreCap,
     oodGuardRiskReductionMultiplier,
     neutral5mDirectionSelectorEnabled,
+    neutral5mDirectionGatedRoutingEnabled,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}, momentumModelVersion=${momentumModelVersion}, modelMode=${modelMode}, maxTotalMarginPct=${maxTotalMarginPct !== undefined ? `${(maxTotalMarginPct * 100).toFixed(1)}%` : '(không giới hạn)'}, oodGuardMode=${oodGuardMode}, oodGuardEmaRatioSlowThreshold=${oodGuardEmaRatioSlowThreshold}, oodGuardScoreCap=${oodGuardScoreCap}, oodGuardRiskReductionMultiplier=${oodGuardRiskReductionMultiplier}, neutral5mDirectionSelectorEnabled=${neutral5mDirectionSelectorEnabled}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}, momentumModelVersion=${momentumModelVersion}, modelMode=${modelMode}, maxTotalMarginPct=${maxTotalMarginPct !== undefined ? `${(maxTotalMarginPct * 100).toFixed(1)}%` : '(không giới hạn)'}, oodGuardMode=${oodGuardMode}, oodGuardEmaRatioSlowThreshold=${oodGuardEmaRatioSlowThreshold}, oodGuardScoreCap=${oodGuardScoreCap}, oodGuardRiskReductionMultiplier=${oodGuardRiskReductionMultiplier}, neutral5mDirectionSelectorEnabled=${neutral5mDirectionSelectorEnabled}, neutral5mDirectionGatedRoutingEnabled=${neutral5mDirectionGatedRoutingEnabled}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -551,6 +561,10 @@ async function main(): Promise<void> {
     // tryMomentumDirect() never even calls computeDirection5m() — fully inert, matching every ticket
     // before this one exactly.
     ...(neutral5mDirectionSelectorEnabled ? { neutral5mDirectionSelectorEnabled: true } : {}),
+    // TICKET-131: false (default) omits the field entirely -> undefined, orchestrator.ts's
+    // tryOpenNewPosition() never even calls computeDirection5mRelaxed() — fully inert, matching every
+    // ticket before this one exactly. Never sets/touches neutralTransitionGateConfig.neutralTransitionTradingEnabled.
+    ...(neutral5mDirectionGatedRoutingEnabled ? { neutral5mDirectionGatedRoutingEnabled: true } : {}),
   };
   // TICKET-123: fail-loud proof-of-model-in-use for the report — check file existence explicitly
   // here (in addition to orchestrator.ts's own throw-on-load-failure) so a missing V7_RAW artifact
@@ -606,6 +620,23 @@ async function main(): Promise<void> {
     passed: boolean;
     direction5m: 'LONG' | 'SHORT' | 'NONE' | undefined;
     rejectedByDirectionSelector: boolean;
+  }[] = [];
+
+  // TICKET-131 — diagnostic-only accumulator: every NEUTRAL_TRANSITION gate evaluation touched by the
+  // new Direction-Gated Routing (both the routing-decision-only rows for rejected candidates, score=0,
+  // and the real gateScore rows for candidates the routing let through), same pass-through-callback
+  // pattern as TICKET-130's neutralDirectionSelectorEvaluations above. Only meaningful when
+  // neutral5mDirectionGatedRoutingEnabled is true. Never read by any decision logic.
+  const neutral5mGatedRoutingEvaluations: {
+    symbol: string;
+    timestamp: number;
+    side: 'LONG' | 'SHORT';
+    setupType: 'OB' | 'FVG' | 'BOX_BREAKOUT' | 'SWEEP' | 'MOMENTUM_DIRECT';
+    score: number;
+    passed: boolean;
+    direction5mGatedRouting: 'LONG' | 'SHORT' | 'NONE' | undefined;
+    neutral5mRoutingAccepted: boolean | undefined;
+    structuralBreakDiagnostic5m: 'LONG' | 'SHORT' | 'NONE' | undefined;
   }[] = [];
   const manipulatedLogLines: string[] = []; // TICKET-027
   const dangerZoneLogLines: string[] = []; // TICKET-033
@@ -792,6 +823,22 @@ async function main(): Promise<void> {
               rejectedByDirectionSelector: evaluation.rejectedByDirectionSelector === true,
             });
           }
+          // TICKET-131: gateType='NEUTRAL_TRANSITION' rows carrying direction5mGatedRouting !==
+          // undefined only ever exist when neutral5mDirectionGatedRoutingEnabled=true — filtered here
+          // for the same reason as the TICKET-130 block above.
+          if (evaluation.gateType === 'NEUTRAL_TRANSITION' && evaluation.direction5mGatedRouting !== undefined) {
+            neutral5mGatedRoutingEvaluations.push({
+              symbol: evaluation.symbol,
+              timestamp: evaluation.timestamp,
+              side: evaluation.side,
+              setupType: evaluation.setupType,
+              score: evaluation.score,
+              passed: evaluation.passed,
+              direction5mGatedRouting: evaluation.direction5mGatedRouting,
+              neutral5mRoutingAccepted: evaluation.neutral5mRoutingAccepted,
+              structuralBreakDiagnostic5m: evaluation.structuralBreakDiagnostic5m,
+            });
+          }
         },
       );
       sd.state = result.symbolState;
@@ -935,7 +982,10 @@ async function main(): Promise<void> {
     // TICKET-130: only appended when the selector is actually active, so every run before this
     // ticket (and Variant A's own neutral5mDirectionSelectorEnabled=false run) keeps its exact
     // pre-existing filename.
-    (neutral5mDirectionSelectorEnabled ? '-neutral5mselector' : '');
+    (neutral5mDirectionSelectorEnabled ? '-neutral5mselector' : '') +
+    // TICKET-131: only appended when the new routing is actually active, so every run before this
+    // ticket keeps its exact pre-existing filename.
+    (neutral5mDirectionGatedRoutingEnabled ? '-neutral5mgatedrouting' : '');
   const tradesPath = path.resolve(process.cwd(), `data/backtest-trades-${suffix}.csv`);
   writeFileSync(tradesPath, tradesCsv(trades));
   console.log(`→ ${tradesPath}`);
@@ -961,6 +1011,35 @@ async function main(): Promise<void> {
     writeFileSync(neutralDiagPath, [neutralHeader, ...neutralRows].join('\n') + '\n');
     const rejectedCount = neutralDirectionSelectorEvaluations.filter((e) => e.rejectedByDirectionSelector).length;
     console.log(`→ ${neutralDiagPath} (${neutralDirectionSelectorEvaluations.length} NEUTRAL_TRANSITION MOMENTUM_DIRECT evaluations, ${rejectedCount} rejected by the selector)`);
+  }
+
+  // TICKET-131 — diagnostic-only Neutral 5m Direction-Gated Routing evaluation log (never influences
+  // trades/report above), consumed offline to build data/ticket131-neutral-5m-direction-gated-routing-report.md.
+  if (neutral5mDirectionGatedRoutingEnabled) {
+    const routingDiagPath = path.resolve(process.cwd(), `data/ticket131-neutral5m-gated-routing-diagnostics-${suffix}.csv`);
+    const routingHeader = 'symbol,timestamp,side,setupType,score,passed,direction5mGatedRouting,neutral5mRoutingAccepted,structuralBreakDiagnostic5m';
+    const routingRows = neutral5mGatedRoutingEvaluations.map((e) =>
+      [
+        e.symbol,
+        e.timestamp,
+        e.side,
+        e.setupType,
+        e.score,
+        e.passed,
+        e.direction5mGatedRouting ?? '',
+        e.neutral5mRoutingAccepted ?? '',
+        e.structuralBreakDiagnostic5m ?? '',
+      ].join(','),
+    );
+    writeFileSync(routingDiagPath, [routingHeader, ...routingRows].join('\n') + '\n');
+    const noneBlockedCount = neutral5mGatedRoutingEvaluations.filter((e) => e.direction5mGatedRouting === 'NONE').length;
+    const sideMismatchBlockedCount = neutral5mGatedRoutingEvaluations.filter(
+      (e) => e.direction5mGatedRouting !== 'NONE' && e.direction5mGatedRouting !== e.side && e.neutral5mRoutingAccepted === false,
+    ).length;
+    const acceptedCount = neutral5mGatedRoutingEvaluations.filter((e) => e.neutral5mRoutingAccepted === true).length;
+    console.log(
+      `→ ${routingDiagPath} (${neutral5mGatedRoutingEvaluations.length} candidates seen, ${noneBlockedCount} blocked by direction5m=NONE, ${sideMismatchBlockedCount} blocked by side mismatch, ${acceptedCount} accepted through to the AI gate)`,
+    );
   }
 
   const totalTrades = trades.length;
@@ -1018,6 +1097,8 @@ async function main(): Promise<void> {
     `- momentumDirectCircuitBreakerLossThreshold: ${momentumDirectCircuitBreakerLossThreshold} (TICKET-081, TODO_CONFIRM, CLI-overridable, default 999999 = không bao giờ kích hoạt — tạm dừng MOMENTUM_DIRECT cho đúng symbol+side sau N lần thua SL liên tiếp)`,
     `- momentumDirectCircuitBreakerCooldownMs: ${momentumDirectCircuitBreakerCooldownMs}ms (TICKET-081, TODO_CONFIRM, CLI-overridable, default 0 — thời gian tạm dừng sau khi cầu dao kích hoạt, reset khi có 1 lệnh thắng)`,
     `- oodGuardMode: ${oodGuardMode} (TICKET-122, TODO_CONFIRM, CLI-overridable, default NONE = tắt hẳn — guard OOD cho model SHORT MOMENTUM_DIRECT dựa trên emaRatioSlow, threshold=${oodGuardEmaRatioSlowThreshold}, scoreCap=${oodGuardScoreCap}, riskReductionMultiplier=${oodGuardRiskReductionMultiplier})`,
+    `- neutral5mDirectionSelectorEnabled: ${neutral5mDirectionSelectorEnabled} (TICKET-130, veto-only 3/3 selector cho tryMomentumDirect(), FAIL — không dùng lại rule này trong TICKET-131)`,
+    `- neutral5mDirectionGatedRoutingEnabled: ${neutral5mDirectionGatedRoutingEnabled} (TICKET-131, relaxed 2/2 EMA+DI routing cho OB/FVG/SWEEP/BOX_BREAKOUT trong NEUTRAL_TRANSITION khi neutralTransitionTradingEnabled=false — không tự bật Neutral, chỉ mở thêm 1 đường đi riêng khi direction5m đúng side)`,
     `- planAutoSelectionEnabled: ${planAutoSelectionEnabled} (TICKET-052, AI-driven Plan A/B selection, TREND only, threshold=${config.planAutoSelectionConfig.planAutoSelectionMomentumThreshold})`,
     `- Runner trailing: ATR (2.5×ATR), không dùng Structure trailing`,
     `- takerFeeRate: 0.0004 (TODO_CONFIRM — Trader chưa cung cấp số thật)`,

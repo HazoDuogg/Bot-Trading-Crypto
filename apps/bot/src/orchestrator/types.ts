@@ -300,6 +300,23 @@ export interface OrchestratorConfig {
    * wired into any production default config.
    */
   neutral5mDirectionSelectorEnabled?: boolean;
+  /**
+   * TICKET-131 — opt-in, default-inert Neutral 5m Direction-Gated Setup Routing. `undefined` (default)
+   * or `false` = fully disabled, byte-identical to every ticket before this one. Only meaningful while
+   * regime===NEUTRAL_TRANSITION AND the candidate's setupType !== 'MOMENTUM_DIRECT' (see
+   * orchestrator.ts's tryOpenNewPosition() NEUTRAL_TRANSITION gate block) — computes a RELAXED 5m
+   * directional verdict (LONG/SHORT/NONE, neutral5mDirectionGatedRouting.ts, 2-of-2 EMA+DI agreement,
+   * NOT TICKET-130's 3-of-3 rule) and provides an ALTERNATE way past that block's early-return, ONLY
+   * when direction5m matches the OB/FVG/SWEEP/BOX_BREAKOUT candidate's own side. Never sets/reads
+   * neutralTransitionGateConfig.neutralTransitionTradingEnabled itself (that field's value is always
+   * whatever the caller configured, untouched by this flag) — this is a SEPARATE, additional way past
+   * the same early-return, not a replacement for that config. A candidate let through still must clear
+   * the EXACT SAME unmodified AI momentum gate (scoreMomentumForSide/gatePassed) that already exists in
+   * that block. Never touches tryMomentumDirect() or any regime other than NEUTRAL_TRANSITION. Only
+   * backtest.ts's new --neutral-5m-direction-gated-routing-enabled= CLI flag (default false) ever sets
+   * this field; never wired into any production default config.
+   */
+  neutral5mDirectionGatedRoutingEnabled?: boolean;
 }
 
 /** TICKET-081 — trạng thái cầu dao cho 1 chiều (LONG hoặc SHORT) của 1 symbol. */
