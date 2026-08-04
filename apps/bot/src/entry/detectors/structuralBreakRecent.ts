@@ -6,9 +6,12 @@
  * detectMarketStructureShift() returns the FIRST confirming candle found ANYWHERE in the given
  * window (here, a ~3.3h/200-candle 1m window) with no recency check at all.
  *
- * This module is READ-ONLY, additive, and used ONLY by shadow-audit scripts (never by
- * entryRouter.ts / production, and never imported by tactical/tacticalRegimeClassifier.ts, which
- * stays decoupled from entry/ detectors per its own header comment).
+ * This module is READ-ONLY and additive. Originally used ONLY by shadow-audit scripts; TICKET-130
+ * added a second, real caller: orchestrator.ts's neutral5mDirectionSelector.ts (opt-in,
+ * config.neutral5mDirectionSelectorEnabled, only active while regime===NEUTRAL_TRANSITION) reuses
+ * this verbatim for its "recent structural break" sub-check. Still never called from
+ * entryRouter.ts directly, and never imported by tactical/tacticalRegimeClassifier.ts, which stays
+ * decoupled from entry/ detectors per its own header comment.
  *
  * Fix, per ticket spec's 4 requirements:
  *   1. Recency — only count a confirmation within RECENT_TOLERANCE_CANDLES of "now" (the end of

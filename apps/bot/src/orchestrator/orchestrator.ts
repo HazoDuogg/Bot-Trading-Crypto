@@ -13,6 +13,7 @@ import { EntryConfig } from '../entry/config.js';
 import { detectMomentumDirect } from '../entry/momentumDirect.js';
 import type { DraftSetup, FunnelCallback } from '../entry/types.js';
 import { detectSwingPoints, latestSwingPointBefore } from '../entry/detectors/swingPoints.js';
+import { computeDirection5m, type Direction5m } from './neutral5mDirectionSelector.js';
 import { buildFeatureVector, computeMomentumCrossFeatures, loadFeatureSchema, type FeatureSchema } from '../xgbFilter/featureBuilder.js';
 import { scoreMomentum } from '../xgbFilter/momentumScorer.js';
 import { computeMomentumMultiplier } from '../xgbFilter/momentumMultiplier.js';
@@ -198,6 +199,21 @@ export interface MomentumGateEvaluation {
   regime?: MarketRegime;
   /** TICKET-122 — diagnostic-only: true when this SHORT MOMENTUM_DIRECT evaluation's emaRatioSlow was flagged OOD by config.oodGuardConfig (undefined/false whenever the guard is inert, and always undefined for LONG). Never itself read by any decision logic — only for offline counting of "candidates affected by the guard". */
   oodFlagged?: boolean;
+  /**
+   * TICKET-130 — diagnostic-only pass-through of the Neutral 5m Direction Selector's verdict at
+   * this call site. undefined whenever the selector is inactive (config.neutral5mDirectionSelectorEnabled
+   * !== true, or regime !== NEUTRAL_TRANSITION) — same value on both the LONG and SHORT evaluation
+   * rows for a given symbol+timestamp (it's computed once per tryMomentumDirect() call, not per side).
+   * Never itself read by any decision logic here — only for offline report breakdowns.
+   */
+  direction5m?: Direction5m;
+  /**
+   * TICKET-130 — diagnostic-only: true when this exact side would have passed the AI momentum gate
+   * (longPassesAiOnly/shortPassesAiOnly) but was vetoed solely because it disagreed with
+   * direction5m. Always false/undefined when the selector is inactive. Lets offline reports isolate
+   * "candidates the selector actually rejected" from "candidates the AI gate itself rejected".
+   */
+  rejectedByDirectionSelector?: boolean;
 }
 
 function touchesFavorable(side: 'LONG' | 'SHORT', candle: CandleData, price: number): boolean {
@@ -455,13 +471,34 @@ async function tryMomentumDirect(
   // only — the diagnostic MomentumGateEvaluation below still logs the real, uncapped shortScore.
   const shortScoreEffective = isShortOod && oodGuardConfig!.mode === 'SCORE_CAP' && shortScore !== undefined ? Math.min(shortScore, oodGuardConfig!.scoreCapValue) : shortScore;
 
-  const longPasses = longScore !== undefined && detectMomentumDirect(longScore, 'LONG', config.momentumDirectThreshold);
+  // TICKET-130 — Neutral 5m Direction Selector. Opt-in (config.neutral5mDirectionSelectorEnabled),
+  // active ONLY while regime===NEUTRAL_TRANSITION — direction5m stays undefined (fully inert) for
+  // every other regime or when the flag is off, byte-identical to every ticket before this one.
+  // Never touches neutralTransitionGateConfig/the OB-FVG-Sweep-BoxBreakout cascade in any way — this
+  // only affects tryMomentumDirect()'s own LONG/SHORT candidate gating below.
+  const direction5m: Direction5m | undefined =
+    config.neutral5mDirectionSelectorEnabled === true && regimeOutput.regime === MarketRegime.NEUTRAL_TRANSITION
+      ? computeDirection5m(input.candles5m, input.candles1m)
+      : undefined;
+  // Mirrors TICKET-122's oodGuardConfig HARD_REJECT pattern exactly: force the DISAGREEING side's
+  // `passes` to false, never touch the agreeing side, never flip LONG<->SHORT. direction5m==='NONE'
+  // (or undefined, selector inactive) rejects nothing — existing NEUTRAL behavior unchanged.
+  const longRejectedByDirection5m = direction5m === 'SHORT';
+  const shortRejectedByDirection5m = direction5m === 'LONG';
+
+  // Raw AI-gate-only pass/fail (unchanged formula) — kept separate from the selector's veto below so
+  // the diagnostic capture can distinguish "AI rejected it anyway" from "AI passed it but the
+  // selector vetoed it for disagreeing with direction5m" (TICKET-130 report needs this distinction).
+  const longPassesAiOnly = longScore !== undefined && detectMomentumDirect(longScore, 'LONG', config.momentumDirectThreshold);
   // HARD_REJECT: force shortPasses=false regardless of the actual (or capped) score — never becomes
   // a candidate.
-  const shortPasses =
+  const shortPassesAiOnly =
     !(isShortOod && oodGuardConfig!.mode === 'HARD_REJECT') &&
     shortScoreEffective !== undefined &&
     detectMomentumDirect(shortScoreEffective, 'SHORT', config.momentumDirectThreshold);
+
+  const longPasses = longPassesAiOnly && !longRejectedByDirection5m;
+  const shortPasses = shortPassesAiOnly && !shortRejectedByDirection5m;
 
   // TICKET-109 — fire for EVERY score actually computed this call (both LONG and SHORT), passed or
   // rejected, BEFORE any of the early returns below — this is the "runs regardless of outcome"
@@ -484,6 +521,9 @@ async function tryMomentumDirect(
           entryPriceCandidate,
           slPriceCandidate: computeMomentumDirectSlPrice('LONG', entryPriceCandidate, currentCandle, gateAtr, config),
           regime: regimeOutput.regime,
+          // TICKET-130 — diagnostic-only pass-through, never read by any decision logic above.
+          direction5m,
+          rejectedByDirectionSelector: longPassesAiOnly && longRejectedByDirection5m,
         });
       }
       if (shortScore !== undefined) {
@@ -500,6 +540,9 @@ async function tryMomentumDirect(
           slPriceCandidate: computeMomentumDirectSlPrice('SHORT', entryPriceCandidate, currentCandle, gateAtr, config),
           regime: regimeOutput.regime,
           oodFlagged: isShortOod,
+          // TICKET-130 — diagnostic-only pass-through, never read by any decision logic above.
+          direction5m,
+          rejectedByDirectionSelector: shortPassesAiOnly && shortRejectedByDirection5m,
         });
       }
     }

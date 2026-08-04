@@ -11,7 +11,7 @@
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
-import type { CandleData } from '../dist/regime/types.js';
+import { MarketRegime, type CandleData } from '../dist/regime/types.js';
 import { RegimeConfig } from '../dist/regime/config.js';
 import { computeCorrelatedRiskRatio } from '../dist/regime/correlatedRisk.js';
 import {
@@ -154,6 +154,12 @@ function parseArgs(): {
   oodGuardScoreCap: number;
   /** RISK_REDUCTION only. */
   oodGuardRiskReductionMultiplier: number;
+  /**
+   * TICKET-130 — opt-in, default-inert Neutral 5m Direction Selector CLI flag. `false` (default, or
+   * the flag omitted entirely) means OrchestratorConfig.neutral5mDirectionSelectorEnabled stays
+   * undefined/false — fully inert, byte-identical to every ticket before this one.
+   */
+  neutral5mDirectionSelectorEnabled: boolean;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -194,6 +200,7 @@ function parseArgs(): {
   const oodGuardEmaRatioSlowThresholdArg = args.find((a) => a.startsWith('--ood-guard-ema-ratio-slow-threshold='));
   const oodGuardScoreCapArg = args.find((a) => a.startsWith('--ood-guard-score-cap='));
   const oodGuardRiskReductionMultiplierArg = args.find((a) => a.startsWith('--ood-guard-risk-reduction-multiplier='));
+  const neutral5mDirectionSelectorEnabledArg = args.find((a) => a.startsWith('--neutral-5m-direction-selector-enabled='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -277,6 +284,8 @@ function parseArgs(): {
     oodGuardEmaRatioSlowThreshold: oodGuardEmaRatioSlowThresholdArg ? Number(oodGuardEmaRatioSlowThresholdArg.split('=')[1]) : 0,
     oodGuardScoreCap: oodGuardScoreCapArg ? Number(oodGuardScoreCapArg.split('=')[1]) : 0,
     oodGuardRiskReductionMultiplier: oodGuardRiskReductionMultiplierArg ? Number(oodGuardRiskReductionMultiplierArg.split('=')[1]) : 1.0,
+    // TICKET-130: off by default — matches OrchestratorConfig.neutral5mDirectionSelectorEnabled's default.
+    neutral5mDirectionSelectorEnabled: neutral5mDirectionSelectorEnabledArg ? neutral5mDirectionSelectorEnabledArg.split('=')[1] === 'true' : false,
   };
 }
 
@@ -453,9 +462,10 @@ async function main(): Promise<void> {
     oodGuardEmaRatioSlowThreshold,
     oodGuardScoreCap,
     oodGuardRiskReductionMultiplier,
+    neutral5mDirectionSelectorEnabled,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}, momentumModelVersion=${momentumModelVersion}, modelMode=${modelMode}, maxTotalMarginPct=${maxTotalMarginPct !== undefined ? `${(maxTotalMarginPct * 100).toFixed(1)}%` : '(không giới hạn)'}, oodGuardMode=${oodGuardMode}, oodGuardEmaRatioSlowThreshold=${oodGuardEmaRatioSlowThreshold}, oodGuardScoreCap=${oodGuardScoreCap}, oodGuardRiskReductionMultiplier=${oodGuardRiskReductionMultiplier}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}, momentumModelVersion=${momentumModelVersion}, modelMode=${modelMode}, maxTotalMarginPct=${maxTotalMarginPct !== undefined ? `${(maxTotalMarginPct * 100).toFixed(1)}%` : '(không giới hạn)'}, oodGuardMode=${oodGuardMode}, oodGuardEmaRatioSlowThreshold=${oodGuardEmaRatioSlowThreshold}, oodGuardScoreCap=${oodGuardScoreCap}, oodGuardRiskReductionMultiplier=${oodGuardRiskReductionMultiplier}, neutral5mDirectionSelectorEnabled=${neutral5mDirectionSelectorEnabled}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -537,6 +547,10 @@ async function main(): Promise<void> {
           momentumBearishSchemaPath: path.join(MODELS_DIR, 'xgb_momentum_bearish_v7_raw_feature_schema.json'),
         }
       : {}),
+    // TICKET-130: false (default) omits the field entirely -> undefined, orchestrator.ts's
+    // tryMomentumDirect() never even calls computeDirection5m() — fully inert, matching every ticket
+    // before this one exactly.
+    ...(neutral5mDirectionSelectorEnabled ? { neutral5mDirectionSelectorEnabled: true } : {}),
   };
   // TICKET-123: fail-loud proof-of-model-in-use for the report — check file existence explicitly
   // here (in addition to orchestrator.ts's own throw-on-load-failure) so a missing V7_RAW artifact
@@ -577,6 +591,22 @@ async function main(): Promise<void> {
   // offline (joined against data/all-candidates-with-outcomes.csv by symbol+timestamp+side) without
   // any new plumbing inside orchestrator.ts itself. Never read by any decision logic.
   const shortMomentumDirectEvaluations: { symbol: string; timestamp: number; score: number; passed: boolean; oodFlagged: boolean }[] = [];
+
+  // TICKET-130 — diagnostic-only accumulator: every NEUTRAL_TRANSITION MOMENTUM_DIRECT gate
+  // evaluation (both LONG and SHORT), same pass-through-callback pattern as TICKET-122's
+  // shortMomentumDirectEvaluations above. Only meaningful when neutral5mDirectionSelectorEnabled is
+  // true (direction5m/rejectedByDirectionSelector stay undefined/false otherwise) — used offline by
+  // ticket130GenerateReport.ts, joined against data/all-candidates-fully-enriched.csv by
+  // symbol+timestamp+side. Never read by any decision logic.
+  const neutralDirectionSelectorEvaluations: {
+    symbol: string;
+    timestamp: number;
+    side: 'LONG' | 'SHORT';
+    score: number;
+    passed: boolean;
+    direction5m: 'LONG' | 'SHORT' | 'NONE' | undefined;
+    rejectedByDirectionSelector: boolean;
+  }[] = [];
   const manipulatedLogLines: string[] = []; // TICKET-027
   const dangerZoneLogLines: string[] = []; // TICKET-033
 
@@ -736,7 +766,8 @@ async function main(): Promise<void> {
           else setupNotFiredOtherCount++;
         },
         undefined, // onRegimeMetrics — not needed by this diagnostic
-        // TICKET-122 — collect every SHORT MOMENTUM_DIRECT gate evaluation for offline OOD analysis.
+        // TICKET-122/130 — collect gate evaluations for offline analysis (OOD guard + Neutral 5m
+        // Direction Selector respectively).
         (evaluation) => {
           if (evaluation.gateType === 'MOMENTUM_DIRECT' && evaluation.side === 'SHORT') {
             shortMomentumDirectEvaluations.push({
@@ -745,6 +776,20 @@ async function main(): Promise<void> {
               score: evaluation.score,
               passed: evaluation.passed,
               oodFlagged: evaluation.oodFlagged === true,
+            });
+          }
+          // TICKET-130: only ever non-empty when neutral5mDirectionSelectorEnabled=true (otherwise
+          // evaluation.regime===NEUTRAL_TRANSITION rows exist but direction5m/rejectedByDirectionSelector
+          // stay undefined/false — filtered out here since they're not useful diagnostic rows).
+          if (evaluation.gateType === 'MOMENTUM_DIRECT' && evaluation.regime === MarketRegime.NEUTRAL_TRANSITION && neutral5mDirectionSelectorEnabled) {
+            neutralDirectionSelectorEvaluations.push({
+              symbol: evaluation.symbol,
+              timestamp: evaluation.timestamp,
+              side: evaluation.side,
+              score: evaluation.score,
+              passed: evaluation.passed,
+              direction5m: evaluation.direction5m,
+              rejectedByDirectionSelector: evaluation.rejectedByDirectionSelector === true,
             });
           }
         },
@@ -886,7 +931,11 @@ async function main(): Promise<void> {
     '-correlated' +
     // TICKET-122: only appended when the guard is actually active, so every run before this ticket
     // (and the baseline run with oodGuardMode=NONE) keeps its exact pre-existing filename.
-    (oodGuardMode !== 'NONE' ? `-ood${oodGuardMode.toLowerCase().replace(/_/g, '')}-${oodGuardEmaRatioSlowThreshold}` : '');
+    (oodGuardMode !== 'NONE' ? `-ood${oodGuardMode.toLowerCase().replace(/_/g, '')}-${oodGuardEmaRatioSlowThreshold}` : '') +
+    // TICKET-130: only appended when the selector is actually active, so every run before this
+    // ticket (and Variant A's own neutral5mDirectionSelectorEnabled=false run) keeps its exact
+    // pre-existing filename.
+    (neutral5mDirectionSelectorEnabled ? '-neutral5mselector' : '');
   const tradesPath = path.resolve(process.cwd(), `data/backtest-trades-${suffix}.csv`);
   writeFileSync(tradesPath, tradesCsv(trades));
   console.log(`→ ${tradesPath}`);
@@ -899,6 +948,19 @@ async function main(): Promise<void> {
     writeFileSync(oodDiagPath, [oodHeader, ...oodRows].join('\n') + '\n');
     const oodFlaggedCount = shortMomentumDirectEvaluations.filter((e) => e.oodFlagged).length;
     console.log(`→ ${oodDiagPath} (${shortMomentumDirectEvaluations.length} SHORT MOMENTUM_DIRECT evaluations, ${oodFlaggedCount} OOD-flagged)`);
+  }
+
+  // TICKET-130 — diagnostic-only Neutral 5m Direction Selector evaluation log (never influences
+  // trades/report above), consumed offline by ticket130GenerateReport.ts.
+  if (neutral5mDirectionSelectorEnabled) {
+    const neutralDiagPath = path.resolve(process.cwd(), `data/ticket130-neutral5m-diagnostics-${suffix}.csv`);
+    const neutralHeader = 'symbol,timestamp,side,score,passed,direction5m,rejectedByDirectionSelector';
+    const neutralRows = neutralDirectionSelectorEvaluations.map((e) =>
+      [e.symbol, e.timestamp, e.side, e.score, e.passed, e.direction5m ?? '', e.rejectedByDirectionSelector].join(','),
+    );
+    writeFileSync(neutralDiagPath, [neutralHeader, ...neutralRows].join('\n') + '\n');
+    const rejectedCount = neutralDirectionSelectorEvaluations.filter((e) => e.rejectedByDirectionSelector).length;
+    console.log(`→ ${neutralDiagPath} (${neutralDirectionSelectorEvaluations.length} NEUTRAL_TRANSITION MOMENTUM_DIRECT evaluations, ${rejectedCount} rejected by the selector)`);
   }
 
   const totalTrades = trades.length;

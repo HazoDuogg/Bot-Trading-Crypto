@@ -286,6 +286,20 @@ export interface OrchestratorConfig {
      */
     riskReductionMultiplier: number;
   };
+  /**
+   * TICKET-130 — opt-in, default-inert Neutral 5m Direction Selector. `undefined` (default) or
+   * `false` = fully disabled, byte-identical to every ticket before this one. Only meaningful while
+   * regime===NEUTRAL_TRANSITION (see orchestrator.ts's tryMomentumDirect()) — computes a 5m
+   * directional verdict (LONG/SHORT/NONE, neutral5mDirectionSelector.ts) from 3 unanimous
+   * sub-confirmations (EMA9/EMA21 cross+slope, DI direction, recent sided structural break) plus an
+   * anti-chase overextension override, and rejects ONLY the disagreeing side of
+   * tryMomentumDirect()'s own LONG/SHORT candidates — never creates a candidate, never flips
+   * LONG<->SHORT, never bypasses the AI gate/macro filter (both still apply independently), never
+   * touches neutralTransitionGateConfig/the OB-FVG-Sweep-BoxBreakout cascade. Only backtest.ts's new
+   * --neutral-5m-direction-selector-enabled= CLI flag (default false) ever sets this field; never
+   * wired into any production default config.
+   */
+  neutral5mDirectionSelectorEnabled?: boolean;
 }
 
 /** TICKET-081 — trạng thái cầu dao cho 1 chiều (LONG hoặc SHORT) của 1 symbol. */
