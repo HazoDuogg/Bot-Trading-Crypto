@@ -3,6 +3,9 @@
  * Run from repo root: `npm run fetch-ohlcv -- --days=180` (loads .env via dotenv, cwd = repo root).
  * TICKET-022: `--out-dir=data/ohlcv-365d` to fetch into a separate directory (defaults to
  * `data/ohlcv`) — lets a training-only pull run without ever touching the dataset backtest.ts reads.
+ * TICKET-135: `--start-date=YYYY-MM-DD --end-date=YYYY-MM-DD` to fetch a FIXED historical window
+ * instead of "last N days ending now" — additive, `--days=`/default behavior unchanged when these
+ * flags are absent. End date is treated as inclusive (end-of-day UTC, 23:59:59.999).
  *
  * Output: {outDir}/{SYMBOL}_{interval}.csv, columns: timestampUtc,datetimeUtcIso,open,high,low,close,volume
  */
@@ -22,15 +25,46 @@ const INTERVALS: Record<string, number> = { '5m': 5 * 60_000, '15m': 15 * 60_000
 const LIMIT_PER_REQUEST = 1500;
 const MAX_RETRIES = 5; // 1s,2s,4s,8s,16s backoff on 429
 
-function parseArgs(): { days: number; outDir: string } {
+interface ParsedArgs {
+  outDir: string;
+  // Either a rolling "last N days ending now" window, or a fixed [rangeStart, rangeEnd] window.
+  rangeStart: number;
+  rangeEnd: number;
+}
+
+/** Parses --start-date=/--end-date= as YYYY-MM-DD (UTC) or raw epoch-ms; end-date is inclusive (end-of-day UTC). */
+function parseDateFlag(raw: string, endOfDay: boolean): number {
+  if (/^\d+$/.test(raw)) return Number(raw); // raw epoch ms
+  const ms = Date.parse(endOfDay ? `${raw}T23:59:59.999Z` : `${raw}T00:00:00.000Z`);
+  if (!Number.isFinite(ms)) throw new Error(`fetchOhlcv: không parse được date "${raw}" — dùng YYYY-MM-DD hoặc epoch ms.`);
+  return ms;
+}
+
+function parseArgs(): ParsedArgs {
   const daysArg = process.argv.find((a) => a.startsWith('--days='));
   const outDirArg = process.argv.find((a) => a.startsWith('--out-dir='));
-  return {
-    days: daysArg ? Number(daysArg.split('=')[1]) : 30,
-    // TICKET-022: separate output dir so a 365-day training-only pull never touches data/ohlcv/
-    // (the 180-day dataset the chosen backtest baseline reads).
-    outDir: path.resolve(process.cwd(), outDirArg ? outDirArg.split('=')[1] : 'data/ohlcv'),
-  };
+  const startDateArg = process.argv.find((a) => a.startsWith('--start-date='));
+  const endDateArg = process.argv.find((a) => a.startsWith('--end-date='));
+
+  // TICKET-022: separate output dir so a 365-day training-only pull never touches data/ohlcv/
+  // (the 180-day dataset the chosen backtest baseline reads).
+  const outDir = path.resolve(process.cwd(), outDirArg ? outDirArg.split('=')[1] : 'data/ohlcv');
+
+  // TICKET-135: explicit fixed historical window, additive — only activates when BOTH flags given.
+  if (startDateArg || endDateArg) {
+    if (!startDateArg || !endDateArg) {
+      throw new Error('fetchOhlcv: --start-date= và --end-date= phải đi cùng nhau.');
+    }
+    const rangeStart = parseDateFlag(startDateArg.split('=')[1], false);
+    const rangeEnd = parseDateFlag(endDateArg.split('=')[1], true);
+    if (rangeStart >= rangeEnd) throw new Error('fetchOhlcv: --start-date phải trước --end-date.');
+    return { outDir, rangeStart, rangeEnd };
+  }
+
+  const days = daysArg ? Number(daysArg.split('=')[1]) : 30;
+  const rangeEnd = Date.now();
+  const rangeStart = rangeEnd - days * 24 * 60 * 60 * 1000;
+  return { outDir, rangeStart, rangeEnd };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -91,10 +125,9 @@ function lastSavedTimestamp(filePath: string): number | null {
   return Number.isFinite(ts) ? ts : null;
 }
 
-async function fetchSymbolInterval(symbol: string, interval: string, intervalMs: number, days: number, outDir: string): Promise<void> {
+async function fetchSymbolInterval(symbol: string, interval: string, intervalMs: number, rangeStart: number, rangeEnd: number, outDir: string): Promise<void> {
   const filePath = path.join(outDir, `${symbol}_${interval}.csv`);
-  const endTime = Date.now();
-  const rangeStart = endTime - days * 24 * 60 * 60 * 1000;
+  const endTime = rangeEnd;
 
   const resumeFrom = lastSavedTimestamp(filePath);
   let startTime = resumeFrom !== null ? resumeFrom + intervalMs : rangeStart;
@@ -140,13 +173,15 @@ async function fetchSymbolInterval(symbol: string, interval: string, intervalMs:
 }
 
 async function main(): Promise<void> {
-  const { days, outDir } = parseArgs();
-  console.log(`Fetch OHLCV ${days} ngày gần nhất cho ${SYMBOLS.join(', ')} → ${outDir}...`);
+  const { rangeStart, rangeEnd, outDir } = parseArgs();
+  console.log(
+    `Fetch OHLCV ${new Date(rangeStart).toISOString()} → ${new Date(rangeEnd).toISOString()} cho ${SYMBOLS.join(', ')} → ${outDir}...`,
+  );
 
   for (const symbol of SYMBOLS) {
     console.log(`=== ${symbol} ===`);
     for (const [interval, intervalMs] of Object.entries(INTERVALS)) {
-      await fetchSymbolInterval(symbol, interval, intervalMs, days, outDir);
+      await fetchSymbolInterval(symbol, interval, intervalMs, rangeStart, rangeEnd, outDir);
     }
   }
 }
