@@ -256,6 +256,36 @@ export interface OrchestratorConfig {
    * quá lớn). `undefined` = không giới hạn (unreachable), khớp mọi ticket trước ticket này.
    */
   maxTotalMarginPct?: number;
+  /**
+   * TICKET-122 — opt-in, default-inert OOD (out-of-distribution) guard for the Bearish (SHORT)
+   * MOMENTUM_DIRECT model. TICKET-121's forensic report found the Bearish model's highest-confidence
+   * decile has an abnormally low real winrate, root-caused to emaRatioSlow being out-of-distribution
+   * relative to training data when scoring a SHORT candidate. `undefined` (default) = guard fully
+   * disabled, byte-identical to every ticket before this one — only backtest.ts's new
+   * --ood-guard-mode= CLI flag (default NONE) ever sets this field; never wired into any production
+   * default config (liveRunner.ts / the official backtest command never pass it).
+   */
+  oodGuardConfig?: {
+    /** emaRatioSlow OOD threshold (P90/P95/P97.5 of the Bearish TRAIN split — computed offline, passed in as a plain number, never recomputed here). Candidate is OOD when emaRatioSlow > this value. */
+    emaRatioSlowThreshold: number;
+    mode: 'HARD_REJECT' | 'SCORE_CAP' | 'RISK_REDUCTION';
+    /**
+     * SCORE_CAP only — effective score ceiling applied to an OOD SHORT candidate's shortScore before
+     * the detectMomentumDirect() pass/fail check. TODO_CONFIRM (PM chooses final value): a cap at or
+     * below momentumDirectThreshold makes SCORE_CAP behave like HARD_REJECT for that candidate; a cap
+     * above threshold still lets it pass, just scored more conservatively.
+     */
+    scoreCapValue: number;
+    /**
+     * RISK_REDUCTION only — multiplies into the SAME riskMultiplier field TICKET-071's
+     * correlationRiskMultiplier already multiplies into (combinedRiskMultiplier before sizing) —
+     * exact same mechanism/multiplication point, no new plumbing. TODO_CONFIRM (PM chooses final
+     * value): e.g. 0.3 shrinks an OOD SHORT candidate's size to 30% instead of rejecting it outright,
+     * mirroring why TICKET-071 chose Risk Reduction over Hard Reject (avoids path-dependent
+     * trade-chain reshuffling).
+     */
+    riskReductionMultiplier: number;
+  };
 }
 
 /** TICKET-081 — trạng thái cầu dao cho 1 chiều (LONG hoặc SHORT) của 1 symbol. */

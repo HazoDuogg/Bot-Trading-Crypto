@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyMssFailReason, detectMarketStructureShift } from './marketStructureShift.js';
+import { classifyMssFailReason, detectMarketStructureShift, detectMarketStructureShiftWithLevel } from './marketStructureShift.js';
 import type { CandleData } from '../../regime/types.js';
 
 function c(open: number, close: number, high: number, low: number): CandleData {
@@ -71,6 +71,62 @@ describe('detectMarketStructureShift — BEARISH (lower-high, reference low BETW
       c(6.5, 5, 6.8, 4.8), // 11 — close 5 < 6 -> MSS confirmed here
     ];
     expect(detectMarketStructureShift(candles, 'BEARISH', config)).toBe(11);
+  });
+});
+
+describe('detectMarketStructureShiftWithLevel — TICKET-125 (same walk as detectMarketStructureShift, plus the reference level price)', () => {
+  it('BULLISH: returns the same index as detectMarketStructureShift, plus the referenceHigh price that was broken', () => {
+    const candles: CandleData[] = [
+      c(9.5, 9.5, 10, 9), // 0
+      c(9.25, 9.25, 10, 8.5), // 1
+      c(7.5, 7.5, 9.5, 6), // 2 — swing low #1 (6)
+      c(9.25, 9.25, 10, 8.5), // 3
+      c(9.5, 9.5, 10, 9), // 4
+      c(10.5, 10.5, 12, 9), // 5 — swing high BETWEEN the two lows (12)
+      c(9.25, 9.25, 10, 8.5), // 6
+      c(9.5, 9.5, 10, 9), // 7
+      c(8.75, 8.75, 9.5, 8), // 8 — swing low #2 (8)
+      c(9.25, 9.25, 10, 8.5), // 9
+      c(9.5, 9.5, 10, 9), // 10
+      c(12.5, 13, 13.2, 12.3), // 11 — close 13 > 12 -> MSS confirmed here
+    ];
+    const detailed = detectMarketStructureShiftWithLevel(candles, 'BULLISH', config);
+    expect(detailed).toEqual({ index: 11, levelPrice: 12 });
+    expect(detectMarketStructureShift(candles, 'BULLISH', config)).toBe(detailed?.index);
+  });
+
+  it('BEARISH: returns the referenceLow price that was broken', () => {
+    const candles: CandleData[] = [
+      c(9.5, 9.5, 10, 9), // 0
+      c(9.75, 9.75, 10.5, 9), // 1
+      c(11.5, 11.5, 13, 10), // 2 — swing high #1 (13)
+      c(9.75, 9.75, 10.5, 9), // 3
+      c(9.5, 9.5, 10, 9), // 4
+      c(8, 8, 10, 6), // 5 — swing low BETWEEN the two highs (6)
+      c(9.75, 9.75, 10.5, 9), // 6
+      c(9.5, 9.5, 10, 9), // 7
+      c(10.5, 10.5, 12, 9), // 8 — swing high #2 (12)
+      c(9.75, 9.75, 10.5, 9), // 9
+      c(9.5, 9.5, 10, 9), // 10
+      c(6.5, 5, 6.8, 4.8), // 11 — close 5 < 6 -> MSS confirmed here
+    ];
+    expect(detectMarketStructureShiftWithLevel(candles, 'BEARISH', config)).toEqual({ index: 11, levelPrice: 6 });
+  });
+
+  it('returns null when detectMarketStructureShift also returns null', () => {
+    const candles: CandleData[] = [
+      c(9.5, 9.5, 10, 9),
+      c(9.25, 9.25, 10, 8.5),
+      c(7.5, 7.5, 9.5, 6),
+      c(9.25, 9.25, 10, 8.5),
+      c(9.5, 9.5, 10, 9),
+      c(9.25, 9.25, 10, 8.5),
+      c(6, 6, 9, 5), // lower low, not a higher-low
+      c(9.25, 9.25, 10, 8.5),
+      c(9.5, 9.5, 10, 9),
+    ];
+    expect(detectMarketStructureShift(candles, 'BULLISH', config)).toBeNull();
+    expect(detectMarketStructureShiftWithLevel(candles, 'BULLISH', config)).toBeNull();
   });
 });
 

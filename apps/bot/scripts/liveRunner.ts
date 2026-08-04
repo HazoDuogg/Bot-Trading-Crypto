@@ -31,7 +31,7 @@ import { LiveCandleFeed, type CandleData } from '../dist/live/liveCandleFeed.js'
 import { BinanceOrderExecutor, initializeLeverageForSymbols, type PositionSide } from '../dist/live/binanceOrderExecutor.js';
 import { StateReconciler, resolveAccountBalanceAfterReconcile, type InternalStateSnapshot } from '../dist/live/stateReconciler.js';
 import { loadBinanceEnvConfig } from '../dist/live/envConfig.js';
-import { processCandle, type ProcessCandleInput } from '../dist/orchestrator/orchestrator.js';
+import { processCandle, type ProcessCandleInput, type MomentumGateEvaluation } from '../dist/orchestrator/orchestrator.js';
 import {
   INITIAL_SYMBOL_STATE,
   type CloseTradeEvent,
@@ -51,6 +51,16 @@ import { formatBotStartMessage, formatFullCloseMessage, formatPartialCloseMessag
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
 const TICK_INTERVAL_MS = 5_000; // how often we check "has a new 5m candle closed" — cheap, reads already-polled in-memory buffers only
+
+// TICKET-124 — feature flag for TICKET-123's chosen production improvement (Variant B: V1 model +
+// OOD Risk Reduction guard on the SHORT MOMENTUM_DIRECT model, P97.5 emaRatioSlow threshold). Default
+// OFF (env var unset or anything other than 'true') so this file's behavior is byte-identical to every
+// ticket before this one unless explicitly opted in. PM-confirmed values below are copied verbatim
+// from `data/ticket123-final-decision-report.md` §6 (Variant B) — do NOT retune here without a fresh
+// backtest re-verification, same rule as the rest of CONFIG.
+const OOD_GUARD_ENABLED = process.env.OOD_GUARD_ENABLED === 'true';
+const OOD_GUARD_EMA_RATIO_SLOW_THRESHOLD = 1.037776; // Bearish TRAIN-split P97.5, TICKET-122/123
+const OOD_GUARD_RISK_REDUCTION_MULTIPLIER = 0.3; // TICKET-122/123 Risk Reduction P97.5 variant
 
 // Official confirmed live config — TICKET-084/085's 8-flag baseline + risk-dollar-or-percent=15/
 // max-margin-cap=37.5 (real $100 capital scale, PM-confirmed risk$15/lệnh) + obSlBufferAtrMultiplier=0.87
@@ -80,6 +90,17 @@ const CONFIG: OrchestratorConfig = {
   momentumDirectCorrelationRiskMultiplier: 1.0,
   momentumDirectCircuitBreakerLossThreshold: 999999,
   momentumDirectCircuitBreakerCooldownMs: 0,
+  // TICKET-124: undefined (guard fully inert) unless OOD_GUARD_ENABLED=true is set in the environment.
+  ...(OOD_GUARD_ENABLED
+    ? {
+        oodGuardConfig: {
+          mode: 'RISK_REDUCTION' as const,
+          emaRatioSlowThreshold: OOD_GUARD_EMA_RATIO_SLOW_THRESHOLD,
+          scoreCapValue: 0, // unused in RISK_REDUCTION mode
+          riskReductionMultiplier: OOD_GUARD_RISK_REDUCTION_MULTIPLIER,
+        },
+      }
+    : {}),
 };
 
 const WINDOW_5M = 320;
@@ -164,6 +185,9 @@ async function main(): Promise<void> {
   await feed.start();
   console.log('LiveCandleFeed đã sẵn sàng.');
 
+  console.log(
+    `TICKET-124 oodGuardEnabled=${OOD_GUARD_ENABLED}${OOD_GUARD_ENABLED ? ` (RISK_REDUCTION, emaRatioSlowThreshold=${OOD_GUARD_EMA_RATIO_SLOW_THRESHOLD}, riskReductionMultiplier=${OOD_GUARD_RISK_REDUCTION_MULTIPLIER})` : ' (shadow monitoring only — set OOD_GUARD_ENABLED=true to actually apply)'}`,
+  );
   telegramQueue.enqueue(
     formatBotStartMessage({
       env: envLabel,
@@ -173,7 +197,9 @@ async function main(): Promise<void> {
       riskPoolMaxPct: CONFIG.riskPoolMaxPct,
       maxConcurrentPositionsPerSymbol: CONFIG.maxConcurrentPositionsPerSymbol,
       timestamp: Date.now(),
-    }) + (dryRun ? '\n\n[DRY-RUN MODE — chưa đặt lệnh thật]' : ''),
+    }) +
+      `\n[OOD Guard (TICKET-124): ${OOD_GUARD_ENABLED ? 'BẬT — RISK_REDUCTION P97.5' : 'TẮT — chỉ theo dõi shadow'}]` +
+      (dryRun ? '\n\n[DRY-RUN MODE — chưa đặt lệnh thật]' : ''),
   );
 
   const runnerState: Record<string, RunnerSymbolState> = {};
@@ -184,6 +210,12 @@ async function main(): Promise<void> {
   let regimeChangeCount = 0;
   let willOpenCount = 0;
   let tickErrorCount = 0;
+  // TICKET-124 — shadow/live-sim monitoring for the OOD guard, collected regardless of
+  // OOD_GUARD_ENABLED (so its effect is visible during dry-run BEFORE flipping the flag). Pure
+  // counters, never fed back into any decision.
+  let oodGuardShortEvalCount = 0;
+  let oodGuardFlaggedCount = 0;
+  let oodGuardFlaggedPassedCount = 0;
 
   function slice(candles: CandleData[], windowSize: number): CandleData[] {
     return candles.length > windowSize ? candles.slice(candles.length - windowSize) : candles;
@@ -216,7 +248,17 @@ async function main(): Promise<void> {
       const orderIds = await placeInitialOrders(symbol, event.side, event, quantity);
       runnerState[symbol].orderIds.set(event.entryTimestamp, orderIds);
     }
-    telegramQueue.enqueue(formatPositionOpenedMessage(event, { env: envLabel, accountBalanceAtOpen: balanceAtOpen }) + (dryRun ? '\n\n[DRY-RUN]' : ''));
+    // TICKET-124 — real-trade-level guard visibility: with momentumDirectCorrelationRiskThreshold=999
+    // (never triggers, see CONFIG above), riskMultiplier<1 on a SHORT MOMENTUM_DIRECT open can only
+    // come from the OOD guard when OOD_GUARD_ENABLED — flag here so the Telegram record shows exactly
+    // which real trades had their size reduced by it, not just the shadow-eval counters.
+    const oodGuardApplied = OOD_GUARD_ENABLED && event.setupType === 'MOMENTUM_DIRECT' && event.side === 'SHORT' && event.riskMultiplier < 1;
+    if (oodGuardApplied) console.log(`[OOD_GUARD] ${symbol} SHORT MOMENTUM_DIRECT mở lệnh với size đã giảm (riskMultiplier=${event.riskMultiplier.toFixed(3)})`);
+    telegramQueue.enqueue(
+      formatPositionOpenedMessage(event, { env: envLabel, accountBalanceAtOpen: balanceAtOpen }) +
+        (dryRun ? '\n\n[DRY-RUN]' : '') +
+        (oodGuardApplied ? '\n[OOD Guard: size đã giảm theo Risk Reduction P97.5]' : ''),
+    );
   }
 
   async function handlePartialCloseEvent(symbol: string, event: PartialCloseEvent, entryTimestampOfPosition: number, remainingQuantity: number): Promise<void> {
@@ -322,9 +364,30 @@ async function main(): Promise<void> {
 
         const previousRegime = rs.symbolState.regimeState.previousRegime;
         let lastComputedMetrics: { adx1h?: number; atrPercentile5m?: number } = {};
-        const result = await processCandle(input, rs.symbolState, CONFIG, undefined, undefined, undefined, undefined, (m) => {
-          lastComputedMetrics = m;
-        });
+        const result = await processCandle(
+          input,
+          rs.symbolState,
+          CONFIG,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          (m) => {
+            lastComputedMetrics = m;
+          },
+          // TICKET-124 — shadow/live-sim monitoring only, see oodGuard* counters above.
+          (evaluation: MomentumGateEvaluation) => {
+            if (evaluation.gateType !== 'MOMENTUM_DIRECT' || evaluation.side !== 'SHORT') return;
+            oodGuardShortEvalCount++;
+            if (evaluation.oodFlagged) {
+              oodGuardFlaggedCount++;
+              if (evaluation.passed) oodGuardFlaggedPassedCount++;
+              console.log(
+                `[OOD_GUARD${OOD_GUARD_ENABLED ? '' : ' shadow'}] ${evaluation.symbol} SHORT MOMENTUM_DIRECT flagged (score=${evaluation.score.toFixed(4)}, passed=${evaluation.passed})`,
+              );
+            }
+          },
+        );
 
         // TICKET-101 Việc 1: refresh immediately so the NEXT symbol in this tick's loop sees this
         // symbol's up-to-date total (see openRiskBySymbol declaration above).
@@ -408,11 +471,11 @@ async function main(): Promise<void> {
         console.warn(`[RECONCILE_BALANCE_OVERRIDE] accountBalance ghi đè theo đúng số Sàn: $${oldBalance.toFixed(2)} → $${accountBalance.toFixed(2)}`);
       }
 
-      console.log(`[SUMMARY] regimeChangeCount=${regimeChangeCount}, willOpenCount(dryRun)=${willOpenCount}, tickErrorCount=${tickErrorCount}`);
+      console.log(`[SUMMARY] regimeChangeCount=${regimeChangeCount}, willOpenCount(dryRun)=${willOpenCount}, tickErrorCount=${tickErrorCount}, oodGuardEnabled=${OOD_GUARD_ENABLED}, oodGuardShortEvalCount=${oodGuardShortEvalCount}, oodGuardFlaggedCount=${oodGuardFlaggedCount}, oodGuardFlaggedPassedCount=${oodGuardFlaggedPassedCount}`);
     },
     onClean: () => {
       console.log(`[RECONCILE] OK — nội bộ khớp với sàn.`);
-      console.log(`[SUMMARY] regimeChangeCount=${regimeChangeCount}, willOpenCount(dryRun)=${willOpenCount}, tickErrorCount=${tickErrorCount}`);
+      console.log(`[SUMMARY] regimeChangeCount=${regimeChangeCount}, willOpenCount(dryRun)=${willOpenCount}, tickErrorCount=${tickErrorCount}, oodGuardEnabled=${OOD_GUARD_ENABLED}, oodGuardShortEvalCount=${oodGuardShortEvalCount}, oodGuardFlaggedCount=${oodGuardFlaggedCount}, oodGuardFlaggedPassedCount=${oodGuardFlaggedPassedCount}`);
     },
     onError: (err) => console.error(`[RECONCILE_ERROR] (đã bắt, KHÔNG crash): ${err.message}`),
   });
@@ -430,7 +493,7 @@ async function main(): Promise<void> {
     reconciler.stop();
     feed.stop();
     await telegramQueue.flush();
-    console.log(`Tổng kết phiên: regimeChangeCount=${regimeChangeCount}, willOpenCount(dryRun)=${willOpenCount}, tickErrorCount=${tickErrorCount}`);
+    console.log(`Tổng kết phiên: regimeChangeCount=${regimeChangeCount}, willOpenCount(dryRun)=${willOpenCount}, tickErrorCount=${tickErrorCount}, oodGuardEnabled=${OOD_GUARD_ENABLED}, oodGuardShortEvalCount=${oodGuardShortEvalCount}, oodGuardFlaggedCount=${oodGuardFlaggedCount}, oodGuardFlaggedPassedCount=${oodGuardFlaggedPassedCount}`);
     process.exit(0);
   };
   process.on('SIGINT', () => void shutdown());

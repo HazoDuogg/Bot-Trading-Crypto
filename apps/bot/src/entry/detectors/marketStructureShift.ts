@@ -9,20 +9,19 @@ export interface MssConfig {
 /** TICKET-043 — granular reason detectMarketStructureShift() found no confirmation, for funnel reporting only. */
 export type MssFailReason = 'NO_HIGHER_LOW_PATTERN' | 'NO_REFERENCE_BETWEEN' | 'NEVER_BROKE_REFERENCE';
 
+/** TICKET-125: detectMarketStructureShift()'s confirming index PLUS the reference price level it broke — same walk, richer result. */
+export interface MssDetailedResult {
+  index: number;
+  levelPrice: number;
+}
+
 /**
- * B.4 — confirms a reversal on a smaller timeframe (1m/3m) before entry. Caller passes only the
- * candles since the 5m setup (OB/FVG/Sweep) formed; returns the index (in `candles`) of the
- * candle whose close confirmed the mini-BOS, or null if not confirmed yet in the given window.
- *
- * TICKET-009: reference point is the swing that already exists BETWEEN the two lows/highs being
- * compared (closest one to the later low/high), not one that forms after — enters sooner, at the
- * cost of more false signals. Intentional per PM: SL is already tight (0.1×ATR), so a false entry
- * costs little while a real move is caught earlier.
- * BULLISH: higher-low (lows[k] > lows[k-1]), referenceHigh = highest-index swing high with
- *   lows[k-1].index < index < lows[k].index, then close > referenceHigh.price after lows[k].index.
- * BEARISH: mirror — lower-high, referenceLow between the two highs, then close < referenceLow.price.
+ * TICKET-125: shared core walk for both detectMarketStructureShift() (index-only, existing contract,
+ * entryRouter.ts depends on it unchanged) and detectMarketStructureShiftWithLevel() (index + the
+ * swing-anchored reference price it broke, new — used only by shadow audit scripts, never by
+ * entryRouter.ts). Extracting this avoids the two functions' walks ever silently diverging.
  */
-export function detectMarketStructureShift(candles: CandleData[], direction: Direction, config: MssConfig): number | null {
+function detectMarketStructureShiftCore(candles: CandleData[], direction: Direction, config: MssConfig): MssDetailedResult | null {
   const swings = detectSwingPoints(candles, config.fractalN);
 
   if (direction === 'BULLISH') {
@@ -34,7 +33,7 @@ export function detectMarketStructureShift(candles: CandleData[], direction: Dir
       if (between.length === 0) continue; // no reference high formed between these two lows
       const referenceHigh = between.reduce((closest, h) => (h.index > closest.index ? h : closest));
       for (let j = lows[k].index + 1; j < candles.length; j++) {
-        if (candles[j].close > referenceHigh.price) return j;
+        if (candles[j].close > referenceHigh.price) return { index: j, levelPrice: referenceHigh.price };
       }
     }
     return null;
@@ -48,10 +47,39 @@ export function detectMarketStructureShift(candles: CandleData[], direction: Dir
     if (between.length === 0) continue; // no reference low formed between these two highs
     const referenceLow = between.reduce((closest, l) => (l.index > closest.index ? l : closest));
     for (let j = highs[k].index + 1; j < candles.length; j++) {
-      if (candles[j].close < referenceLow.price) return j;
+      if (candles[j].close < referenceLow.price) return { index: j, levelPrice: referenceLow.price };
     }
   }
   return null;
+}
+
+/**
+ * B.4 — confirms a reversal on a smaller timeframe (1m/3m) before entry. Caller passes only the
+ * candles since the 5m setup (OB/FVG/Sweep) formed; returns the index (in `candles`) of the
+ * candle whose close confirmed the mini-BOS, or null if not confirmed yet in the given window.
+ *
+ * TICKET-009: reference point is the swing that already exists BETWEEN the two lows/highs being
+ * compared (closest one to the later low/high), not one that forms after — enters sooner, at the
+ * cost of more false signals. Intentional per PM: SL is already tight (0.1×ATR), so a false entry
+ * costs little while a real move is caught earlier.
+ * BULLISH: higher-low (lows[k] > lows[k-1]), referenceHigh = highest-index swing high with
+ *   lows[k-1].index < index < lows[k].index, then close > referenceHigh.price after lows[k].index.
+ * BEARISH: mirror — lower-high, referenceLow between the two highs, then close < referenceLow.price.
+ *
+ * UNCHANGED signature/behavior (TICKET-125) — entryRouter.ts calls this exact function as-is.
+ */
+export function detectMarketStructureShift(candles: CandleData[], direction: Direction, config: MssConfig): number | null {
+  return detectMarketStructureShiftCore(candles, direction, config)?.index ?? null;
+}
+
+/**
+ * TICKET-125 — SEPARATE, additive function (never called by entryRouter.ts / production): same
+ * walk as detectMarketStructureShift(), but also returns the swing-anchored reference price level
+ * that was broken to confirm the shift. Used by shadow-audit scripts that need to compute
+ * distance-from-break-in-ATR and log the actual level, not just a boolean.
+ */
+export function detectMarketStructureShiftWithLevel(candles: CandleData[], direction: Direction, config: MssConfig): MssDetailedResult | null {
+  return detectMarketStructureShiftCore(candles, direction, config);
 }
 
 /**

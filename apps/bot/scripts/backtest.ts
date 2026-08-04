@@ -9,7 +9,7 @@
  * No look-ahead: at each 5m step, every timeframe is sliced to only candles already CLOSED as of
  * that step's decision time (two-pointer, same alignment technique as calibrateThresholds.ts).
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import type { CandleData } from '../dist/regime/types.js';
 import { RegimeConfig } from '../dist/regime/config.js';
@@ -24,7 +24,13 @@ import {
 import { INITIAL_SYMBOL_STATE, type CloseTradeEvent, type OrchestratorConfig, type SymbolState } from '../dist/orchestrator/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import type { EntryStyleForNeutral, FunnelEvent } from '../dist/entry/types.js';
-import { DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, DEFAULT_PLAN_AUTO_SELECTION_CONFIG } from '../dist/xgbFilter/config.js';
+import {
+  DEFAULT_MOMENTUM_FILTER_CONFIG,
+  DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG,
+  DEFAULT_PLAN_AUTO_SELECTION_CONFIG,
+  MOMENTUM_MODEL_PATH,
+  MOMENTUM_BEARISH_MODEL_PATH,
+} from '../dist/xgbFilter/config.js';
 import type { OpenPositionRisk } from '../dist/risk/riskPool.js';
 import type { TpPlan } from '../dist/risk/slTpManager.js';
 import { emptyFunnelStats, fmtInt, funnelReportMarkdown, pct, STATE_PASS_REGIMES, type RegimeFunnelStats } from './entryFunnelReport.js';
@@ -118,12 +124,36 @@ function parseArgs(): {
    */
   momentumModelVersion: 'v1' | 'v3';
   /**
+   * TICKET-123 Variant C/D — CLI flag `--model-mode=` (or env var MODEL_MODE), 'V1' (default,
+   * production behavior byte-identical to every ticket before this one) or 'V7_RAW' (TICKET-118's
+   * Cách B bullish/bearish RAW — uncalibrated — ONNX exports, models/xgb_momentum_{bullish,bearish}_v7_raw.onnx).
+   * Independent of momentumModelVersion above (that flag is TICKET-098's v1/v3 A/B test); kept as a
+   * separate flag/field so V7_RAW composes cleanly with the OOD guard (Variant D) without touching
+   * the v3 experimental path. No silent fallback: if V7_RAW is requested, orchestrator.ts's existing
+   * getSchemaCached()/scoreMomentum() ONNX-session loading already throws (fs.readFileSync/
+   * onnxruntime-node both throw on a missing/invalid file) rather than falling back to V1 — this
+   * flag only ever POINTS at the V7_RAW files, it never wraps that load in a try/catch.
+   */
+  modelMode: 'V1' | 'V7_RAW';
+  /**
    * TICKET-101 Việc 2 — TODO_CONFIRM (PM gợi ý 50-60%, chưa chốt số): trần TỔNG MARGIN thật đang mở
    * cùng lúc trên cả 4 coin gộp lại, dạng phần trăm THUẦN (VD 50, không phải 0.5) — chia cho 100 ở
    * đây rồi truyền tiếp dạng phân số vào OrchestratorConfig.maxTotalMarginPct, cùng convention
    * riskPoolMaxPct. undefined (mặc định, không truyền cờ) = không giới hạn, khớp mọi ticket trước.
    */
   maxTotalMarginPct?: number;
+  /**
+   * TICKET-122 — opt-in, default-inert OOD guard CLI flags for the Bearish (SHORT) MOMENTUM_DIRECT
+   * model. `NONE` (default, or the flag omitted entirely) means OrchestratorConfig.oodGuardConfig
+   * stays undefined — fully inert, byte-identical to every ticket before this one.
+   */
+  oodGuardMode: 'NONE' | 'HARD_REJECT' | 'SCORE_CAP' | 'RISK_REDUCTION';
+  /** emaRatioSlow OOD threshold (P90/P95/P97.5 of the Bearish TRAIN split, precomputed offline — never recomputed here) — only meaningful when oodGuardMode !== 'NONE'. */
+  oodGuardEmaRatioSlowThreshold: number;
+  /** SCORE_CAP only. */
+  oodGuardScoreCap: number;
+  /** RISK_REDUCTION only. */
+  oodGuardRiskReductionMultiplier: number;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -158,7 +188,12 @@ function parseArgs(): {
   const maxMarginCapArg = args.find((a) => a.startsWith('--max-margin-cap='));
   const skipDaysArg = args.find((a) => a.startsWith('--skip-days='));
   const momentumModelVersionArg = args.find((a) => a.startsWith('--momentum-model-version='));
+  const modelModeArg = args.find((a) => a.startsWith('--model-mode='));
   const maxTotalMarginPctArg = args.find((a) => a.startsWith('--max-total-margin-pct='));
+  const oodGuardModeArg = args.find((a) => a.startsWith('--ood-guard-mode='));
+  const oodGuardEmaRatioSlowThresholdArg = args.find((a) => a.startsWith('--ood-guard-ema-ratio-slow-threshold='));
+  const oodGuardScoreCapArg = args.find((a) => a.startsWith('--ood-guard-score-cap='));
+  const oodGuardRiskReductionMultiplierArg = args.find((a) => a.startsWith('--ood-guard-risk-reduction-multiplier='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -225,8 +260,23 @@ function parseArgs(): {
     skipDays: skipDaysArg ? Number(skipDaysArg.split('=')[1]) : 0,
     // TICKET-098: default 'v1' unchanged unless CLI overrides — matches every ticket before this one exactly.
     momentumModelVersion: (momentumModelVersionArg ? momentumModelVersionArg.split('=')[1] : 'v1') as 'v1' | 'v3',
+    // TICKET-123: CLI flag wins over env var wins over default 'V1'. Validated below — any other
+    // string throws immediately (fail loud, never silently treated as 'V1').
+    modelMode: ((): 'V1' | 'V7_RAW' => {
+      const raw = modelModeArg ? modelModeArg.split('=')[1] : (process.env.MODEL_MODE ?? 'V1');
+      if (raw !== 'V1' && raw !== 'V7_RAW') {
+        throw new Error(`--model-mode/MODEL_MODE phải là 'V1' hoặc 'V7_RAW', nhận được: "${raw}"`);
+      }
+      return raw;
+    })(),
     // TICKET-101 Việc 2: undefined (no cap) unless CLI overrides — matches every ticket before this one exactly.
     maxTotalMarginPct: maxTotalMarginPctArg ? Number(maxTotalMarginPctArg.split('=')[1]) / 100 : undefined,
+    // TICKET-122: default 'NONE' unchanged unless CLI overrides — OrchestratorConfig.oodGuardConfig
+    // stays undefined below, matching every ticket before this one exactly.
+    oodGuardMode: (oodGuardModeArg ? oodGuardModeArg.split('=')[1] : 'NONE') as 'NONE' | 'HARD_REJECT' | 'SCORE_CAP' | 'RISK_REDUCTION',
+    oodGuardEmaRatioSlowThreshold: oodGuardEmaRatioSlowThresholdArg ? Number(oodGuardEmaRatioSlowThresholdArg.split('=')[1]) : 0,
+    oodGuardScoreCap: oodGuardScoreCapArg ? Number(oodGuardScoreCapArg.split('=')[1]) : 0,
+    oodGuardRiskReductionMultiplier: oodGuardRiskReductionMultiplierArg ? Number(oodGuardRiskReductionMultiplierArg.split('=')[1]) : 1.0,
   };
 }
 
@@ -397,10 +447,15 @@ async function main(): Promise<void> {
     dateTo,
     skipDays,
     momentumModelVersion,
+    modelMode,
     maxTotalMarginPct,
+    oodGuardMode,
+    oodGuardEmaRatioSlowThreshold,
+    oodGuardScoreCap,
+    oodGuardRiskReductionMultiplier,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}, momentumModelVersion=${momentumModelVersion}, maxTotalMarginPct=${maxTotalMarginPct !== undefined ? `${(maxTotalMarginPct * 100).toFixed(1)}%` : '(không giới hạn)'}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}, momentumModelVersion=${momentumModelVersion}, modelMode=${modelMode}, maxTotalMarginPct=${maxTotalMarginPct !== undefined ? `${(maxTotalMarginPct * 100).toFixed(1)}%` : '(không giới hạn)'}, oodGuardMode=${oodGuardMode}, oodGuardEmaRatioSlowThreshold=${oodGuardEmaRatioSlowThreshold}, oodGuardScoreCap=${oodGuardScoreCap}, oodGuardRiskReductionMultiplier=${oodGuardRiskReductionMultiplier}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -448,6 +503,18 @@ async function main(): Promise<void> {
     momentumDirectCircuitBreakerLossThreshold, // TICKET-081: TODO_CONFIRM, default 999999 (never triggers) unchanged unless CLI overrides.
     momentumDirectCircuitBreakerCooldownMs, // TICKET-081: TODO_CONFIRM, default 0 unchanged unless CLI overrides.
     maxTotalMarginPct, // TICKET-101 Việc 2: TODO_CONFIRM, undefined (no cap) unless CLI overrides.
+    // TICKET-122: undefined for oodGuardMode='NONE' (default) — orchestrator.ts's OOD guard code
+    // stays fully inert, matching every ticket before this one exactly.
+    ...(oodGuardMode !== 'NONE'
+      ? {
+          oodGuardConfig: {
+            emaRatioSlowThreshold: oodGuardEmaRatioSlowThreshold,
+            mode: oodGuardMode,
+            scoreCapValue: oodGuardScoreCap,
+            riskReductionMultiplier: oodGuardRiskReductionMultiplier,
+          },
+        }
+      : {}),
     // TICKET-098: undefined for 'v1' (default) — orchestrator.ts falls back to xgbFilter/config.ts's
     // production v1 paths unchanged. 'v3' points at TICKET-097's experimental model files.
     ...(momentumModelVersion === 'v3'
@@ -458,7 +525,39 @@ async function main(): Promise<void> {
           momentumBearishSchemaPath: path.join(MODELS_DIR, 'xgb_momentum_v3_bearish_experimental_feature_schema.json'),
         }
       : {}),
+    // TICKET-123 Variant C/D: undefined for modelMode='V1' (default) — orchestrator.ts falls back to
+    // xgbFilter/config.ts's production v1 paths unchanged. 'V7_RAW' points at TICKET-118's Cách B
+    // bullish/bearish RAW (uncalibrated) ONNX exports. Takes precedence over the v3 block above if
+    // both were somehow requested (spread order: this object literal wins since it's listed last).
+    ...(modelMode === 'V7_RAW'
+      ? {
+          momentumModelPath: path.join(MODELS_DIR, 'xgb_momentum_bullish_v7_raw.onnx'),
+          momentumSchemaPath: path.join(MODELS_DIR, 'xgb_momentum_bullish_v7_raw_feature_schema.json'),
+          momentumBearishModelPath: path.join(MODELS_DIR, 'xgb_momentum_bearish_v7_raw.onnx'),
+          momentumBearishSchemaPath: path.join(MODELS_DIR, 'xgb_momentum_bearish_v7_raw_feature_schema.json'),
+        }
+      : {}),
   };
+  // TICKET-123: fail-loud proof-of-model-in-use for the report — check file existence explicitly
+  // here (in addition to orchestrator.ts's own throw-on-load-failure) so a missing V7_RAW artifact
+  // is caught at startup, before any candle is processed, with a clear message.
+  if (modelMode === 'V7_RAW') {
+    for (const p of [
+      config.momentumModelPath,
+      config.momentumSchemaPath,
+      config.momentumBearishModelPath,
+      config.momentumBearishSchemaPath,
+    ]) {
+      if (p === undefined || !existsSync(p)) {
+        throw new Error(`MODEL_MODE=V7_RAW nhưng không tìm thấy file model/schema: ${p}`);
+      }
+    }
+    console.log(
+      `MODEL_MODE=V7_RAW — dùng model: bullish=${config.momentumModelPath}, bullishSchema=${config.momentumSchemaPath}, bearish=${config.momentumBearishModelPath}, bearishSchema=${config.momentumBearishSchemaPath}`,
+    );
+  } else {
+    console.log(`MODEL_MODE=V1 — dùng model production mặc định (${MOMENTUM_MODEL_PATH}, ${MOMENTUM_BEARISH_MODEL_PATH}), KHÔNG dùng V7_RAW.`);
+  }
 
   let accountBalance = startBalance;
   // TICKET-056: Max Drawdown — the "cost" of allowing concentrated multi-position risk, tracked
@@ -471,6 +570,13 @@ async function main(): Promise<void> {
   // never falsely blames "risk pool" for what's actually the Momentum Gate rejecting NEUTRAL_TRANSITION.
   let riskPoolSkippedCount = 0;
   let neutralGateRejectedCount = 0;
+
+  // TICKET-122 — diagnostic-only accumulator: every SHORT MOMENTUM_DIRECT gate evaluation this run
+  // produced (via onMomentumGateEvaluation, TICKET-109's existing pass-through callback), so the
+  // guard's "candidates affected" count and OOD-group-vs-non-OOD-group winrate can be computed
+  // offline (joined against data/all-candidates-with-outcomes.csv by symbol+timestamp+side) without
+  // any new plumbing inside orchestrator.ts itself. Never read by any decision logic.
+  const shortMomentumDirectEvaluations: { symbol: string; timestamp: number; score: number; passed: boolean; oodFlagged: boolean }[] = [];
   const manipulatedLogLines: string[] = []; // TICKET-027
   const dangerZoneLogLines: string[] = []; // TICKET-033
 
@@ -629,6 +735,19 @@ async function main(): Promise<void> {
           else if (d.adxDirection1h === 'FLAT') setupNotFiredFlatCount++;
           else setupNotFiredOtherCount++;
         },
+        undefined, // onRegimeMetrics — not needed by this diagnostic
+        // TICKET-122 — collect every SHORT MOMENTUM_DIRECT gate evaluation for offline OOD analysis.
+        (evaluation) => {
+          if (evaluation.gateType === 'MOMENTUM_DIRECT' && evaluation.side === 'SHORT') {
+            shortMomentumDirectEvaluations.push({
+              symbol: evaluation.symbol,
+              timestamp: evaluation.timestamp,
+              score: evaluation.score,
+              passed: evaluation.passed,
+              oodFlagged: evaluation.oodFlagged === true,
+            });
+          }
+        },
       );
       sd.state = result.symbolState;
       accountBalance = result.accountBalance;
@@ -763,10 +882,24 @@ async function main(): Promise<void> {
       planAutoSelectionEnabled,
       maxConcurrentPositionsPerSymbol,
       momentumDirectEnabled,
-    ) + '-correlated';
+    ) +
+    '-correlated' +
+    // TICKET-122: only appended when the guard is actually active, so every run before this ticket
+    // (and the baseline run with oodGuardMode=NONE) keeps its exact pre-existing filename.
+    (oodGuardMode !== 'NONE' ? `-ood${oodGuardMode.toLowerCase().replace(/_/g, '')}-${oodGuardEmaRatioSlowThreshold}` : '');
   const tradesPath = path.resolve(process.cwd(), `data/backtest-trades-${suffix}.csv`);
   writeFileSync(tradesPath, tradesCsv(trades));
   console.log(`→ ${tradesPath}`);
+
+  // TICKET-122 — diagnostic-only OOD guard evaluation log (never influences trades/report above).
+  if (oodGuardMode !== 'NONE') {
+    const oodDiagPath = path.resolve(process.cwd(), `data/ticket122-ood-diagnostics-${suffix}.csv`);
+    const oodHeader = 'symbol,timestamp,score,passed,oodFlagged';
+    const oodRows = shortMomentumDirectEvaluations.map((e) => [e.symbol, e.timestamp, e.score, e.passed, e.oodFlagged].join(','));
+    writeFileSync(oodDiagPath, [oodHeader, ...oodRows].join('\n') + '\n');
+    const oodFlaggedCount = shortMomentumDirectEvaluations.filter((e) => e.oodFlagged).length;
+    console.log(`→ ${oodDiagPath} (${shortMomentumDirectEvaluations.length} SHORT MOMENTUM_DIRECT evaluations, ${oodFlaggedCount} OOD-flagged)`);
+  }
 
   const totalTrades = trades.length;
   const wins = trades.filter((t) => t.pnlUsd > 0).length;
@@ -822,6 +955,7 @@ async function main(): Promise<void> {
     `- momentumDirectCorrelationRiskMultiplier: ${momentumDirectCorrelationRiskMultiplier} (TICKET-071, TODO_CONFIRM, CLI-overridable, default 1.0 = không đổi size, nhân vào riskMultiplier khi trigger kích hoạt — thay thế cơ chế chặn hẳn của TICKET-070)`,
     `- momentumDirectCircuitBreakerLossThreshold: ${momentumDirectCircuitBreakerLossThreshold} (TICKET-081, TODO_CONFIRM, CLI-overridable, default 999999 = không bao giờ kích hoạt — tạm dừng MOMENTUM_DIRECT cho đúng symbol+side sau N lần thua SL liên tiếp)`,
     `- momentumDirectCircuitBreakerCooldownMs: ${momentumDirectCircuitBreakerCooldownMs}ms (TICKET-081, TODO_CONFIRM, CLI-overridable, default 0 — thời gian tạm dừng sau khi cầu dao kích hoạt, reset khi có 1 lệnh thắng)`,
+    `- oodGuardMode: ${oodGuardMode} (TICKET-122, TODO_CONFIRM, CLI-overridable, default NONE = tắt hẳn — guard OOD cho model SHORT MOMENTUM_DIRECT dựa trên emaRatioSlow, threshold=${oodGuardEmaRatioSlowThreshold}, scoreCap=${oodGuardScoreCap}, riskReductionMultiplier=${oodGuardRiskReductionMultiplier})`,
     `- planAutoSelectionEnabled: ${planAutoSelectionEnabled} (TICKET-052, AI-driven Plan A/B selection, TREND only, threshold=${config.planAutoSelectionConfig.planAutoSelectionMomentumThreshold})`,
     `- Runner trailing: ATR (2.5×ATR), không dùng Structure trailing`,
     `- takerFeeRate: 0.0004 (TODO_CONFIRM — Trader chưa cung cấp số thật)`,

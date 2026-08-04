@@ -1,0 +1,63 @@
+{
+  "numeric_features": [
+    "volAdjReturn5m",
+    "emaRatioFast",
+    "emaRatioSlow",
+    "adx1h",
+    "atrPercentile5m",
+    "bbWidthPercentile15m",
+    "volumeZScore5m",
+    "correlatedRiskRatio",
+    "distanceToNearestSwingAtr"
+  ],
+  "categorical_feature_order": [
+    "atrTrend5m",
+    "adxDirection1h",
+    "macroDirection",
+    "symbol"
+  ],
+  "categorical_features": {
+    "atrTrend5m": [
+      "decreasing",
+      "increasing"
+    ],
+    "adxDirection1h": [
+      "DOWN",
+      "UP"
+    ],
+    "macroDirection": [
+      "DOWN",
+      "UP"
+    ],
+    "symbol": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT",
+      "XRPUSDT"
+    ]
+  },
+  "missing_categorical_value": "UNKNOWN",
+  "feature_order": [
+    "volAdjReturn5m",
+    "emaRatioFast",
+    "emaRatioSlow",
+    "adx1h",
+    "atrPercentile5m",
+    "bbWidthPercentile15m",
+    "volumeZScore5m",
+    "correlatedRiskRatio",
+    "distanceToNearestSwingAtr",
+    "atrTrend5m__decreasing",
+    "atrTrend5m__increasing",
+    "adxDirection1h__DOWN",
+    "adxDirection1h__UP",
+    "macroDirection__DOWN",
+    "macroDirection__UP",
+    "symbol__BTCUSDT",
+    "symbol__ETHUSDT",
+    "symbol__SOLUSDT",
+    "symbol__XRPUSDT"
+  ],
+  "calibration": "NONE \u2014 raw XGBClassifier.predict_proba() output. Output tensor is named 'calibrated_probabilities' ONLY for structural compatibility with momentumScorer.ts's scoreMomentum(); it is NOT Platt-scaled or otherwise calibrated. See TICKET-123 Variant C.",
+  "source": "TICKET-118 Cach B fixed 60/20/20 split (cachB-{side}-original), ticket118Common.py XGB_PARAMS, momentum-v6-labeled.csv"
+}

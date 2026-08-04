@@ -194,6 +194,10 @@ export interface MomentumGateEvaluation {
   entryPriceCandidate: number;
   /** The SL price this candidate WOULD have used, computed via the exact same existing formula the real setup uses for this gateType (never a new formula). */
   slPriceCandidate: number;
+  /** TICKET-119 — diagnostic-only pass-through of regimeOutput.regime at this call site, for offline analysis (regime-segmented AUC breakdowns). Optional: never read by any decision logic. */
+  regime?: MarketRegime;
+  /** TICKET-122 — diagnostic-only: true when this SHORT MOMENTUM_DIRECT evaluation's emaRatioSlow was flagged OOD by config.oodGuardConfig (undefined/false whenever the guard is inert, and always undefined for LONG). Never itself read by any decision logic — only for offline counting of "candidates affected by the guard". */
+  oodFlagged?: boolean;
 }
 
 function touchesFavorable(side: 'LONG' | 'SHORT', candle: CandleData, price: number): boolean {
@@ -437,8 +441,27 @@ async function tryMomentumDirect(
 
   const longScore = await scoreMomentumForSide('LONG', input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection, input.correlatedRiskRatio, config);
   const shortScore = await scoreMomentumForSide('SHORT', input.symbol, input.candles5m, input.candles1hMomentum, regimeOutput, macroDirection, input.correlatedRiskRatio, config);
+
+  // TICKET-122 — Bearish (SHORT) MOMENTUM_DIRECT OOD guard, Bearish-model-specific per the ticket
+  // (LONG side untouched). Recomputes crossFeatures via the SAME computeMomentumCrossFeatures()
+  // scoreMomentumForSide() already calls internally — never a new formula, same non-invasive reuse
+  // pattern TICKET-109/119 used. config.oodGuardConfig undefined (default) => isShortOod is always
+  // false and every branch below is a no-op: byte-identical to pre-TICKET-122 behavior.
+  const oodGuardConfig = config.oodGuardConfig;
+  const oodCrossFeatures = oodGuardConfig ? computeMomentumCrossFeatures(input.candles5m, input.candles1hMomentum) : undefined;
+  const isShortOod = oodGuardConfig !== undefined && oodCrossFeatures !== undefined && oodCrossFeatures.emaRatioSlow > oodGuardConfig.emaRatioSlowThreshold;
+
+  // SCORE_CAP: use min(shortScore, scoreCapValue) as the EFFECTIVE score for the pass/fail check
+  // only — the diagnostic MomentumGateEvaluation below still logs the real, uncapped shortScore.
+  const shortScoreEffective = isShortOod && oodGuardConfig!.mode === 'SCORE_CAP' && shortScore !== undefined ? Math.min(shortScore, oodGuardConfig!.scoreCapValue) : shortScore;
+
   const longPasses = longScore !== undefined && detectMomentumDirect(longScore, 'LONG', config.momentumDirectThreshold);
-  const shortPasses = shortScore !== undefined && detectMomentumDirect(shortScore, 'SHORT', config.momentumDirectThreshold);
+  // HARD_REJECT: force shortPasses=false regardless of the actual (or capped) score — never becomes
+  // a candidate.
+  const shortPasses =
+    !(isShortOod && oodGuardConfig!.mode === 'HARD_REJECT') &&
+    shortScoreEffective !== undefined &&
+    detectMomentumDirect(shortScoreEffective, 'SHORT', config.momentumDirectThreshold);
 
   // TICKET-109 — fire for EVERY score actually computed this call (both LONG and SHORT), passed or
   // rejected, BEFORE any of the early returns below — this is the "runs regardless of outcome"
@@ -460,6 +483,7 @@ async function tryMomentumDirect(
           passed: longPasses,
           entryPriceCandidate,
           slPriceCandidate: computeMomentumDirectSlPrice('LONG', entryPriceCandidate, currentCandle, gateAtr, config),
+          regime: regimeOutput.regime,
         });
       }
       if (shortScore !== undefined) {
@@ -474,6 +498,8 @@ async function tryMomentumDirect(
           passed: shortPasses,
           entryPriceCandidate,
           slPriceCandidate: computeMomentumDirectSlPrice('SHORT', entryPriceCandidate, currentCandle, gateAtr, config),
+          regime: regimeOutput.regime,
+          oodFlagged: isShortOod,
         });
       }
     }
@@ -505,6 +531,13 @@ async function tryMomentumDirect(
   const hasOtherSymbolSameSideOpen = (input.momentumDirectOpenPositions ?? []).some((p) => p.symbol !== input.symbol && p.side === side);
   const correlationRiskMultiplier = correlationElevated && hasOtherSymbolSameSideOpen ? config.momentumDirectCorrelationRiskMultiplier : 1.0;
 
+  // TICKET-122 — RISK_REDUCTION mode: still allow the OOD SHORT candidate through normally, but
+  // shrink its size via the EXACT SAME multiplication point correlationRiskMultiplier above already
+  // uses (TICKET-071 precedent) — no new plumbing. side==='SHORT' is implied by isShortOod (only ever
+  // computed for the SHORT score), checked explicitly here for clarity since `side` may end up LONG
+  // when both sides passed and LONG scored higher.
+  const oodRiskMultiplier = side === 'SHORT' && isShortOod && oodGuardConfig?.mode === 'RISK_REDUCTION' ? oodGuardConfig.riskReductionMultiplier : 1.0;
+
   // Mandatory macro alignment check — unlike routeEntry()'s cascade, NOT gated behind
   // entryRouterConfig.macroTrendFilterEnabled (TICKET-059 Phần B lists this as an unconditional
   // step for MOMENTUM_DIRECT, not an A/B-testable optional filter).
@@ -534,7 +567,7 @@ async function tryMomentumDirect(
     // this same riskMultiplier field, which tryOpenNewPosition() already multiplies together with
     // momentumMultiplier into combinedRiskMultiplier before sizing — no new plumbing, reuses the
     // exact mechanism regimeRiskMultiplier/momentumMultiplier already combine through.
-    riskMultiplier: config.entryRouterConfig.regimeRiskMultiplier[regimeOutput.regime] * correlationRiskMultiplier,
+    riskMultiplier: config.entryRouterConfig.regimeRiskMultiplier[regimeOutput.regime] * correlationRiskMultiplier * oodRiskMultiplier,
     tpPriceOverride,
   };
 }
@@ -644,6 +677,7 @@ async function tryOpenNewPosition(
         passed: gatePassed,
         entryPriceCandidate: effectiveDraftSetup.entryPrice,
         slPriceCandidate: effectiveDraftSetup.slPrice,
+        regime: regimeOutput.regime,
       });
     }
 
