@@ -15,6 +15,7 @@ import type { DraftSetup, FunnelCallback } from '../entry/types.js';
 import { detectSwingPoints, latestSwingPointBefore } from '../entry/detectors/swingPoints.js';
 import { computeDirection5m, type Direction5m } from './neutral5mDirectionSelector.js';
 import { computeDirection5mRelaxed } from './neutral5mDirectionGatedRouting.js';
+import { is5mConfirmed } from './neutralMacroConflictOverride.js';
 import { buildFeatureVector, computeMomentumCrossFeatures, loadFeatureSchema, type FeatureSchema } from '../xgbFilter/featureBuilder.js';
 import { scoreMomentum } from '../xgbFilter/momentumScorer.js';
 import { computeMomentumMultiplier } from '../xgbFilter/momentumMultiplier.js';
@@ -239,6 +240,34 @@ export interface MomentumGateEvaluation {
    * whenever direction5mGatedRouting itself is undefined.
    */
   structuralBreakDiagnostic5m?: Direction5m;
+  /**
+   * TICKET-138 — diagnostic-only: true when THIS side's candidate conflicts with the 1D macro
+   * direction ((side==='LONG' && macroDirection==='DOWN') || (side==='SHORT' && macroDirection==='UP')).
+   * Computed and reported for gateType='MOMENTUM_DIRECT' rows whenever regime===NEUTRAL_TRANSITION,
+   * REGARDLESS of config.neutralMacroConflictOverrideMode (so offline reports can see the conflict
+   * rate even on a 'NONE'/'UNFILTERED' run) — never itself read by any decision logic here. undefined
+   * for every other regime (macro conflict is only ever actionable for NEUTRAL_TRANSITION per this
+   * ticket's scope).
+   */
+  macroConflict?: boolean;
+  /**
+   * TICKET-138 — diagnostic-only pass-through of neutralMacroConflictOverride.ts's is5mConfirmed()
+   * verdict for this exact side. Only computed (non-undefined) when macroConflict===true (no reason to
+   * evaluate it otherwise) — computed REGARDLESS of config.neutralMacroConflictOverrideMode, so a
+   * 'NONE'/'UNFILTERED' offline report can still see what the CONDITIONAL_5M rule would have decided.
+   * Never itself read by any decision logic here except inside tryMomentumDirect()'s own
+   * evaluateMacroConflictOverride() when mode==='CONDITIONAL_5M' — this field is a pure pass-through of
+   * that same computation, not a second independent evaluation.
+   */
+  macroConflict5mConfirmed?: boolean;
+  /**
+   * TICKET-138 — diagnostic-only: true when this side's macro conflict was ACTUALLY overridden (the
+   * hard block was skipped) per config.neutralMacroConflictOverrideMode. Always false when
+   * macroConflict!==true, or when the mode is 'NONE'. Note: this reflects what evaluateMacroConflictOverride()
+   * computed for this side in the pre-side-selection diagnostic pass — the REAL production decision is
+   * only ever applied to whichever side tryMomentumDirect() actually selected as `side` further down.
+   */
+  macroConflictOverridden?: boolean;
 }
 
 function touchesFavorable(side: 'LONG' | 'SHORT', candle: CandleData, price: number): boolean {
@@ -447,6 +476,34 @@ function computeMomentumDirectSlPrice(side: 'LONG' | 'SHORT', entryPrice: number
 }
 
 /**
+ * TICKET-138 — single shared evaluation for both (a) the pre-side-selection diagnostic capture (both
+ * LONG and SHORT, always computed whenever regime===NEUTRAL_TRANSITION, independent of `mode` — see
+ * MomentumGateEvaluation's macroConflict / is5mConfirmed doc comments) and (b) the real decision at the
+ * mandatory macro-alignment check further down (only for the finally-chosen `side`). Kept as one
+ * function so the diagnostic fields and the real decision can never drift out of sync with each other.
+ * `mode==='NONE'` (or regime!==NEUTRAL_TRANSITION, or no macro conflict at all) never overrides —
+ * byte-identical to every ticket before this one.
+ */
+function evaluateMacroConflictOverride(
+  side: 'LONG' | 'SHORT',
+  macroDirection: 'UP' | 'DOWN' | 'FLAT' | undefined,
+  regime: MarketRegime,
+  candles5m: CandleData[],
+  mode: 'NONE' | 'UNFILTERED' | 'CONDITIONAL_5M',
+): { macroConflict: boolean; is5mConfirmed?: boolean; overridden: boolean } {
+  const macroConflict = (side === 'LONG' && macroDirection === 'DOWN') || (side === 'SHORT' && macroDirection === 'UP');
+  if (!macroConflict || regime !== MarketRegime.NEUTRAL_TRANSITION) {
+    return { macroConflict, overridden: false };
+  }
+  // Always computed once macroConflict+NEUTRAL_TRANSITION hold, regardless of `mode` — cheap
+  // (EMA9/EMA21/DI on the existing 5m window) and lets offline reports see the CONDITIONAL_5M verdict
+  // even on a 'NONE'/'UNFILTERED' run.
+  const confirmed = is5mConfirmed(candles5m, side);
+  const overridden = mode === 'UNFILTERED' ? true : mode === 'CONDITIONAL_5M' ? confirmed : false;
+  return { macroConflict, is5mConfirmed: confirmed, overridden };
+}
+
+/**
  * TICKET-059 Phần B — the AI momentum score used DIRECTLY as an entry signal, independent of
  * OB/FVG/Sweep/Box Breakout/MSS. Only ever tried by the caller when routeEntry()'s cascade already
  * returned null for this candle (see tryOpenNewPosition below) — never replaces or short-circuits it.
@@ -529,11 +586,17 @@ async function tryMomentumDirect(
   // rejected, BEFORE any of the early returns below — this is the "runs regardless of outcome"
   // capture point. Diagnostic-only: reading atr here just for the hypothetical SL candidate does not
   // change anything the real code below still independently (re)checks.
+  // TICKET-138 — mode used both here (diagnostic capture, both sides) and at the real decision point
+  // further down (chosen `side` only). Defaults to 'NONE' (undefined field), byte-identical to every
+  // ticket before this one.
+  const macroOverrideMode = config.neutralMacroConflictOverrideMode ?? 'NONE';
+
   if (onMomentumGateEvaluation) {
     const gateAtr = lastDefined(wilderATRSeries(input.candles5m, RegimeConfig.ATR_PERIOD_5M));
     if (gateAtr !== undefined) {
       const entryPriceCandidate = currentCandle.close;
       if (longScore !== undefined) {
+        const longMacroOverride = evaluateMacroConflictOverride('LONG', macroDirection, regimeOutput.regime, input.candles5m, macroOverrideMode);
         onMomentumGateEvaluation({
           symbol: input.symbol,
           timestamp: currentCandle.timestamp,
@@ -549,9 +612,14 @@ async function tryMomentumDirect(
           // TICKET-130 — diagnostic-only pass-through, never read by any decision logic above.
           direction5m,
           rejectedByDirectionSelector: longPassesAiOnly && longRejectedByDirection5m,
+          // TICKET-138 — diagnostic-only pass-through, see evaluateMacroConflictOverride() above.
+          macroConflict: longMacroOverride.macroConflict || undefined,
+          macroConflict5mConfirmed: longMacroOverride.is5mConfirmed,
+          macroConflictOverridden: longMacroOverride.macroConflict ? longMacroOverride.overridden : undefined,
         });
       }
       if (shortScore !== undefined) {
+        const shortMacroOverride = evaluateMacroConflictOverride('SHORT', macroDirection, regimeOutput.regime, input.candles5m, macroOverrideMode);
         onMomentumGateEvaluation({
           symbol: input.symbol,
           timestamp: currentCandle.timestamp,
@@ -568,6 +636,10 @@ async function tryMomentumDirect(
           // TICKET-130 — diagnostic-only pass-through, never read by any decision logic above.
           direction5m,
           rejectedByDirectionSelector: shortPassesAiOnly && shortRejectedByDirection5m,
+          // TICKET-138 — diagnostic-only pass-through, see evaluateMacroConflictOverride() above.
+          macroConflict: shortMacroOverride.macroConflict || undefined,
+          macroConflict5mConfirmed: shortMacroOverride.is5mConfirmed,
+          macroConflictOverridden: shortMacroOverride.macroConflict ? shortMacroOverride.overridden : undefined,
         });
       }
     }
@@ -609,7 +681,20 @@ async function tryMomentumDirect(
   // Mandatory macro alignment check — unlike routeEntry()'s cascade, NOT gated behind
   // entryRouterConfig.macroTrendFilterEnabled (TICKET-059 Phần B lists this as an unconditional
   // step for MOMENTUM_DIRECT, not an A/B-testable optional filter).
-  if ((side === 'LONG' && macroDirection === 'DOWN') || (side === 'SHORT' && macroDirection === 'UP')) return null;
+  // TICKET-138 — opt-in, scope-restricted (regime===NEUTRAL_TRANSITION only, enforced inside
+  // evaluateMacroConflictOverride()) conditional override of this same block. `macroOverrideMode`
+  // defaults to 'NONE' -> overridden always false -> this early-return fires exactly as before this
+  // ticket (byte-identical when the flag is unset). MOMENTUM_DIRECT_BLOCKED_REGIMES at the top of this
+  // function already unconditionally excludes MANIPULATED/VOLATILE_CHOP/DANGER_ZONE/LOW_LIQUIDITY (and
+  // CORRELATED_RISK) before this line is ever reached, so the ticket's "also block if state is
+  // MANIPULATED/VOLATILE_CHOP/DANGER_ZONE/LOW_LIQUIDITY" requirement is already vacuously satisfied
+  // for every candidate that can reach here — no additional check needed (see TICKET-138 report for
+  // the full reasoning).
+  const macroOverride = evaluateMacroConflictOverride(side, macroDirection, regimeOutput.regime, input.candles5m, macroOverrideMode);
+  if (macroOverride.macroConflict && !macroOverride.overridden) return null;
+  // TICKET-138 — ticket-given constant (0.30), not tuned here. 1.0 (no-op) unless the override above
+  // actually fired for this exact candidate.
+  const macroConflictRiskMultiplier = macroOverride.macroConflict && macroOverride.overridden ? 0.3 : 1.0;
 
   const atr = lastDefined(wilderATRSeries(input.candles5m, RegimeConfig.ATR_PERIOD_5M));
   if (atr === undefined) return null; // not enough 5m history to size the SL buffer
@@ -635,7 +720,7 @@ async function tryMomentumDirect(
     // this same riskMultiplier field, which tryOpenNewPosition() already multiplies together with
     // momentumMultiplier into combinedRiskMultiplier before sizing — no new plumbing, reuses the
     // exact mechanism regimeRiskMultiplier/momentumMultiplier already combine through.
-    riskMultiplier: config.entryRouterConfig.regimeRiskMultiplier[regimeOutput.regime] * correlationRiskMultiplier * oodRiskMultiplier,
+    riskMultiplier: config.entryRouterConfig.regimeRiskMultiplier[regimeOutput.regime] * correlationRiskMultiplier * oodRiskMultiplier * macroConflictRiskMultiplier,
     tpPriceOverride,
   };
 }

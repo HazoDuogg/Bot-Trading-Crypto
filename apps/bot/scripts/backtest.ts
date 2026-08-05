@@ -166,6 +166,13 @@ function parseArgs(): {
    * stays undefined/false — fully inert, byte-identical to every ticket before this one.
    */
   neutral5mDirectionGatedRoutingEnabled: boolean;
+  /**
+   * TICKET-138 — opt-in, default-inert Neutral 5m Conditional Override for HTF (1D macro) conflict CLI
+   * flag. `'NONE'` (default, or the flag omitted entirely) means
+   * OrchestratorConfig.neutralMacroConflictOverrideMode stays undefined/'NONE' — fully inert,
+   * byte-identical to every ticket before this one.
+   */
+  neutralMacroConflictOverrideMode: 'NONE' | 'UNFILTERED' | 'CONDITIONAL_5M';
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -208,6 +215,7 @@ function parseArgs(): {
   const oodGuardRiskReductionMultiplierArg = args.find((a) => a.startsWith('--ood-guard-risk-reduction-multiplier='));
   const neutral5mDirectionSelectorEnabledArg = args.find((a) => a.startsWith('--neutral-5m-direction-selector-enabled='));
   const neutral5mDirectionGatedRoutingEnabledArg = args.find((a) => a.startsWith('--neutral-5m-direction-gated-routing-enabled='));
+  const neutralMacroConflictOverrideModeArg = args.find((a) => a.startsWith('--neutral-macro-conflict-override-mode='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -295,6 +303,11 @@ function parseArgs(): {
     neutral5mDirectionSelectorEnabled: neutral5mDirectionSelectorEnabledArg ? neutral5mDirectionSelectorEnabledArg.split('=')[1] === 'true' : false,
     // TICKET-131: off by default — matches OrchestratorConfig.neutral5mDirectionGatedRoutingEnabled's default.
     neutral5mDirectionGatedRoutingEnabled: neutral5mDirectionGatedRoutingEnabledArg ? neutral5mDirectionGatedRoutingEnabledArg.split('=')[1] === 'true' : false,
+    // TICKET-138: 'NONE' by default — matches OrchestratorConfig.neutralMacroConflictOverrideMode's default.
+    neutralMacroConflictOverrideMode: (neutralMacroConflictOverrideModeArg ? neutralMacroConflictOverrideModeArg.split('=')[1] : 'NONE') as
+      | 'NONE'
+      | 'UNFILTERED'
+      | 'CONDITIONAL_5M',
   };
 }
 
@@ -473,9 +486,10 @@ async function main(): Promise<void> {
     oodGuardRiskReductionMultiplier,
     neutral5mDirectionSelectorEnabled,
     neutral5mDirectionGatedRoutingEnabled,
+    neutralMacroConflictOverrideMode,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}, momentumModelVersion=${momentumModelVersion}, modelMode=${modelMode}, maxTotalMarginPct=${maxTotalMarginPct !== undefined ? `${(maxTotalMarginPct * 100).toFixed(1)}%` : '(không giới hạn)'}, oodGuardMode=${oodGuardMode}, oodGuardEmaRatioSlowThreshold=${oodGuardEmaRatioSlowThreshold}, oodGuardScoreCap=${oodGuardScoreCap}, oodGuardRiskReductionMultiplier=${oodGuardRiskReductionMultiplier}, neutral5mDirectionSelectorEnabled=${neutral5mDirectionSelectorEnabled}, neutral5mDirectionGatedRoutingEnabled=${neutral5mDirectionGatedRoutingEnabled}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}, momentumModelVersion=${momentumModelVersion}, modelMode=${modelMode}, maxTotalMarginPct=${maxTotalMarginPct !== undefined ? `${(maxTotalMarginPct * 100).toFixed(1)}%` : '(không giới hạn)'}, oodGuardMode=${oodGuardMode}, oodGuardEmaRatioSlowThreshold=${oodGuardEmaRatioSlowThreshold}, oodGuardScoreCap=${oodGuardScoreCap}, oodGuardRiskReductionMultiplier=${oodGuardRiskReductionMultiplier}, neutral5mDirectionSelectorEnabled=${neutral5mDirectionSelectorEnabled}, neutral5mDirectionGatedRoutingEnabled=${neutral5mDirectionGatedRoutingEnabled}, neutralMacroConflictOverrideMode=${neutralMacroConflictOverrideMode}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -565,6 +579,9 @@ async function main(): Promise<void> {
     // tryOpenNewPosition() never even calls computeDirection5mRelaxed() — fully inert, matching every
     // ticket before this one exactly. Never sets/touches neutralTransitionGateConfig.neutralTransitionTradingEnabled.
     ...(neutral5mDirectionGatedRoutingEnabled ? { neutral5mDirectionGatedRoutingEnabled: true } : {}),
+    // TICKET-138: 'NONE' (default) omits the field entirely -> undefined, orchestrator.ts's
+    // tryMomentumDirect() macro-alignment check fires exactly as before this ticket — fully inert.
+    ...(neutralMacroConflictOverrideMode !== 'NONE' ? { neutralMacroConflictOverrideMode } : {}),
   };
   // TICKET-123: fail-loud proof-of-model-in-use for the report — check file existence explicitly
   // here (in addition to orchestrator.ts's own throw-on-load-failure) so a missing V7_RAW artifact
@@ -637,6 +654,22 @@ async function main(): Promise<void> {
     direction5mGatedRouting: 'LONG' | 'SHORT' | 'NONE' | undefined;
     neutral5mRoutingAccepted: boolean | undefined;
     structuralBreakDiagnostic5m: 'LONG' | 'SHORT' | 'NONE' | undefined;
+  }[] = [];
+  // TICKET-138 — diagnostic-only accumulator: every NEUTRAL_TRANSITION MOMENTUM_DIRECT gate
+  // evaluation where this side actually conflicted with the 1D macro direction (macroConflict===true),
+  // same pass-through-callback pattern as TICKET-122/130/131 above. Populated on EVERY run where such
+  // a conflict occurs, regardless of neutralMacroConflictOverrideMode (evaluateMacroConflictOverride()
+  // in orchestrator.ts always computes macroConflict/is5mConfirmed once regime===NEUTRAL_TRANSITION,
+  // independent of mode) — lets the V0 baseline run itself report the conflict rate and what
+  // CONDITIONAL_5M would have decided. Never read by any decision logic.
+  const macroConflictEvaluations: {
+    symbol: string;
+    timestamp: number;
+    side: 'LONG' | 'SHORT';
+    score: number;
+    passed: boolean;
+    macroConflict5mConfirmed: boolean | undefined;
+    macroConflictOverridden: boolean;
   }[] = [];
   const manipulatedLogLines: string[] = []; // TICKET-027
   const dangerZoneLogLines: string[] = []; // TICKET-033
@@ -839,6 +872,18 @@ async function main(): Promise<void> {
               structuralBreakDiagnostic5m: evaluation.structuralBreakDiagnostic5m,
             });
           }
+          // TICKET-138 — see macroConflictEvaluations declaration above.
+          if (evaluation.gateType === 'MOMENTUM_DIRECT' && evaluation.macroConflict === true) {
+            macroConflictEvaluations.push({
+              symbol: evaluation.symbol,
+              timestamp: evaluation.timestamp,
+              side: evaluation.side,
+              score: evaluation.score,
+              passed: evaluation.passed,
+              macroConflict5mConfirmed: evaluation.macroConflict5mConfirmed,
+              macroConflictOverridden: evaluation.macroConflictOverridden === true,
+            });
+          }
         },
       );
       sd.state = result.symbolState;
@@ -985,7 +1030,10 @@ async function main(): Promise<void> {
     (neutral5mDirectionSelectorEnabled ? '-neutral5mselector' : '') +
     // TICKET-131: only appended when the new routing is actually active, so every run before this
     // ticket keeps its exact pre-existing filename.
-    (neutral5mDirectionGatedRoutingEnabled ? '-neutral5mgatedrouting' : '');
+    (neutral5mDirectionGatedRoutingEnabled ? '-neutral5mgatedrouting' : '') +
+    // TICKET-138: only appended when the override is actually active, so every run before this
+    // ticket (and the NONE-mode baseline run) keeps its exact pre-existing filename.
+    (neutralMacroConflictOverrideMode !== 'NONE' ? `-macroconflict${neutralMacroConflictOverrideMode.toLowerCase().replace(/_/g, '')}` : '');
   const tradesPath = path.resolve(process.cwd(), `data/backtest-trades-${suffix}.csv`);
   writeFileSync(tradesPath, tradesCsv(trades));
   console.log(`→ ${tradesPath}`);
@@ -1039,6 +1087,25 @@ async function main(): Promise<void> {
     const acceptedCount = neutral5mGatedRoutingEvaluations.filter((e) => e.neutral5mRoutingAccepted === true).length;
     console.log(
       `→ ${routingDiagPath} (${neutral5mGatedRoutingEvaluations.length} candidates seen, ${noneBlockedCount} blocked by direction5m=NONE, ${sideMismatchBlockedCount} blocked by side mismatch, ${acceptedCount} accepted through to the AI gate)`,
+    );
+  }
+
+  // TICKET-138 — diagnostic-only Neutral Macro Conflict Override evaluation log (never influences
+  // trades/report above), consumed offline to build data/ticket138-neutral-5m-conditional-override.md.
+  // Written on EVERY run (macroConflictEvaluations is populated regardless of
+  // neutralMacroConflictOverrideMode — see the field's doc comment in orchestrator.ts) so the V0
+  // baseline run itself can report the macro-conflict rate and what CONDITIONAL_5M would have decided.
+  {
+    const macroConflictDiagPath = path.resolve(process.cwd(), `data/ticket138-macro-conflict-diagnostics-${suffix}.csv`);
+    const macroConflictHeader = 'symbol,timestamp,side,score,passed,macroConflict5mConfirmed,macroConflictOverridden';
+    const macroConflictRows = macroConflictEvaluations.map((e) =>
+      [e.symbol, e.timestamp, e.side, e.score, e.passed, e.macroConflict5mConfirmed ?? '', e.macroConflictOverridden].join(','),
+    );
+    writeFileSync(macroConflictDiagPath, [macroConflictHeader, ...macroConflictRows].join('\n') + '\n');
+    const confirmedCount = macroConflictEvaluations.filter((e) => e.macroConflict5mConfirmed === true).length;
+    const overriddenCount = macroConflictEvaluations.filter((e) => e.macroConflictOverridden).length;
+    console.log(
+      `→ ${macroConflictDiagPath} (${macroConflictEvaluations.length} NEUTRAL_TRANSITION MOMENTUM_DIRECT candidates with a macro conflict, ${confirmedCount} 5M_CONFIRMED, ${overriddenCount} actually overridden this run)`,
     );
   }
 

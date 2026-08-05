@@ -317,6 +317,28 @@ export interface OrchestratorConfig {
    * this field; never wired into any production default config.
    */
   neutral5mDirectionGatedRoutingEnabled?: boolean;
+  /**
+   * TICKET-138 — opt-in, default-inert Neutral 5m Conditional Override for HTF (1D macro) conflict.
+   * `'NONE'` (default, including when the field itself is undefined) = fully disabled, byte-identical
+   * to every ticket before this one — tryMomentumDirect()'s mandatory macro-alignment early-return
+   * ((side==='LONG' && macroDirection==='DOWN') || (side==='SHORT' && macroDirection==='UP')) fires
+   * exactly as before. Only meaningful while regimeOutput.regime===MarketRegime.NEUTRAL_TRANSITION —
+   * TREND_RIDER and every other regime that also calls tryMomentumDirect() always keeps the
+   * unconditional hard block, regardless of this flag.
+   *   'UNFILTERED' — the macro-conflict early-return is skipped unconditionally for NEUTRAL_TRANSITION
+   *     candidates (V1, control-only per the ticket — never itself a basis for shipping to production).
+   *   'CONDITIONAL_5M' — the early-return is skipped ONLY when neutralMacroConflictOverride.ts's
+   *     is5mConfirmed() (a NEW, deliberately simpler 2-of-2 raw-EMA+raw-DI rule — NOT TICKET-130's
+   *     computeDirection5m() 3-of-3, per the ticket's explicit "Không dùng computeDirection5m() 3/3
+   *     cũ") agrees with the candidate's side; otherwise the hard block still fires, same as 'NONE'.
+   * Whenever the override actually fires (either mode), the resulting DraftSetup's riskMultiplier is
+   * additionally multiplied by 0.30 (TICKET-138 ticket-given constant, not tuned) via the SAME
+   * multiplication chain correlationRiskMultiplier/oodRiskMultiplier already use — no new plumbing.
+   * Never applies to setupType!=='MOMENTUM_DIRECT' candidates (routeEntry()'s OB/FVG/SWEEP/BOX_BREAKOUT
+   * cascade is untouched). Only backtest.ts's new --neutral-macro-conflict-override-mode= CLI flag
+   * (default 'NONE') ever sets this field; never wired into any production default config.
+   */
+  neutralMacroConflictOverrideMode?: 'NONE' | 'UNFILTERED' | 'CONDITIONAL_5M';
 }
 
 /** TICKET-081 — trạng thái cầu dao cho 1 chiều (LONG hoặc SHORT) của 1 symbol. */
