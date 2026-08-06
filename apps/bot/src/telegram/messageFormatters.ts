@@ -213,6 +213,39 @@ export function formatSafetyState5mStabilizedChangeMessage(change: SafetyState5m
   ].join('\n');
 }
 
+// ---- 5d. TICKET-144: Momentum Context Decision Matrix V2 audit notification. Fires ONLY on an
+// actual entry (decision !== 'BLOCK') or a macro-conflict candidate that got BLOCKed (the
+// audit-worthy BLOCK case — most BLOCKs are just "no macro conflict happened", not interesting).
+// Gated by the caller behind momentumContextDecisionMatrixV2Enabled — never spams every candle.
+
+export interface MomentumContextDecisionNotificationInfo {
+  symbol: string;
+  timestamp: number;
+  side: 'LONG' | 'SHORT';
+  macroDirection: 'UP' | 'DOWN' | 'FLAT' | undefined;
+  macroConflict: boolean;
+  safetyState5m: SafetyState5m;
+  decision: 'ALLOW_NORMAL' | 'ALLOW_REDUCED_RISK' | 'BLOCK';
+  riskMultiplier: number;
+  candidateId: string;
+  entryAllowed: boolean;
+  blockReason: string;
+}
+
+/** TICKET-144 diagnostic message — audit trail for V2 Decision Matrix entries/blocks, not spammed per candle. */
+export function formatMomentumContextDecisionMessage(info: MomentumContextDecisionNotificationInfo): string {
+  const icon = info.entryAllowed ? '✅' : '⛔';
+  return [
+    `${icon} [MOMENTUM CONTEXT MATRIX V2]`,
+    `#${info.symbol} ${info.side}`,
+    `Decision: ${info.decision} (riskMultiplier=${info.riskMultiplier})`,
+    `macroDirection=${info.macroDirection ?? 'N/A'} macroConflict=${info.macroConflict} safetyState5m=${info.safetyState5m}`,
+    `candidateId=${info.candidateId}`,
+    ...(info.entryAllowed ? [] : [`blockReason=${info.blockReason}`]),
+    `🕐 ${fmtTimestamp(info.timestamp)}`,
+  ].join('\n');
+}
+
 // ---- 6. Weekly summary (bonus, per ticket's extra request) ----
 
 export interface WeeklySummaryStats {

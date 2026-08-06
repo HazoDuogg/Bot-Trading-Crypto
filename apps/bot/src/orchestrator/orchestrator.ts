@@ -288,6 +288,11 @@ export interface MomentumGateEvaluation {
  * or its V2 sibling is true, once per real tryMomentumDirect() candidate that reaches the decision point
  * (post AI gate, post circuit breaker — same point the old unconditional macro-conflict block used to fire).
  * Never read by any decision logic — this is purely for the ticket's required CSV/report output.
+ *
+ * TICKET-144 added candidateId/entryAllowed (additive, backward-compatible — no existing consumer reads
+ * these two fields, none removed/renamed). decisionReason already satisfies TICKET-144's "blockReason"
+ * requirement (same underlying reason string for both allowed and blocked decisions) — kept as-is rather
+ * than renamed, to avoid touching every existing call site/CSV consumer for a cosmetic rename.
  */
 export interface MomentumContextDecisionDiagnostic {
   symbol: string;
@@ -302,6 +307,10 @@ export interface MomentumContextDecisionDiagnostic {
   decision: 'ALLOW_NORMAL' | 'ALLOW_REDUCED_RISK' | 'BLOCK';
   riskMultiplier: number;
   decisionReason: string;
+  /** TICKET-144 — same construction convention as T142A's zoneId: `${symbol}:MOMENTUM_DIRECT:${side}:${timestamp}`. */
+  candidateId: string;
+  /** TICKET-144 — derived, not independently computed: true iff decision !== 'BLOCK'. */
+  entryAllowed: boolean;
 }
 
 function touchesFavorable(side: 'LONG' | 'SHORT', candle: CandleData, price: number): boolean {
@@ -777,6 +786,9 @@ async function tryMomentumDirect(
         decision: decisionResult.decision,
         riskMultiplier: decisionResult.riskMultiplier,
         decisionReason: decisionResult.reason,
+        // TICKET-144 — same convention as T142A's zoneId construction.
+        candidateId: `${input.symbol}:MOMENTUM_DIRECT:${side}:${currentCandle.timestamp}`,
+        entryAllowed: decisionResult.decision !== 'BLOCK',
       });
     }
     if (decisionResult.decision === 'BLOCK') return null;

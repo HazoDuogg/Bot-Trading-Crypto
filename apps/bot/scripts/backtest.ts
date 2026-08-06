@@ -1717,9 +1717,12 @@ async function main(): Promise<void> {
   if (momentumContextDecisionMatrixEnabled || momentumContextDecisionMatrixV2Enabled) {
     const t143FilePrefix = momentumContextDecisionMatrixV2Enabled ? 'ticket143a-momentum-context-matrix-v2' : 'ticket143-momentum-context-matrix';
     const t143Path = path.resolve(process.cwd(), `data/${t143FilePrefix}-${suffix}.csv`);
-    const t143Header = ['symbol', 'timestamp', 'side', 'htfContext', 'macroDirection', 'macroConflict', 'safetyState5m', 'modelScore', 'momentumScore', 'decision', 'riskMultiplier', 'decisionReason'].join(',');
+    // TICKET-144 — candidateId/entryAllowed appended at the end (additive), so T143/T143A's own
+    // parsers (readDecisions() in ticket143(a)GenerateReport.ts, positional column indices 0-11)
+    // stay byte-compatible; they simply never read columns 12/13.
+    const t143Header = ['symbol', 'timestamp', 'side', 'htfContext', 'macroDirection', 'macroConflict', 'safetyState5m', 'modelScore', 'momentumScore', 'decision', 'riskMultiplier', 'decisionReason', 'candidateId', 'entryAllowed'].join(',');
     const t143Rows = momentumContextDecisionRows.map((r) =>
-      [r.symbol, r.timestamp, r.side, r.htfContext, r.macroDirection ?? '', r.macroConflict, r.safetyState5m, r.modelScore, r.momentumScore, r.decision, r.riskMultiplier, r.decisionReason].join(','),
+      [r.symbol, r.timestamp, r.side, r.htfContext, r.macroDirection ?? '', r.macroConflict, r.safetyState5m, r.modelScore, r.momentumScore, r.decision, r.riskMultiplier, r.decisionReason, r.candidateId, r.entryAllowed].join(','),
     );
     writeFileSync(t143Path, [t143Header, ...t143Rows].join('\n') + '\n');
     console.log(`→ ${t143Path} (${momentumContextDecisionRows.length} dòng)`);

@@ -31,7 +31,7 @@ import { LiveCandleFeed, type CandleData } from '../dist/live/liveCandleFeed.js'
 import { BinanceOrderExecutor, initializeLeverageForSymbols, type PositionSide } from '../dist/live/binanceOrderExecutor.js';
 import { StateReconciler, resolveAccountBalanceAfterReconcile, type InternalStateSnapshot } from '../dist/live/stateReconciler.js';
 import { loadBinanceEnvConfig } from '../dist/live/envConfig.js';
-import { processCandle, type ProcessCandleInput, type MomentumGateEvaluation } from '../dist/orchestrator/orchestrator.js';
+import { processCandle, type ProcessCandleInput, type MomentumGateEvaluation, type MomentumContextDecisionDiagnostic } from '../dist/orchestrator/orchestrator.js';
 import {
   INITIAL_SYMBOL_STATE,
   type CloseTradeEvent,
@@ -56,6 +56,7 @@ import {
   formatHtfContextChangeMessage,
   formatSafetyState5mChangeMessage,
   formatSafetyState5mStabilizedChangeMessage,
+  formatMomentumContextDecisionMessage,
 } from '../dist/telegram/messageFormatters.js';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
@@ -421,6 +422,38 @@ async function main(): Promise<void> {
           (change) => {
             console.log(`[TICKET-140 SAFETY5M STABILIZED] ${symbol}: ${change.from} → ${change.to}`);
             telegramQueue.enqueue(formatSafetyState5mStabilizedChangeMessage({ symbol, fromState: change.from, toState: change.to, timestamp: change.timestamp }));
+          },
+          // onSafetyState5mFinalStabilized/onLocalTradeThesis5m/onSetupSpecificThesis/
+          // onMomentumCandidateIntegrity — none wired in live (T140B/T141/T142/T142A never needed a
+          // live Telegram message), left undefined same as before this ticket.
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          // TICKET-144 — Decision Matrix V2 audit notification. processCandle() itself already only
+          // fires this callback when momentumContextDecisionMatrixEnabled or its V2 sibling is true;
+          // this extra CONFIG.momentumContextDecisionMatrixV2Enabled guard restricts it further to
+          // the V2 flag specifically (never fires for a hypothetical future V1-only live config), and
+          // only sends Telegram for an actual entry or a macro-conflict candidate that got BLOCKed —
+          // not every BLOCK (most BLOCKs are just "no macro conflict", not audit-worthy).
+          (diagnostic: MomentumContextDecisionDiagnostic) => {
+            if (!CONFIG.momentumContextDecisionMatrixV2Enabled) return;
+            if (!diagnostic.entryAllowed && !diagnostic.macroConflict) return;
+            telegramQueue.enqueue(
+              formatMomentumContextDecisionMessage({
+                symbol: diagnostic.symbol,
+                timestamp: diagnostic.timestamp,
+                side: diagnostic.side,
+                macroDirection: diagnostic.macroDirection,
+                macroConflict: diagnostic.macroConflict,
+                safetyState5m: diagnostic.safetyState5m,
+                decision: diagnostic.decision,
+                riskMultiplier: diagnostic.riskMultiplier,
+                candidateId: diagnostic.candidateId,
+                entryAllowed: diagnostic.entryAllowed,
+                blockReason: diagnostic.decisionReason,
+              }),
+            );
           },
         );
 

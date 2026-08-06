@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { MarketRegime } from '../regime/types.js';
 import type { CloseTradeEvent, OpenTradeEvent, PartialCloseEvent } from '../orchestrator/types.js';
+import { SafetyState5m } from '../regime/htfSafetyTypes.js';
 import {
   computeWeeklySummaryStats,
   formatBotStartMessage,
   formatFullCloseMessage,
+  formatMomentumContextDecisionMessage,
   formatPartialCloseMessage,
   formatPositionOpenedMessage,
   formatRegimeChangeMessage,
@@ -281,5 +283,34 @@ describe('computeWeeklySummaryStats + formatWeeklySummaryMessage', () => {
     expect(text).toContain('#ETHUSDT');
     expect(text).toContain('TP2: 1 lệnh');
     expect(text).toContain('SL: 1 lệnh');
+  });
+});
+
+describe('formatMomentumContextDecisionMessage (TICKET-144)', () => {
+  const base = {
+    symbol: 'SOLUSDT',
+    timestamp: Date.UTC(2026, 0, 1, 12, 0, 0),
+    side: 'SHORT' as const,
+    macroDirection: 'UP' as const,
+    macroConflict: true,
+    safetyState5m: SafetyState5m.NORMAL,
+    candidateId: 'SOLUSDT:MOMENTUM_DIRECT:SHORT:1234567890',
+  };
+
+  it('entry (entryAllowed=true) includes decision/riskMultiplier/candidateId, no blockReason line', () => {
+    const text = formatMomentumContextDecisionMessage({ ...base, decision: 'ALLOW_REDUCED_RISK', riskMultiplier: 0.3, entryAllowed: true, blockReason: 'macro_conflict_reduced_risk' });
+    expect(text).toContain('#SOLUSDT SHORT');
+    expect(text).toContain('ALLOW_REDUCED_RISK');
+    expect(text).toContain('riskMultiplier=0.3');
+    expect(text).toContain('candidateId=SOLUSDT:MOMENTUM_DIRECT:SHORT:1234567890');
+    expect(text).not.toContain('blockReason=');
+    expect(text).toContain('✅');
+  });
+
+  it('macro-conflict BLOCK (entryAllowed=false) includes blockReason', () => {
+    const text = formatMomentumContextDecisionMessage({ ...base, symbol: 'BTCUSDT', decision: 'BLOCK', riskMultiplier: 0, entryAllowed: false, blockReason: 'btc_macro_conflict' });
+    expect(text).toContain('BLOCK');
+    expect(text).toContain('blockReason=btc_macro_conflict');
+    expect(text).toContain('⛔');
   });
 });
