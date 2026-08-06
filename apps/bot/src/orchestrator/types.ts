@@ -7,6 +7,7 @@ import type { EntryRouterConfig } from '../entry/types.js';
 import type { MomentumFilterConfig, NeutralTransitionGateConfig, PlanAutoSelectionConfig } from '../xgbFilter/config.js';
 import type { LocalTradeThesis5mResult } from './localTradeThesis5m.js';
 import type { SetupThesisResult } from './setupThesis/types.js';
+import type { MomentumCandidateIntegrityResult } from './setupThesis/momentumThesis.js';
 
 export interface RegimeHysteresisState {
   previousRegime: MarketRegime | null;
@@ -96,6 +97,18 @@ export interface SetupSpecificThesisDiagnosticState {
   lastResults: SetupThesisResult[];
 }
 
+/**
+ * TICKET-142A — diagnostic-only state for the Momentum Candidate Integrity engine. Own tracker +
+ * own consecutive-run pointer (activeRun), independent of SetupSpecificThesisDiagnosticState above.
+ * Only populated/read when OrchestratorConfig.momentumCandidateIntegrityEnabled is true; undefined
+ * otherwise. Never read by any entry/risk decision.
+ */
+export interface MomentumCandidateIntegrityDiagnosticState {
+  tracker: SafetyState5mTrackerState;
+  activeRun: { side: 'LONG' | 'SHORT'; candidateId: string } | null;
+  lastResult: MomentumCandidateIntegrityResult;
+}
+
 export interface SymbolState {
   regimeState: RegimeHysteresisState;
   /** TICKET-056: was `openPosition: ManagedPositionState | null` + `openMeta` — up to config.maxConcurrentPositionsPerSymbol entries now, each tracked fully independently (its own TP/SL/trailing). */
@@ -112,6 +125,8 @@ export interface SymbolState {
   localTradeThesis5mDiagnostic?: LocalTradeThesis5mDiagnosticState;
   /** TICKET-142 — see SetupSpecificThesisDiagnosticState doc comment. Undefined when the flag is off/unused so far. */
   setupSpecificThesisDiagnostic?: SetupSpecificThesisDiagnosticState;
+  /** TICKET-142A — see MomentumCandidateIntegrityDiagnosticState doc comment. Undefined when the flag is off/unused so far. */
+  momentumCandidateIntegrityDiagnostic?: MomentumCandidateIntegrityDiagnosticState;
 }
 
 export const INITIAL_SYMBOL_STATE: SymbolState = {
@@ -485,6 +500,15 @@ export interface OrchestratorConfig {
    * standalone or together. Only backtest.ts's `--setup-specific-thesis-enabled=true` CLI flag sets this.
    */
   setupSpecificThesisEnabled?: boolean;
+  /**
+   * TICKET-142A — opt-in, default-inert Momentum Candidate Integrity diagnostic. `undefined`/`false`
+   * = fully disabled, byte-identical to every ticket before this one. Independent of
+   * setupSpecificThesisEnabled — the old computeMomentumThesis() stays untouched; this runs the
+   * FIXED tryMomentumDirect()-faithful pipeline (orchestrator/setupThesis/momentumThesis.ts's
+   * computeMomentumCandidateIntegrity()) that never yields both LONG and SHORT VALID on one candle.
+   * Only backtest.ts's new `--momentum-candidate-integrity-enabled=true` CLI flag sets this.
+   */
+  momentumCandidateIntegrityEnabled?: boolean;
 }
 
 /** TICKET-081 — trạng thái cầu dao cho 1 chiều (LONG hoặc SHORT) của 1 symbol. */

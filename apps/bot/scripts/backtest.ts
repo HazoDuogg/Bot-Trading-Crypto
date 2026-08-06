@@ -24,6 +24,7 @@ import {
 import { INITIAL_SYMBOL_STATE, type CloseTradeEvent, type OrchestratorConfig, type SymbolState } from '../dist/orchestrator/types.js';
 import type { LocalTradeThesis5mResult } from '../dist/orchestrator/localTradeThesis5m.js';
 import type { SetupThesisResult } from '../dist/orchestrator/setupThesis/types.js';
+import type { MomentumCandidateIntegrityResult } from '../dist/orchestrator/setupThesis/momentumThesis.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import type { EntryStyleForNeutral, FunnelEvent } from '../dist/entry/types.js';
 import {
@@ -215,6 +216,14 @@ function parseArgs(): {
    * data/ticket142-setup-specific-thesis.md.
    */
   setupSpecificThesisEnabled: boolean;
+  /**
+   * TICKET-142A — opt-in, default-inert Momentum Candidate Integrity diagnostic CLI flag. `false`
+   * (default, or the flag omitted entirely) means OrchestratorConfig.momentumCandidateIntegrityEnabled
+   * stays undefined/false — fully inert, byte-identical to every ticket before this one. When true,
+   * this script ALSO writes data/ticket142a-momentum-candidate-integrity-<suffix>.csv and generates
+   * data/ticket142a-momentum-candidate-integrity.md.
+   */
+  momentumCandidateIntegrityEnabled: boolean;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -263,6 +272,7 @@ function parseArgs(): {
   const safetyState5mFinalStabilizationEnabledArg = args.find((a) => a.startsWith('--safety-state-5m-final-stabilization-enabled='));
   const localTradeThesis5mEnabledArg = args.find((a) => a.startsWith('--local-trade-thesis-5m-enabled='));
   const setupSpecificThesisEnabledArg = args.find((a) => a.startsWith('--setup-specific-thesis-enabled='));
+  const momentumCandidateIntegrityEnabledArg = args.find((a) => a.startsWith('--momentum-candidate-integrity-enabled='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -365,6 +375,8 @@ function parseArgs(): {
     localTradeThesis5mEnabled: localTradeThesis5mEnabledArg ? localTradeThesis5mEnabledArg.split('=')[1] === 'true' : false,
     // TICKET-142: off by default — matches OrchestratorConfig.setupSpecificThesisEnabled's default.
     setupSpecificThesisEnabled: setupSpecificThesisEnabledArg ? setupSpecificThesisEnabledArg.split('=')[1] === 'true' : false,
+    // TICKET-142A: off by default — matches OrchestratorConfig.momentumCandidateIntegrityEnabled's default.
+    momentumCandidateIntegrityEnabled: momentumCandidateIntegrityEnabledArg ? momentumCandidateIntegrityEnabledArg.split('=')[1] === 'true' : false,
   };
 }
 
@@ -549,6 +561,7 @@ async function main(): Promise<void> {
     safetyState5mFinalStabilizationEnabled,
     localTradeThesis5mEnabled,
     setupSpecificThesisEnabled,
+    momentumCandidateIntegrityEnabled,
   } = parseArgs();
   console.log(
     `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}, momentumModelVersion=${momentumModelVersion}, modelMode=${modelMode}, maxTotalMarginPct=${maxTotalMarginPct !== undefined ? `${(maxTotalMarginPct * 100).toFixed(1)}%` : '(không giới hạn)'}, oodGuardMode=${oodGuardMode}, oodGuardEmaRatioSlowThreshold=${oodGuardEmaRatioSlowThreshold}, oodGuardScoreCap=${oodGuardScoreCap}, oodGuardRiskReductionMultiplier=${oodGuardRiskReductionMultiplier}, neutral5mDirectionSelectorEnabled=${neutral5mDirectionSelectorEnabled}, neutral5mDirectionGatedRoutingEnabled=${neutral5mDirectionGatedRoutingEnabled}, neutralMacroConflictOverrideMode=${neutralMacroConflictOverrideMode}`,
@@ -664,6 +677,10 @@ async function main(): Promise<void> {
     // processCandle() never even computes the 4 setup-specific thesis modules — fully inert, matching
     // every ticket before this one exactly.
     ...(setupSpecificThesisEnabled ? { setupSpecificThesisEnabled: true } : {}),
+    // TICKET-142A: false (default) omits the field entirely -> undefined, orchestrator.ts's
+    // processCandle() never even computes the Momentum Candidate Integrity engine — fully inert,
+    // matching every ticket before this one exactly.
+    ...(momentumCandidateIntegrityEnabled ? { momentumCandidateIntegrityEnabled: true } : {}),
   };
   // TICKET-123: fail-loud proof-of-model-in-use for the report — check file existence explicitly
   // here (in addition to orchestrator.ts's own throw-on-load-failure) so a missing V7_RAW artifact
@@ -727,6 +744,11 @@ async function main(): Promise<void> {
   // off sd.state.setupSpecificThesisDiagnostic right after processCandle() below). Only ever
   // populated when setupSpecificThesisEnabled=true. Never influences trades/report above.
   const setupSpecificThesisRows: SetupThesisResult[] = [];
+  // TICKET-142A — diagnostic-only per-candle row: the ONE production-faithful momentum candidate
+  // integrity result for this candle (read off sd.state.momentumCandidateIntegrityDiagnostic right
+  // after processCandle() below). Only ever populated when momentumCandidateIntegrityEnabled=true.
+  // Never influences trades/report above.
+  const momentumCandidateIntegrityRows: MomentumCandidateIntegrityResult[] = [];
 
   // TICKET-130 — diagnostic-only accumulator: every NEUTRAL_TRANSITION MOMENTUM_DIRECT gate
   // evaluation (both LONG and SHORT), same pass-through-callback pattern as TICKET-122's
@@ -1032,6 +1054,11 @@ async function main(): Promise<void> {
       // TICKET-142 — see setupSpecificThesisRows declaration above.
       if (sd.state.setupSpecificThesisDiagnostic) {
         setupSpecificThesisRows.push(...sd.state.setupSpecificThesisDiagnostic.lastResults);
+      }
+
+      // TICKET-142A — see momentumCandidateIntegrityRows declaration above.
+      if (sd.state.momentumCandidateIntegrityDiagnostic) {
+        momentumCandidateIntegrityRows.push(sd.state.momentumCandidateIntegrityDiagnostic.lastResult);
       }
 
       // TICKET-101 Việc 1 — BUG FIX: openRiskBySymbol was a snapshot taken ONCE before this step's
@@ -1569,6 +1596,54 @@ async function main(): Promise<void> {
     const t142ReportPath = path.resolve(process.cwd(), 'data/ticket142-setup-specific-thesis.md');
     await generateTicket142Report(t142Path, t142ReportPath, suffix);
     console.log(`→ ${t142ReportPath}`);
+  }
+
+  // TICKET-142A — diagnostic-only CSV (one row per candle, the single production-faithful momentum
+  // candidate integrity result), consumed by ticket142aGenerateReport.ts to produce
+  // data/ticket142a-momentum-candidate-integrity.md. Never influences trades/report above.
+  if (momentumCandidateIntegrityEnabled) {
+    const t142aPath = path.resolve(process.cwd(), `data/ticket142a-momentum-candidate-integrity-${suffix}.csv`);
+    const t142aHeader = [
+      'symbol', 'timestamp', 'side', 'candidateId', 'momentumScore', 'modelScore', 'triggerReason', 'invalidReason',
+      'thesisState', 'isNewEvent', 'htfContext', 'safetyState5m', 'regime', 'macroDirection',
+      'entryPrice', 'stopLoss', 'tpPriceOverride',
+      'longScore', 'longPasses', 'longBlockedBy', 'shortScore', 'shortPasses', 'shortBlockedBy',
+    ].join(',');
+    const csvEscape142a = (v: string): string => `"${v.replace(/"/g, '""')}"`;
+    const t142aRows = momentumCandidateIntegrityRows.map((r) =>
+      [
+        r.symbol,
+        r.timestamp,
+        r.side,
+        r.candidateId !== null ? csvEscape142a(r.candidateId) : '',
+        r.momentumScore ?? '',
+        r.modelScore ?? '',
+        csvEscape142a(r.triggerReason),
+        r.invalidReason !== null ? csvEscape142a(r.invalidReason) : '',
+        r.thesisState,
+        r.isNewEvent,
+        r.htfContext,
+        r.safetyState5m,
+        r.regime,
+        r.macroDirection ?? '',
+        r.entryPrice ?? '',
+        r.stopLoss ?? '',
+        r.tpPriceOverride ?? '',
+        r.sideDiagnostics.LONG.score ?? '',
+        r.sideDiagnostics.LONG.passes,
+        r.sideDiagnostics.LONG.blockedBy !== null ? csvEscape142a(r.sideDiagnostics.LONG.blockedBy) : '',
+        r.sideDiagnostics.SHORT.score ?? '',
+        r.sideDiagnostics.SHORT.passes,
+        r.sideDiagnostics.SHORT.blockedBy !== null ? csvEscape142a(r.sideDiagnostics.SHORT.blockedBy) : '',
+      ].join(','),
+    );
+    writeFileSync(t142aPath, [t142aHeader, ...t142aRows].join('\n') + '\n');
+    console.log(`→ ${t142aPath} (${momentumCandidateIntegrityRows.length} dòng)`);
+
+    const { generateTicket142aReport } = await import('./ticket142aGenerateReport.js');
+    const t142aReportPath = path.resolve(process.cwd(), 'data/ticket142a-momentum-candidate-integrity.md');
+    await generateTicket142aReport(t142aPath, t142aReportPath, suffix);
+    console.log(`→ ${t142aReportPath}`);
   }
 }
 

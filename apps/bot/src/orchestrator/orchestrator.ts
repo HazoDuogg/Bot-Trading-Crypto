@@ -14,7 +14,8 @@ import { applySafetyState5mStabilization } from '../regime/safetyState5mTracker.
 import { applySafetyState5mFinalStabilization } from '../regime/safetyState5mTrackerV2.js';
 import { HTFContext, SafetyState5m } from '../regime/htfSafetyTypes.js';
 import { computeLocalTradeThesis5m, type LocalTradeThesis5mResult } from './localTradeThesis5m.js';
-import { computeMomentumThesis } from './setupThesis/momentumThesis.js';
+import { computeMomentumThesis, computeMomentumCandidateIntegrity } from './setupThesis/momentumThesis.js';
+import type { MomentumCandidateIntegrityResult } from './setupThesis/momentumThesis.js';
 import { computePullbackThesis } from './setupThesis/pullbackThesis.js';
 import { computeBreakoutThesis } from './setupThesis/breakoutThesis.js';
 import { computeReversalThesis } from './setupThesis/reversalThesis.js';
@@ -455,7 +456,7 @@ export function selectTpPlan(defaultPlan: TpPlan, momentumScore: number | undefi
  * its own compilation unit and cannot depend on scripts/ (which itself depends on dist/, built FROM
  * src/ — importing the other way would be a wrong-direction/circular dependency).
  */
-const MOMENTUM_DIRECT_BLOCKED_REGIMES: readonly MarketRegime[] = [
+export const MOMENTUM_DIRECT_BLOCKED_REGIMES: readonly MarketRegime[] = [
   MarketRegime.DANGER_ZONE,
   MarketRegime.MANIPULATED,
   MarketRegime.LOW_LIQUIDITY,
@@ -469,7 +470,7 @@ const MOMENTUM_DIRECT_BLOCKED_REGIMES: readonly MarketRegime[] = [
  * price for the diagnostic-only MomentumGateEvaluation of the SIDE THAT DIDN'T become the actual
  * candidate (tryMomentumDirect only ever computed this for its one chosen `side` before this ticket).
  */
-function computeMomentumDirectSlPrice(side: 'LONG' | 'SHORT', entryPrice: number, currentCandle: CandleData, atr: number, config: OrchestratorConfig): number {
+export function computeMomentumDirectSlPrice(side: 'LONG' | 'SHORT', entryPrice: number, currentCandle: CandleData, atr: number, config: OrchestratorConfig): number {
   // Sweep-style SL: nearest extreme point (current candle's own low/high, since MOMENTUM_DIRECT has
   // no OB/FVG/Sweep zone to anchor to) ± ATR buffer.
   const rawSlPrice = side === 'LONG' ? currentCandle.low : currentCandle.high;
@@ -495,7 +496,7 @@ function computeMomentumDirectSlPrice(side: 'LONG' | 'SHORT', entryPrice: number
  * `mode==='NONE'` (or regime!==NEUTRAL_TRANSITION, or no macro conflict at all) never overrides —
  * byte-identical to every ticket before this one.
  */
-function evaluateMacroConflictOverride(
+export function evaluateMacroConflictOverride(
   side: 'LONG' | 'SHORT',
   macroDirection: 'UP' | 'DOWN' | 'FLAT' | undefined,
   regime: MarketRegime,
@@ -1089,6 +1090,10 @@ export async function processCandle(
   // closed 5m candle, with all 4 setup-specific thesis modules' results for that candle. Never read
   // here, never affects any decision — see OrchestratorConfig.setupSpecificThesisEnabled.
   onSetupSpecificThesis?: (results: SetupThesisResult[]) => void,
+  // TICKET-142A — diagnostic-only, fires ONLY when config.momentumCandidateIntegrityEnabled is true,
+  // EVERY closed 5m candle. Never read here, never affects any decision — see
+  // OrchestratorConfig.momentumCandidateIntegrityEnabled.
+  onMomentumCandidateIntegrity?: (result: MomentumCandidateIntegrityResult) => void,
 ): Promise<ProcessCandleResult> {
   // Step 1 — regime, always runs.
   const regimeOutput = detectRegime({
@@ -1274,6 +1279,54 @@ export async function processCandle(
     setupSpecificThesisDiagnostic = { tracker: newTracker, lastResults: results };
   }
 
+  // TICKET-142A — gated entirely behind its own flag, fully independent of setupSpecificThesisEnabled
+  // above (own tracker field, own activeRun consecutive-run pointer, never shares state). When
+  // off/unset, momentumCandidateIntegrityDiagnostic stays undefined and nothing below this block runs
+  // — byte-identical to pre-TICKET-142A behavior. Diagnostic only — never read by any decision below,
+  // never used to ALLOW/BLOCK any entry.
+  let momentumCandidateIntegrityDiagnostic: NonNullable<SymbolState['momentumCandidateIntegrityDiagnostic']> | undefined;
+  if (config.momentumCandidateIntegrityEnabled) {
+    const htfContextCandidate = classifyHtfContextCandidate(regimeOutput.computedMetrics);
+    const safetyCandidate = classifySafetyState5mCandidate(regimeOutput.computedMetrics);
+    const previousTracker = state.momentumCandidateIntegrityDiagnostic?.tracker ?? null;
+    const newTracker = applySafetyState5mFinalStabilization(safetyCandidate, currentCandle.timestamp, previousTracker);
+
+    // Same macroDirection formula tryOpenNewPosition()/T142's block above compute locally — reused verbatim.
+    const macroDirectionSeries = wilderDIDirectionSeries(input.candles1d, EntryConfig.MACRO_TREND_ADX_PERIOD_1D);
+    const macroDirection = macroDirectionSeries.length > 0 ? macroDirectionSeries[macroDirectionSeries.length - 1] : undefined;
+
+    const { result, nextActiveRun } = await computeMomentumCandidateIntegrity(
+      {
+        symbol: input.symbol,
+        timestamp: currentCandle.timestamp,
+        htfContext: htfContextCandidate,
+        safetyState5m: newTracker.currentState,
+        candles5m: input.candles5m,
+        candles1m: input.candles1m,
+        candles1hMomentum: input.candles1hMomentum,
+        regimeOutput,
+        macroDirection,
+        correlatedRiskRatio: input.correlatedRiskRatio,
+        momentumDirectThreshold: config.momentumDirectThreshold,
+        momentumDirectMinSlPercent: config.momentumDirectMinSlPercent,
+        momentumDirectTpRMultiple: config.momentumDirectTpRMultiple,
+        momentumModelPath: config.momentumModelPath,
+        momentumSchemaPath: config.momentumSchemaPath,
+        momentumBearishModelPath: config.momentumBearishModelPath,
+        momentumBearishSchemaPath: config.momentumBearishSchemaPath,
+        circuitBreakerState: state.momentumDirectCircuitBreaker,
+        oodGuardConfig: config.oodGuardConfig,
+        neutral5mDirectionSelectorEnabled: config.neutral5mDirectionSelectorEnabled,
+        macroOverrideMode: config.neutralMacroConflictOverrideMode ?? 'NONE',
+        momentumDirectMaxAtrPercentile: config.momentumDirectMaxAtrPercentile,
+      },
+      state.momentumCandidateIntegrityDiagnostic?.activeRun ?? null,
+    );
+
+    onMomentumCandidateIntegrity?.(result);
+    momentumCandidateIntegrityDiagnostic = { tracker: newTracker, activeRun: nextActiveRun, lastResult: result };
+  }
+
   // TICKET-027 — diagnostic-only, no effect on any decision below: fires once per fresh transition
   // into MANIPULATED (state.regimeState.previousRegime was something else, now confirmed MANIPULATED).
   if (
@@ -1419,6 +1472,7 @@ export async function processCandle(
       ...(safetyState5mFinalStabilizedDiagnostic !== undefined ? { safetyState5mFinalStabilizedDiagnostic } : {}),
       ...(localTradeThesis5mDiagnostic !== undefined ? { localTradeThesis5mDiagnostic } : {}),
       ...(setupSpecificThesisDiagnostic !== undefined ? { setupSpecificThesisDiagnostic } : {}),
+      ...(momentumCandidateIntegrityDiagnostic !== undefined ? { momentumCandidateIntegrityDiagnostic } : {}),
     },
     accountBalance,
     events,
