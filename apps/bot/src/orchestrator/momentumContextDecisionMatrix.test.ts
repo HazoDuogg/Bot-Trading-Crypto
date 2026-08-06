@@ -83,3 +83,57 @@ describe('computeMomentumContextDecision (TICKET-143 Decision Matrix V1)', () =>
     expect(Object.values(HTFContext)).toContain('NEUTRAL');
   });
 });
+
+describe('computeMomentumContextDecision (TICKET-143A Decision Matrix V2)', () => {
+  it('ETHUSDT + macroConflict -> BLOCK under V2 (distinct from V1 ALLOW_REDUCED_RISK on the same input)', () => {
+    const input = { ...base, symbol: 'ETHUSDT', macroConflict: true };
+    const v1 = computeMomentumContextDecision(input, 'V1');
+    const v2 = computeMomentumContextDecision(input, 'V2');
+    expect(v1.decision).toBe('ALLOW_REDUCED_RISK');
+    expect(v2.decision).toBe('BLOCK');
+    expect(v2.riskMultiplier).toBe(0);
+    expect(v2.reason).toBe('eth_macro_conflict');
+  });
+
+  it('BTCUSDT + macroConflict -> BLOCK under V2, unchanged from V1', () => {
+    const input = { ...base, symbol: 'BTCUSDT', macroConflict: true };
+    const v1 = computeMomentumContextDecision(input, 'V1');
+    const v2 = computeMomentumContextDecision(input, 'V2');
+    expect(v2.decision).toBe('BLOCK');
+    expect(v2).toEqual(v1);
+  });
+
+  it('SOLUSDT/XRPUSDT + macroConflict -> ALLOW_REDUCED_RISK with 0.30 under V2, unchanged from V1', () => {
+    for (const symbol of ['SOLUSDT', 'XRPUSDT']) {
+      const input = { ...base, symbol, macroConflict: true };
+      const v1 = computeMomentumContextDecision(input, 'V1');
+      const v2 = computeMomentumContextDecision(input, 'V2');
+      expect(v2.decision).toBe('ALLOW_REDUCED_RISK');
+      expect(v2.riskMultiplier).toBe(MOMENTUM_CONTEXT_REDUCED_RISK_MULTIPLIER);
+      expect(v2).toEqual(v1);
+    }
+  });
+
+  it('SHOCK/MANIPULATED -> BLOCK under V2 regardless of macroConflict/symbol, unchanged from V1', () => {
+    for (const st of [SafetyState5m.SHOCK, SafetyState5m.MANIPULATED]) {
+      for (const macroConflict of [true, false]) {
+        for (const symbol of ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT']) {
+          const input = { ...base, symbol, macroConflict, safetyState5m: st };
+          const v2 = computeMomentumContextDecision(input, 'V2');
+          expect(v2.decision).toBe('BLOCK');
+          expect(v2).toEqual(computeMomentumContextDecision(input, 'V1'));
+        }
+      }
+    }
+  });
+
+  it('no macroConflict -> ALLOW_NORMAL under V2, unchanged from V1 (version never affects the no-conflict branch)', () => {
+    const input = { ...base, macroConflict: false };
+    expect(computeMomentumContextDecision(input, 'V2')).toEqual(computeMomentumContextDecision(input, 'V1'));
+  });
+
+  it('version param defaults to V1 when omitted — no call site needs to change', () => {
+    const input = { ...base, symbol: 'ETHUSDT', macroConflict: true };
+    expect(computeMomentumContextDecision(input)).toEqual(computeMomentumContextDecision(input, 'V1'));
+  });
+});

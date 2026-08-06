@@ -239,6 +239,13 @@ function parseArgs(): {
    * (never blocks on macroConflict) — see OrchestratorConfig.momentumContextDecisionMatrixMode.
    */
   momentumContextDecisionMatrixMode: 'V1' | 'AUDIT_UNFILTERED';
+  /**
+   * TICKET-143A — opt-in, default-inert Momentum Context Decision Matrix V2 CLI flag. `false`
+   * (default, or the flag omitted entirely) means OrchestratorConfig.momentumContextDecisionMatrixV2Enabled
+   * stays undefined/false — fully inert, byte-identical to every ticket before this one. When true,
+   * this script ALSO writes data/ticket143a-momentum-context-matrix-v2-<suffix>.csv.
+   */
+  momentumContextDecisionMatrixV2Enabled: boolean;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -290,6 +297,7 @@ function parseArgs(): {
   const momentumCandidateIntegrityEnabledArg = args.find((a) => a.startsWith('--momentum-candidate-integrity-enabled='));
   const momentumContextDecisionMatrixEnabledArg = args.find((a) => a.startsWith('--momentum-context-decision-matrix-enabled='));
   const momentumContextDecisionMatrixModeArg = args.find((a) => a.startsWith('--momentum-context-decision-matrix-mode='));
+  const momentumContextDecisionMatrixV2EnabledArg = args.find((a) => a.startsWith('--momentum-context-decision-matrix-v2-enabled='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -397,6 +405,8 @@ function parseArgs(): {
     // TICKET-143: off by default — matches OrchestratorConfig.momentumContextDecisionMatrixEnabled's default.
     momentumContextDecisionMatrixEnabled: momentumContextDecisionMatrixEnabledArg ? momentumContextDecisionMatrixEnabledArg.split('=')[1] === 'true' : false,
     momentumContextDecisionMatrixMode: (momentumContextDecisionMatrixModeArg ? momentumContextDecisionMatrixModeArg.split('=')[1] : 'V1') as 'V1' | 'AUDIT_UNFILTERED',
+    // TICKET-143A: off by default — matches OrchestratorConfig.momentumContextDecisionMatrixV2Enabled's default.
+    momentumContextDecisionMatrixV2Enabled: momentumContextDecisionMatrixV2EnabledArg ? momentumContextDecisionMatrixV2EnabledArg.split('=')[1] === 'true' : false,
   };
 }
 
@@ -584,9 +594,10 @@ async function main(): Promise<void> {
     momentumCandidateIntegrityEnabled,
     momentumContextDecisionMatrixEnabled,
     momentumContextDecisionMatrixMode,
+    momentumContextDecisionMatrixV2Enabled,
   } = parseArgs();
   console.log(
-    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}, momentumModelVersion=${momentumModelVersion}, modelMode=${modelMode}, maxTotalMarginPct=${maxTotalMarginPct !== undefined ? `${(maxTotalMarginPct * 100).toFixed(1)}%` : '(không giới hạn)'}, oodGuardMode=${oodGuardMode}, oodGuardEmaRatioSlowThreshold=${oodGuardEmaRatioSlowThreshold}, oodGuardScoreCap=${oodGuardScoreCap}, oodGuardRiskReductionMultiplier=${oodGuardRiskReductionMultiplier}, neutral5mDirectionSelectorEnabled=${neutral5mDirectionSelectorEnabled}, neutral5mDirectionGatedRoutingEnabled=${neutral5mDirectionGatedRoutingEnabled}, neutralMacroConflictOverrideMode=${neutralMacroConflictOverrideMode}, momentumContextDecisionMatrixEnabled=${momentumContextDecisionMatrixEnabled}, momentumContextDecisionMatrixMode=${momentumContextDecisionMatrixMode}`,
+    `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}, momentumModelVersion=${momentumModelVersion}, modelMode=${modelMode}, maxTotalMarginPct=${maxTotalMarginPct !== undefined ? `${(maxTotalMarginPct * 100).toFixed(1)}%` : '(không giới hạn)'}, oodGuardMode=${oodGuardMode}, oodGuardEmaRatioSlowThreshold=${oodGuardEmaRatioSlowThreshold}, oodGuardScoreCap=${oodGuardScoreCap}, oodGuardRiskReductionMultiplier=${oodGuardRiskReductionMultiplier}, neutral5mDirectionSelectorEnabled=${neutral5mDirectionSelectorEnabled}, neutral5mDirectionGatedRoutingEnabled=${neutral5mDirectionGatedRoutingEnabled}, neutralMacroConflictOverrideMode=${neutralMacroConflictOverrideMode}, momentumContextDecisionMatrixEnabled=${momentumContextDecisionMatrixEnabled}, momentumContextDecisionMatrixMode=${momentumContextDecisionMatrixMode}, momentumContextDecisionMatrixV2Enabled=${momentumContextDecisionMatrixV2Enabled}`,
   );
   console.log('Đọc CSV (5m/15m/1h/1m/1d x 4 coin)...');
 
@@ -707,6 +718,10 @@ async function main(): Promise<void> {
     // tryMomentumDirect() keeps its old unconditional (T138-scoped) macro-conflict block — fully
     // inert, matching every ticket before this one exactly.
     ...(momentumContextDecisionMatrixEnabled ? { momentumContextDecisionMatrixEnabled: true, momentumContextDecisionMatrixMode } : {}),
+    // TICKET-143A: false (default) omits the field entirely -> undefined, orchestrator.ts's
+    // tryMomentumDirect() keeps V1's/T138's behavior (whichever the flag above selects) — fully inert,
+    // matching every ticket before this one exactly.
+    ...(momentumContextDecisionMatrixV2Enabled ? { momentumContextDecisionMatrixV2Enabled: true } : {}),
   };
   // TICKET-123: fail-loud proof-of-model-in-use for the report — check file existence explicitly
   // here (in addition to orchestrator.ts's own throw-on-load-failure) so a missing V7_RAW artifact
@@ -1250,7 +1265,10 @@ async function main(): Promise<void> {
     // TICKET-143: only appended when the Decision Matrix is actually active — this flag DOES change
     // real trades produced (unlike T142A's read-only diagnostic), so its own trades CSV must never
     // collide with the baseline's filename. Includes the mode (V1 vs AUDIT_UNFILTERED) too.
-    (momentumContextDecisionMatrixEnabled ? `-momentumcontextmatrix${momentumContextDecisionMatrixMode === 'AUDIT_UNFILTERED' ? 'auditunfiltered' : 'v1'}` : '');
+    (momentumContextDecisionMatrixEnabled ? `-momentumcontextmatrix${momentumContextDecisionMatrixMode === 'AUDIT_UNFILTERED' ? 'auditunfiltered' : 'v1'}` : '') +
+    // TICKET-143A: only appended when the V2 matrix is actually active — same reasoning as T143 above
+    // (V2 changes real trades produced, its trades CSV must never collide with V1's/baseline's filename).
+    (momentumContextDecisionMatrixV2Enabled ? '-momentumcontextmatrixv2' : '');
   const tradesPath = path.resolve(process.cwd(), `data/backtest-trades-${suffix}.csv`);
   writeFileSync(tradesPath, tradesCsv(trades));
   console.log(`→ ${tradesPath}`);
@@ -1691,12 +1709,14 @@ async function main(): Promise<void> {
     console.log(`→ ${t142aReportPath}`);
   }
 
-  // TICKET-143 — one row per REAL MOMENTUM_DIRECT candidate that reached the Decision Matrix's
+  // TICKET-143/143A — one row per REAL MOMENTUM_DIRECT candidate that reached the Decision Matrix's
   // decision point this run (see momentumContextDecisionRows declaration above). Report generation
-  // (ticket143GenerateReport.ts) is a separate script — it needs Mode A/B/C's 3 SEPARATE runs' CSVs
-  // together, not just this one run's.
-  if (momentumContextDecisionMatrixEnabled) {
-    const t143Path = path.resolve(process.cwd(), `data/ticket143-momentum-context-matrix-${suffix}.csv`);
+  // (ticket143GenerateReport.ts / ticket143aGenerateReport.ts) is a separate script — it needs each
+  // Mode's own SEPARATE run's CSV together, not just this one run's. Same CSV shape reused for both
+  // V1 and V2 runs — only the filename prefix differs, so V2's report script can reuse T143's parser.
+  if (momentumContextDecisionMatrixEnabled || momentumContextDecisionMatrixV2Enabled) {
+    const t143FilePrefix = momentumContextDecisionMatrixV2Enabled ? 'ticket143a-momentum-context-matrix-v2' : 'ticket143-momentum-context-matrix';
+    const t143Path = path.resolve(process.cwd(), `data/${t143FilePrefix}-${suffix}.csv`);
     const t143Header = ['symbol', 'timestamp', 'side', 'htfContext', 'macroDirection', 'macroConflict', 'safetyState5m', 'modelScore', 'momentumScore', 'decision', 'riskMultiplier', 'decisionReason'].join(',');
     const t143Rows = momentumContextDecisionRows.map((r) =>
       [r.symbol, r.timestamp, r.side, r.htfContext, r.macroDirection ?? '', r.macroConflict, r.safetyState5m, r.modelScore, r.momentumScore, r.decision, r.riskMultiplier, r.decisionReason].join(','),

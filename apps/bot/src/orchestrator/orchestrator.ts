@@ -284,10 +284,10 @@ export interface MomentumGateEvaluation {
 }
 
 /**
- * TICKET-143 — diagnostic-only pass-through, fires ONLY when config.momentumContextDecisionMatrixEnabled
- * is true, once per real tryMomentumDirect() candidate that reaches the decision point (post AI gate,
- * post circuit breaker — same point the old unconditional macro-conflict block used to fire). Never
- * read by any decision logic — this is purely for the ticket's required CSV/report output.
+ * TICKET-143/143A — diagnostic-only pass-through, fires ONLY when config.momentumContextDecisionMatrixEnabled
+ * or its V2 sibling is true, once per real tryMomentumDirect() candidate that reaches the decision point
+ * (post AI gate, post circuit breaker — same point the old unconditional macro-conflict block used to fire).
+ * Never read by any decision logic — this is purely for the ticket's required CSV/report output.
  */
 export interface MomentumContextDecisionDiagnostic {
   symbol: string;
@@ -552,10 +552,10 @@ async function tryMomentumDirect(
   macroDirection: 'UP' | 'DOWN' | 'FLAT' | undefined,
   circuitBreakerState: { LONG: MomentumDirectCircuitBreakerSideState; SHORT: MomentumDirectCircuitBreakerSideState },
   onMomentumGateEvaluation: ((evaluation: MomentumGateEvaluation) => void) | undefined,
-  // TICKET-143 — SafetyState5m for the Decision Matrix's own independent tracker (see SymbolState.
+  // TICKET-143/143A — SafetyState5m for the Decision Matrix's own independent tracker (see SymbolState.
   // momentumContextSafetyState5m), computed by the caller BEFORE this call so it can share the same
   // per-candle classification the T139/T140/T140B diagnostic blocks compute, without sharing THEIR
-  // tracker state. Undefined when config.momentumContextDecisionMatrixEnabled is not true.
+  // tracker state. Undefined when neither momentumContextDecisionMatrixEnabled nor its V2 sibling is true.
   momentumContextSafetyState5m: SafetyState5m | undefined,
   onMomentumContextDecision: ((diagnostic: MomentumContextDecisionDiagnostic) => void) | undefined,
 ): Promise<DraftSetup | null> {
@@ -730,14 +730,17 @@ async function tryMomentumDirect(
   // MANIPULATED/VOLATILE_CHOP/DANGER_ZONE/LOW_LIQUIDITY" requirement is already vacuously satisfied
   // for every candidate that can reach here — no additional check needed (see TICKET-138 report for
   // the full reasoning).
-  // TICKET-143 — when the Decision Matrix is enabled, it REPLACES this entire block (not just
-  // NEUTRAL_TRANSITION's scoped T138 override) — runs across every regime tryMomentumDirect() can
+  // TICKET-143/143A — when either Decision Matrix flag is enabled, it REPLACES this entire block (not
+  // just NEUTRAL_TRANSITION's scoped T138 override) — runs across every regime tryMomentumDirect() can
   // reach here. macroOverrideMode/evaluateMacroConflictOverride() are never consulted in this branch,
-  // so the two flags cannot interfere with each other; when momentumContextDecisionMatrixEnabled is
-  // false/unset (default), the `else` branch below is byte-identical to every ticket before this one.
+  // so those flags cannot interfere with either matrix flag; when BOTH momentumContextDecisionMatrixEnabled
+  // and momentumContextDecisionMatrixV2Enabled are false/unset (default), the `else` branch below is
+  // byte-identical to every ticket before T143. Precedence when BOTH flags are somehow set at once
+  // (should never happen in any real config — coordinator's responsibility): V2 wins, checked first.
   let macroConflictRiskMultiplier: number;
-  if (config.momentumContextDecisionMatrixEnabled) {
+  if (config.momentumContextDecisionMatrixV2Enabled || config.momentumContextDecisionMatrixEnabled) {
     const macroConflict = (side === 'LONG' && macroDirection === 'DOWN') || (side === 'SHORT' && macroDirection === 'UP');
+    const matrixVersion: 'V1' | 'V2' = config.momentumContextDecisionMatrixV2Enabled ? 'V2' : 'V1';
     const matrixMode = config.momentumContextDecisionMatrixMode ?? 'V1';
     // TICKET-143 §"MomentumThesis không hợp lệ" — by this point the candidate already cleared the AI
     // score threshold, OOD guard, TICKET-130 direction5m veto, and the circuit breaker above; the
@@ -746,15 +749,19 @@ async function tryMomentumDirect(
     const momentumThesisValid = true;
     // Mode B (AUDIT_UNFILTERED) — separate, non-production audit variant: never blocks on
     // macroConflict, riskMultiplier stays 1.0 (no reduction applied). Never itself a production path.
+    // Only meaningful for the V1 flag — TICKET-143A's V2 flag never consults matrixMode.
     const decisionResult =
-      matrixMode === 'AUDIT_UNFILTERED'
+      !config.momentumContextDecisionMatrixV2Enabled && matrixMode === 'AUDIT_UNFILTERED'
         ? ({ decision: 'ALLOW_NORMAL', riskMultiplier: 1.0, reason: 'audit_unfiltered_no_macro_block' } as const)
-        : computeMomentumContextDecision({
-            symbol: input.symbol,
-            macroConflict,
-            safetyState5m: momentumContextSafetyState5m ?? SafetyState5m.NORMAL,
-            momentumThesisValid,
-          });
+        : computeMomentumContextDecision(
+            {
+              symbol: input.symbol,
+              macroConflict,
+              safetyState5m: momentumContextSafetyState5m ?? SafetyState5m.NORMAL,
+              momentumThesisValid,
+            },
+            matrixVersion,
+          );
     if (onMomentumContextDecision) {
       const htfContextCandidate = classifyHtfContextCandidate(regimeOutput.computedMetrics);
       onMomentumContextDecision({
@@ -1180,9 +1187,9 @@ export async function processCandle(
   // EVERY closed 5m candle. Never read here, never affects any decision — see
   // OrchestratorConfig.momentumCandidateIntegrityEnabled.
   onMomentumCandidateIntegrity?: (result: MomentumCandidateIntegrityResult) => void,
-  // TICKET-143 — diagnostic-only, fires ONLY when config.momentumContextDecisionMatrixEnabled is true,
-  // once per real tryMomentumDirect() candidate that reaches the decision point. Never read here,
-  // never affects any decision — see MomentumContextDecisionDiagnostic's own doc comment.
+  // TICKET-143/143A — diagnostic-only, fires ONLY when config.momentumContextDecisionMatrixEnabled or
+  // its V2 sibling is true, once per real tryMomentumDirect() candidate that reaches the decision
+  // point. Never read here, never affects any decision — see MomentumContextDecisionDiagnostic's own doc comment.
   onMomentumContextDecision?: (diagnostic: MomentumContextDecisionDiagnostic) => void,
 ): Promise<ProcessCandleResult> {
   // Step 1 — regime, always runs.
@@ -1281,15 +1288,16 @@ export async function processCandle(
     safetyState5mFinalStabilizedDiagnostic = { tracker: newTracker };
   }
 
-  // TICKET-143 — gated entirely behind config.momentumContextDecisionMatrixEnabled, fully independent
-  // of every T139/T140/T140B/T141/T142/T142A block above (own tracker field, own state, never shares
-  // with any of them — see MomentumContextSafetyState5mState's doc comment). When off/unset,
+  // TICKET-143/143A — gated behind either Decision Matrix flag (V2's tracker is the exact same
+  // computation, just feeding the V2 matrix instead), fully independent of every T139/T140/T140B/
+  // T141/T142/T142A block above (own tracker field, own state, never shares with any of them — see
+  // MomentumContextSafetyState5mState's doc comment). When both flags are off/unset,
   // momentumContextSafetyState5m stays undefined and nothing below this block runs — byte-identical to
   // pre-TICKET-143 behavior. The resulting currentState is passed into tryOpenNewPosition/
   // tryMomentumDirect below for the REAL Decision Matrix decision (this is the one diagnostic-shaped
-  // block in this file whose output actually feeds a live decision, when the flag is on).
+  // block in this file whose output actually feeds a live decision, when either flag is on).
   let momentumContextSafetyState5mDiagnostic: NonNullable<SymbolState['momentumContextSafetyState5m']> | undefined;
-  if (config.momentumContextDecisionMatrixEnabled) {
+  if (config.momentumContextDecisionMatrixEnabled || config.momentumContextDecisionMatrixV2Enabled) {
     const safetyCandidate = classifySafetyState5mCandidate(regimeOutput.computedMetrics);
     const previousTracker = state.momentumContextSafetyState5m?.tracker ?? null;
     const newTracker = applySafetyState5mFinalStabilization(safetyCandidate, currentCandle.timestamp, previousTracker);

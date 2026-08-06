@@ -550,6 +550,20 @@ export interface OrchestratorConfig {
    * ever sets this; requires momentumContextDecisionMatrixEnabled=true to have any effect at all.
    */
   momentumContextDecisionMatrixMode?: 'V1' | 'AUDIT_UNFILTERED';
+  /**
+   * TICKET-143A — opt-in, default-inert Momentum Context Decision Matrix V2. `undefined`/`false` =
+   * fully disabled, byte-identical to every ticket before this one (including T143's V1 flag being
+   * unset). V2 moves ETHUSDT from V1's ALLOW_REDUCED_RISK set into the hard-block set (alongside
+   * BTCUSDT) — TICKET-143's own real backtest found ETH's reduced-risk group net-negative while
+   * SOL/XRP were net-positive. Everything else — the 0.30 multiplier, no-macroConflict->ALLOW_NORMAL,
+   * SHOCK/MANIPULATED block, HTFContext never gating — is byte-identical to V1's own logic (see
+   * computeMomentumContextDecision()'s `version` parameter). Precedence when BOTH this flag AND
+   * momentumContextDecisionMatrixEnabled are set (should never happen in any real config): V2 wins —
+   * see the `if` chain in tryMomentumDirect() for the exact precedence check. Only backtest.ts's new
+   * `--momentum-context-decision-matrix-v2-enabled=true` CLI flag ever sets this; never wired into
+   * any production default config. Shadow/audit only — see TICKET-143A report.
+   */
+  momentumContextDecisionMatrixV2Enabled?: boolean;
 }
 
 /** TICKET-081 — trạng thái cầu dao cho 1 chiều (LONG hoặc SHORT) của 1 symbol. */
