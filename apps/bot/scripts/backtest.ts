@@ -23,6 +23,7 @@ import {
 } from '../dist/orchestrator/orchestrator.js';
 import { INITIAL_SYMBOL_STATE, type CloseTradeEvent, type OrchestratorConfig, type SymbolState } from '../dist/orchestrator/types.js';
 import type { LocalTradeThesis5mResult } from '../dist/orchestrator/localTradeThesis5m.js';
+import type { SetupThesisResult } from '../dist/orchestrator/setupThesis/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import type { EntryStyleForNeutral, FunnelEvent } from '../dist/entry/types.js';
 import {
@@ -206,6 +207,14 @@ function parseArgs(): {
    * and, at the end of the run, generates data/ticket141-5m-local-trade-thesis.md.
    */
   localTradeThesis5mEnabled: boolean;
+  /**
+   * TICKET-142 — opt-in, default-inert Setup-Specific Thesis diagnostic CLI flag. `false` (default,
+   * or the flag omitted entirely) means OrchestratorConfig.setupSpecificThesisEnabled stays
+   * undefined/false — fully inert, byte-identical to every ticket before this one. When true, this
+   * script ALSO writes data/ticket142-setup-specific-thesis-<suffix>.csv and generates
+   * data/ticket142-setup-specific-thesis.md.
+   */
+  setupSpecificThesisEnabled: boolean;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -253,6 +262,7 @@ function parseArgs(): {
   const safetyState5mStabilizationEnabledArg = args.find((a) => a.startsWith('--safety-state-5m-stabilization-enabled='));
   const safetyState5mFinalStabilizationEnabledArg = args.find((a) => a.startsWith('--safety-state-5m-final-stabilization-enabled='));
   const localTradeThesis5mEnabledArg = args.find((a) => a.startsWith('--local-trade-thesis-5m-enabled='));
+  const setupSpecificThesisEnabledArg = args.find((a) => a.startsWith('--setup-specific-thesis-enabled='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -353,6 +363,8 @@ function parseArgs(): {
     safetyState5mFinalStabilizationEnabled: safetyState5mFinalStabilizationEnabledArg ? safetyState5mFinalStabilizationEnabledArg.split('=')[1] === 'true' : false,
     // TICKET-141: off by default — matches OrchestratorConfig.localTradeThesis5mEnabled's default.
     localTradeThesis5mEnabled: localTradeThesis5mEnabledArg ? localTradeThesis5mEnabledArg.split('=')[1] === 'true' : false,
+    // TICKET-142: off by default — matches OrchestratorConfig.setupSpecificThesisEnabled's default.
+    setupSpecificThesisEnabled: setupSpecificThesisEnabledArg ? setupSpecificThesisEnabledArg.split('=')[1] === 'true' : false,
   };
 }
 
@@ -536,6 +548,7 @@ async function main(): Promise<void> {
     safetyState5mStabilizationEnabled,
     safetyState5mFinalStabilizationEnabled,
     localTradeThesis5mEnabled,
+    setupSpecificThesisEnabled,
   } = parseArgs();
   console.log(
     `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}, momentumModelVersion=${momentumModelVersion}, modelMode=${modelMode}, maxTotalMarginPct=${maxTotalMarginPct !== undefined ? `${(maxTotalMarginPct * 100).toFixed(1)}%` : '(không giới hạn)'}, oodGuardMode=${oodGuardMode}, oodGuardEmaRatioSlowThreshold=${oodGuardEmaRatioSlowThreshold}, oodGuardScoreCap=${oodGuardScoreCap}, oodGuardRiskReductionMultiplier=${oodGuardRiskReductionMultiplier}, neutral5mDirectionSelectorEnabled=${neutral5mDirectionSelectorEnabled}, neutral5mDirectionGatedRoutingEnabled=${neutral5mDirectionGatedRoutingEnabled}, neutralMacroConflictOverrideMode=${neutralMacroConflictOverrideMode}`,
@@ -647,6 +660,10 @@ async function main(): Promise<void> {
     // processCandle() never even computes the Local Trade Thesis 5m engine — fully inert, matching
     // every ticket before this one exactly.
     ...(localTradeThesis5mEnabled ? { localTradeThesis5mEnabled: true } : {}),
+    // TICKET-142: false (default) omits the field entirely -> undefined, orchestrator.ts's
+    // processCandle() never even computes the 4 setup-specific thesis modules — fully inert, matching
+    // every ticket before this one exactly.
+    ...(setupSpecificThesisEnabled ? { setupSpecificThesisEnabled: true } : {}),
   };
   // TICKET-123: fail-loud proof-of-model-in-use for the report — check file existence explicitly
   // here (in addition to orchestrator.ts's own throw-on-load-failure) so a missing V7_RAW artifact
@@ -706,6 +723,10 @@ async function main(): Promise<void> {
   // sd.state.localTradeThesis5mDiagnostic right after processCandle() below). Only ever populated
   // when localTradeThesis5mEnabled=true. Never influences trades/report above (§11/§13).
   const localTradeThesis5mRows: LocalTradeThesis5mResult[] = [];
+  // TICKET-142 — diagnostic-only per-candle rows: all 4 setup-specific thesis modules' results (read
+  // off sd.state.setupSpecificThesisDiagnostic right after processCandle() below). Only ever
+  // populated when setupSpecificThesisEnabled=true. Never influences trades/report above.
+  const setupSpecificThesisRows: SetupThesisResult[] = [];
 
   // TICKET-130 — diagnostic-only accumulator: every NEUTRAL_TRANSITION MOMENTUM_DIRECT gate
   // evaluation (both LONG and SHORT), same pass-through-callback pattern as TICKET-122's
@@ -1006,6 +1027,11 @@ async function main(): Promise<void> {
       // TICKET-141 — see localTradeThesis5mRows declaration above.
       if (sd.state.localTradeThesis5mDiagnostic) {
         localTradeThesis5mRows.push(sd.state.localTradeThesis5mDiagnostic.lastResult);
+      }
+
+      // TICKET-142 — see setupSpecificThesisRows declaration above.
+      if (sd.state.setupSpecificThesisDiagnostic) {
+        setupSpecificThesisRows.push(...sd.state.setupSpecificThesisDiagnostic.lastResults);
       }
 
       // TICKET-101 Việc 1 — BUG FIX: openRiskBySymbol was a snapshot taken ONCE before this step's
@@ -1511,6 +1537,38 @@ async function main(): Promise<void> {
     const t141aReportPath = path.resolve(process.cwd(), 'data/ticket141a-local-thesis-candidate-integrity.md');
     await generateTicket141aReport(t141aPath, t141aReportPath, config, suffix);
     console.log(`→ ${t141aReportPath}`);
+  }
+
+  // TICKET-142 — diagnostic-only CSV (one row per SetupThesisResult, never influences trades/report
+  // above), consumed by ticket142GenerateReport.ts to produce data/ticket142-setup-specific-thesis.md.
+  if (setupSpecificThesisEnabled) {
+    const t142Path = path.resolve(process.cwd(), `data/ticket142-setup-specific-thesis-${suffix}.csv`);
+    const t142Header = ['symbol', 'timestamp', 'setupType', 'side', 'candidateId', 'thesisState', 'qualityScore', 'reasons', 'entryPrice', 'stopLoss', 'riskReward', 'htfContext', 'safetyState5m'].join(',');
+    const csvEscape142 = (v: string): string => `"${v.replace(/"/g, '""')}"`;
+    const t142Rows = setupSpecificThesisRows.map((r) =>
+      [
+        r.symbol,
+        r.timestamp,
+        r.setupType,
+        r.side,
+        csvEscape142(r.candidateId),
+        r.thesisState,
+        r.qualityScore ?? '',
+        csvEscape142(r.reasons.join(' | ')),
+        r.entryPrice ?? '',
+        r.stopLoss ?? '',
+        r.riskReward ?? '',
+        r.htfContext,
+        r.safetyState5m,
+      ].join(','),
+    );
+    writeFileSync(t142Path, [t142Header, ...t142Rows].join('\n') + '\n');
+    console.log(`→ ${t142Path} (${setupSpecificThesisRows.length} dòng)`);
+
+    const { generateTicket142Report } = await import('./ticket142GenerateReport.js');
+    const t142ReportPath = path.resolve(process.cwd(), 'data/ticket142-setup-specific-thesis.md');
+    await generateTicket142Report(t142Path, t142ReportPath, suffix);
+    console.log(`→ ${t142ReportPath}`);
   }
 }
 

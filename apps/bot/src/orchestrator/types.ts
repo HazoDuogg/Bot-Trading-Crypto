@@ -6,6 +6,7 @@ import type { ManagedPositionState, TpLevel, TpPlan } from '../risk/slTpManager.
 import type { EntryRouterConfig } from '../entry/types.js';
 import type { MomentumFilterConfig, NeutralTransitionGateConfig, PlanAutoSelectionConfig } from '../xgbFilter/config.js';
 import type { LocalTradeThesis5mResult } from './localTradeThesis5m.js';
+import type { SetupThesisResult } from './setupThesis/types.js';
 
 export interface RegimeHysteresisState {
   previousRegime: MarketRegime | null;
@@ -84,6 +85,17 @@ export interface LocalTradeThesis5mDiagnosticState {
   lastResult: LocalTradeThesis5mResult;
 }
 
+/**
+ * TICKET-142 — diagnostic-only state for the 4 setup-specific thesis modules. Own tracker, fully
+ * independent of LocalTradeThesis5mDiagnosticState's tracker above. Only populated/read when
+ * OrchestratorConfig.setupSpecificThesisEnabled is true; undefined otherwise. Never read by any
+ * entry/risk decision.
+ */
+export interface SetupSpecificThesisDiagnosticState {
+  tracker: SafetyState5mTrackerState;
+  lastResults: SetupThesisResult[];
+}
+
 export interface SymbolState {
   regimeState: RegimeHysteresisState;
   /** TICKET-056: was `openPosition: ManagedPositionState | null` + `openMeta` — up to config.maxConcurrentPositionsPerSymbol entries now, each tracked fully independently (its own TP/SL/trailing). */
@@ -98,6 +110,8 @@ export interface SymbolState {
   safetyState5mFinalStabilizedDiagnostic?: SafetyState5mFinalStabilizedDiagnosticState;
   /** TICKET-141 — see LocalTradeThesis5mDiagnosticState doc comment. Undefined when the flag is off/unused so far. */
   localTradeThesis5mDiagnostic?: LocalTradeThesis5mDiagnosticState;
+  /** TICKET-142 — see SetupSpecificThesisDiagnosticState doc comment. Undefined when the flag is off/unused so far. */
+  setupSpecificThesisDiagnostic?: SetupSpecificThesisDiagnosticState;
 }
 
 export const INITIAL_SYMBOL_STATE: SymbolState = {
@@ -464,6 +478,13 @@ export interface OrchestratorConfig {
    * false) ever sets this field; never wired into any production default config.
    */
   localTradeThesis5mEnabled?: boolean;
+  /**
+   * TICKET-142 — opt-in, default-inert Setup-Specific Thesis diagnostic (MomentumThesis/PullbackThesis/
+   * BreakoutThesis/ReversalThesis, orchestrator/setupThesis/). `undefined`/`false` = fully disabled,
+   * byte-identical to every ticket before this one. Independent of localTradeThesis5mEnabled — can run
+   * standalone or together. Only backtest.ts's `--setup-specific-thesis-enabled=true` CLI flag sets this.
+   */
+  setupSpecificThesisEnabled?: boolean;
 }
 
 /** TICKET-081 — trạng thái cầu dao cho 1 chiều (LONG hoặc SHORT) của 1 symbol. */

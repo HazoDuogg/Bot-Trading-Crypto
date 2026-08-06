@@ -205,7 +205,7 @@ interface SetupCandidate {
  *  - retested: the current (last) candle's own [low, high] range overlaps the zone's [low, high] range
  *    — hard geometric overlap, no fuzz factor.
  */
-function evaluateZoneGates(
+export function evaluateZoneGates(
   candles5m: CandleData[],
   zoneFormedIndex: number,
   low: number,

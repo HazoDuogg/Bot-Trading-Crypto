@@ -14,6 +14,11 @@ import { applySafetyState5mStabilization } from '../regime/safetyState5mTracker.
 import { applySafetyState5mFinalStabilization } from '../regime/safetyState5mTrackerV2.js';
 import { HTFContext, SafetyState5m } from '../regime/htfSafetyTypes.js';
 import { computeLocalTradeThesis5m, type LocalTradeThesis5mResult } from './localTradeThesis5m.js';
+import { computeMomentumThesis } from './setupThesis/momentumThesis.js';
+import { computePullbackThesis } from './setupThesis/pullbackThesis.js';
+import { computeBreakoutThesis } from './setupThesis/breakoutThesis.js';
+import { computeReversalThesis } from './setupThesis/reversalThesis.js';
+import type { SetupThesisResult } from './setupThesis/types.js';
 import { routeEntry } from '../entry/entryRouter.js';
 import { EntryConfig } from '../entry/config.js';
 import { detectMomentumDirect } from '../entry/momentumDirect.js';
@@ -1080,6 +1085,10 @@ export async function processCandle(
   // closed 5m candle (not just on change — §8's CSV wants one row per candle). Never read here,
   // never affects any decision — see OrchestratorConfig.localTradeThesis5mEnabled.
   onLocalTradeThesis5m?: (result: LocalTradeThesis5mResult) => void,
+  // TICKET-142 — diagnostic-only, fires ONLY when config.setupSpecificThesisEnabled is true, EVERY
+  // closed 5m candle, with all 4 setup-specific thesis modules' results for that candle. Never read
+  // here, never affects any decision — see OrchestratorConfig.setupSpecificThesisEnabled.
+  onSetupSpecificThesis?: (results: SetupThesisResult[]) => void,
 ): Promise<ProcessCandleResult> {
   // Step 1 — regime, always runs.
   const regimeOutput = detectRegime({
@@ -1205,6 +1214,64 @@ export async function processCandle(
 
     onLocalTradeThesis5m?.(thesisResult);
     localTradeThesis5mDiagnostic = { tracker: newTracker, lastResult: thesisResult };
+  }
+
+  // TICKET-142 — gated entirely behind its own flag, fully independent of every T139/T140/T140B/T141
+  // block above (own tracker field, never shares state). When off/unset, setupSpecificThesisDiagnostic
+  // stays undefined and nothing below this block runs — byte-identical to pre-TICKET-142 behavior.
+  // Diagnostic only — never read by any decision below, never used to ALLOW/BLOCK any entry.
+  let setupSpecificThesisDiagnostic: NonNullable<SymbolState['setupSpecificThesisDiagnostic']> | undefined;
+  if (config.setupSpecificThesisEnabled) {
+    const htfContextCandidate = classifyHtfContextCandidate(regimeOutput.computedMetrics);
+    const safetyCandidate = classifySafetyState5mCandidate(regimeOutput.computedMetrics);
+    const previousTracker = state.setupSpecificThesisDiagnostic?.tracker ?? null;
+    const newTracker = applySafetyState5mFinalStabilization(safetyCandidate, currentCandle.timestamp, previousTracker);
+
+    // Same macroDirection formula tryOpenNewPosition() computes locally — reused verbatim, not a new one.
+    const macroDirectionSeries = wilderDIDirectionSeries(input.candles1d, EntryConfig.MACRO_TREND_ADX_PERIOD_1D);
+    const macroDirection = macroDirectionSeries.length > 0 ? macroDirectionSeries[macroDirectionSeries.length - 1] : undefined;
+
+    const common = { symbol: input.symbol, timestamp: currentCandle.timestamp, htfContext: htfContextCandidate, safetyState5m: newTracker.currentState };
+
+    const momentumResults = await computeMomentumThesis({
+      ...common,
+      candles5m: input.candles5m,
+      candles1hMomentum: input.candles1hMomentum,
+      regimeOutput,
+      macroDirection,
+      correlatedRiskRatio: input.correlatedRiskRatio,
+      momentumDirectThreshold: config.momentumDirectThreshold,
+      momentumDirectMinSlPercent: config.momentumDirectMinSlPercent,
+      momentumDirectTpRMultiple: config.momentumDirectTpRMultiple,
+      momentumModelPath: config.momentumModelPath,
+      momentumSchemaPath: config.momentumSchemaPath,
+      momentumBearishModelPath: config.momentumBearishModelPath,
+      momentumBearishSchemaPath: config.momentumBearishSchemaPath,
+    });
+    const pullbackResults = computePullbackThesis({
+      ...common,
+      candles5m: input.candles5m,
+      candles1m: input.candles1m,
+      obSlBufferAtrMultiplier: config.entryRouterConfig.obSlBufferAtrMultiplier,
+      tpPlan: config.tpPlan,
+    });
+    const breakoutResults = computeBreakoutThesis({
+      ...common,
+      candles5m: input.candles5m,
+      candles15m: input.candles15m,
+      computedMetrics: regimeOutput.computedMetrics,
+      tpPlan: config.tpPlan,
+    });
+    const reversalResults = computeReversalThesis({
+      ...common,
+      candles5m: input.candles5m,
+      candles1m: input.candles1m,
+      tpPlan: config.tpPlan,
+    });
+
+    const results = [...momentumResults, ...pullbackResults, ...breakoutResults, ...reversalResults];
+    onSetupSpecificThesis?.(results);
+    setupSpecificThesisDiagnostic = { tracker: newTracker, lastResults: results };
   }
 
   // TICKET-027 — diagnostic-only, no effect on any decision below: fires once per fresh transition
@@ -1351,6 +1418,7 @@ export async function processCandle(
       ...(safetyState5mStabilizedDiagnostic !== undefined ? { safetyState5mStabilizedDiagnostic } : {}),
       ...(safetyState5mFinalStabilizedDiagnostic !== undefined ? { safetyState5mFinalStabilizedDiagnostic } : {}),
       ...(localTradeThesis5mDiagnostic !== undefined ? { localTradeThesis5mDiagnostic } : {}),
+      ...(setupSpecificThesisDiagnostic !== undefined ? { setupSpecificThesisDiagnostic } : {}),
     },
     accountBalance,
     events,
