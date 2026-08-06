@@ -16,6 +16,7 @@ import { HTFContext, SafetyState5m } from '../regime/htfSafetyTypes.js';
 import { computeLocalTradeThesis5m, type LocalTradeThesis5mResult } from './localTradeThesis5m.js';
 import { computeMomentumThesis, computeMomentumCandidateIntegrity } from './setupThesis/momentumThesis.js';
 import type { MomentumCandidateIntegrityResult } from './setupThesis/momentumThesis.js';
+import { computeMomentumContextDecision } from './momentumContextDecisionMatrix.js';
 import { computePullbackThesis } from './setupThesis/pullbackThesis.js';
 import { computeBreakoutThesis } from './setupThesis/breakoutThesis.js';
 import { computeReversalThesis } from './setupThesis/reversalThesis.js';
@@ -282,6 +283,27 @@ export interface MomentumGateEvaluation {
   macroConflictOverridden?: boolean;
 }
 
+/**
+ * TICKET-143 — diagnostic-only pass-through, fires ONLY when config.momentumContextDecisionMatrixEnabled
+ * is true, once per real tryMomentumDirect() candidate that reaches the decision point (post AI gate,
+ * post circuit breaker — same point the old unconditional macro-conflict block used to fire). Never
+ * read by any decision logic — this is purely for the ticket's required CSV/report output.
+ */
+export interface MomentumContextDecisionDiagnostic {
+  symbol: string;
+  timestamp: number;
+  side: 'LONG' | 'SHORT';
+  htfContext: HTFContext;
+  macroDirection: 'UP' | 'DOWN' | 'FLAT' | undefined;
+  macroConflict: boolean;
+  safetyState5m: SafetyState5m;
+  modelScore: number;
+  momentumScore: number;
+  decision: 'ALLOW_NORMAL' | 'ALLOW_REDUCED_RISK' | 'BLOCK';
+  riskMultiplier: number;
+  decisionReason: string;
+}
+
 function touchesFavorable(side: 'LONG' | 'SHORT', candle: CandleData, price: number): boolean {
   return side === 'LONG' ? isTpHit(side, candle.high, price) : isTpHit(side, candle.low, price);
 }
@@ -530,6 +552,12 @@ async function tryMomentumDirect(
   macroDirection: 'UP' | 'DOWN' | 'FLAT' | undefined,
   circuitBreakerState: { LONG: MomentumDirectCircuitBreakerSideState; SHORT: MomentumDirectCircuitBreakerSideState },
   onMomentumGateEvaluation: ((evaluation: MomentumGateEvaluation) => void) | undefined,
+  // TICKET-143 — SafetyState5m for the Decision Matrix's own independent tracker (see SymbolState.
+  // momentumContextSafetyState5m), computed by the caller BEFORE this call so it can share the same
+  // per-candle classification the T139/T140/T140B diagnostic blocks compute, without sharing THEIR
+  // tracker state. Undefined when config.momentumContextDecisionMatrixEnabled is not true.
+  momentumContextSafetyState5m: SafetyState5m | undefined,
+  onMomentumContextDecision: ((diagnostic: MomentumContextDecisionDiagnostic) => void) | undefined,
 ): Promise<DraftSetup | null> {
   if (MOMENTUM_DIRECT_BLOCKED_REGIMES.includes(regimeOutput.regime)) return null;
 
@@ -702,11 +730,57 @@ async function tryMomentumDirect(
   // MANIPULATED/VOLATILE_CHOP/DANGER_ZONE/LOW_LIQUIDITY" requirement is already vacuously satisfied
   // for every candidate that can reach here — no additional check needed (see TICKET-138 report for
   // the full reasoning).
-  const macroOverride = evaluateMacroConflictOverride(side, macroDirection, regimeOutput.regime, input.candles5m, macroOverrideMode);
-  if (macroOverride.macroConflict && !macroOverride.overridden) return null;
-  // TICKET-138 — ticket-given constant (0.30), not tuned here. 1.0 (no-op) unless the override above
-  // actually fired for this exact candidate.
-  const macroConflictRiskMultiplier = macroOverride.macroConflict && macroOverride.overridden ? 0.3 : 1.0;
+  // TICKET-143 — when the Decision Matrix is enabled, it REPLACES this entire block (not just
+  // NEUTRAL_TRANSITION's scoped T138 override) — runs across every regime tryMomentumDirect() can
+  // reach here. macroOverrideMode/evaluateMacroConflictOverride() are never consulted in this branch,
+  // so the two flags cannot interfere with each other; when momentumContextDecisionMatrixEnabled is
+  // false/unset (default), the `else` branch below is byte-identical to every ticket before this one.
+  let macroConflictRiskMultiplier: number;
+  if (config.momentumContextDecisionMatrixEnabled) {
+    const macroConflict = (side === 'LONG' && macroDirection === 'DOWN') || (side === 'SHORT' && macroDirection === 'UP');
+    const matrixMode = config.momentumContextDecisionMatrixMode ?? 'V1';
+    // TICKET-143 §"MomentumThesis không hợp lệ" — by this point the candidate already cleared the AI
+    // score threshold, OOD guard, TICKET-130 direction5m veto, and the circuit breaker above; the
+    // ticket's thesis-invalid BLOCK condition is structurally unreachable here (see report's judgment
+    // calls section) — always true in this real wiring, only meaningfully false in the offline CSV.
+    const momentumThesisValid = true;
+    // Mode B (AUDIT_UNFILTERED) — separate, non-production audit variant: never blocks on
+    // macroConflict, riskMultiplier stays 1.0 (no reduction applied). Never itself a production path.
+    const decisionResult =
+      matrixMode === 'AUDIT_UNFILTERED'
+        ? ({ decision: 'ALLOW_NORMAL', riskMultiplier: 1.0, reason: 'audit_unfiltered_no_macro_block' } as const)
+        : computeMomentumContextDecision({
+            symbol: input.symbol,
+            macroConflict,
+            safetyState5m: momentumContextSafetyState5m ?? SafetyState5m.NORMAL,
+            momentumThesisValid,
+          });
+    if (onMomentumContextDecision) {
+      const htfContextCandidate = classifyHtfContextCandidate(regimeOutput.computedMetrics);
+      onMomentumContextDecision({
+        symbol: input.symbol,
+        timestamp: currentCandle.timestamp,
+        side,
+        htfContext: htfContextCandidate,
+        macroDirection,
+        macroConflict,
+        safetyState5m: momentumContextSafetyState5m ?? SafetyState5m.NORMAL,
+        modelScore: (side === 'LONG' ? longScore : shortScore) as number,
+        momentumScore: (side === 'LONG' ? longScore : shortScoreEffective) as number,
+        decision: decisionResult.decision,
+        riskMultiplier: decisionResult.riskMultiplier,
+        decisionReason: decisionResult.reason,
+      });
+    }
+    if (decisionResult.decision === 'BLOCK') return null;
+    macroConflictRiskMultiplier = decisionResult.riskMultiplier;
+  } else {
+    const macroOverride = evaluateMacroConflictOverride(side, macroDirection, regimeOutput.regime, input.candles5m, macroOverrideMode);
+    if (macroOverride.macroConflict && !macroOverride.overridden) return null;
+    // TICKET-138 — ticket-given constant (0.30), not tuned here. 1.0 (no-op) unless the override above
+    // actually fired for this exact candidate.
+    macroConflictRiskMultiplier = macroOverride.macroConflict && macroOverride.overridden ? 0.3 : 1.0;
+  }
 
   const atr = lastDefined(wilderATRSeries(input.candles5m, RegimeConfig.ATR_PERIOD_5M));
   if (atr === undefined) return null; // not enough 5m history to size the SL buffer
@@ -760,6 +834,8 @@ async function tryOpenNewPosition(
   onSetupNotFiredDiagnostic: ((diagnostic: SetupNotFiredDiagnostic) => void) | undefined,
   circuitBreakerState: { LONG: MomentumDirectCircuitBreakerSideState; SHORT: MomentumDirectCircuitBreakerSideState },
   onMomentumGateEvaluation: ((evaluation: MomentumGateEvaluation) => void) | undefined,
+  momentumContextSafetyState5m: SafetyState5m | undefined,
+  onMomentumContextDecision: ((diagnostic: MomentumContextDecisionDiagnostic) => void) | undefined,
 ): Promise<EntryAttemptResult> {
   // TICKET-017 Phần A: same direction function as adxDirection1h, applied to 1D candles instead.
   const macroDirectionSeries = wilderDIDirectionSeries(input.candles1d, EntryConfig.MACRO_TREND_ADX_PERIOD_1D);
@@ -803,7 +879,17 @@ async function tryOpenNewPosition(
   // straight through to the early return below, byte-identical to every ticket before this one.
   let effectiveDraftSetup: DraftSetup | null = draftSetup;
   if (effectiveDraftSetup === null && config.momentumDirectEnabled) {
-    effectiveDraftSetup = await tryMomentumDirect(input, config, regimeOutput, currentCandle, macroDirection, circuitBreakerState, onMomentumGateEvaluation);
+    effectiveDraftSetup = await tryMomentumDirect(
+      input,
+      config,
+      regimeOutput,
+      currentCandle,
+      macroDirection,
+      circuitBreakerState,
+      onMomentumGateEvaluation,
+      momentumContextSafetyState5m,
+      onMomentumContextDecision,
+    );
   }
 
   if (effectiveDraftSetup === null) return { event: null, newEntry: null };
@@ -1094,6 +1180,10 @@ export async function processCandle(
   // EVERY closed 5m candle. Never read here, never affects any decision — see
   // OrchestratorConfig.momentumCandidateIntegrityEnabled.
   onMomentumCandidateIntegrity?: (result: MomentumCandidateIntegrityResult) => void,
+  // TICKET-143 — diagnostic-only, fires ONLY when config.momentumContextDecisionMatrixEnabled is true,
+  // once per real tryMomentumDirect() candidate that reaches the decision point. Never read here,
+  // never affects any decision — see MomentumContextDecisionDiagnostic's own doc comment.
+  onMomentumContextDecision?: (diagnostic: MomentumContextDecisionDiagnostic) => void,
 ): Promise<ProcessCandleResult> {
   // Step 1 — regime, always runs.
   const regimeOutput = detectRegime({
@@ -1189,6 +1279,21 @@ export async function processCandle(
     }
 
     safetyState5mFinalStabilizedDiagnostic = { tracker: newTracker };
+  }
+
+  // TICKET-143 — gated entirely behind config.momentumContextDecisionMatrixEnabled, fully independent
+  // of every T139/T140/T140B/T141/T142/T142A block above (own tracker field, own state, never shares
+  // with any of them — see MomentumContextSafetyState5mState's doc comment). When off/unset,
+  // momentumContextSafetyState5m stays undefined and nothing below this block runs — byte-identical to
+  // pre-TICKET-143 behavior. The resulting currentState is passed into tryOpenNewPosition/
+  // tryMomentumDirect below for the REAL Decision Matrix decision (this is the one diagnostic-shaped
+  // block in this file whose output actually feeds a live decision, when the flag is on).
+  let momentumContextSafetyState5mDiagnostic: NonNullable<SymbolState['momentumContextSafetyState5m']> | undefined;
+  if (config.momentumContextDecisionMatrixEnabled) {
+    const safetyCandidate = classifySafetyState5mCandidate(regimeOutput.computedMetrics);
+    const previousTracker = state.momentumContextSafetyState5m?.tracker ?? null;
+    const newTracker = applySafetyState5mFinalStabilization(safetyCandidate, currentCandle.timestamp, previousTracker);
+    momentumContextSafetyState5mDiagnostic = { tracker: newTracker };
   }
 
   // TICKET-141 — gated entirely behind its own flag, fully independent of the T139/T140/T140B blocks
@@ -1457,6 +1562,8 @@ export async function processCandle(
       onSetupNotFiredDiagnostic,
       circuitBreakerState,
       onMomentumGateEvaluation,
+      momentumContextSafetyState5mDiagnostic?.tracker.currentState,
+      onMomentumContextDecision,
     );
     if (event) events.push(event);
     if (newEntry) remainingPositions.push(newEntry);
@@ -1470,6 +1577,7 @@ export async function processCandle(
       ...(htfSafetyDiagnostic !== undefined ? { htfSafetyDiagnostic } : {}),
       ...(safetyState5mStabilizedDiagnostic !== undefined ? { safetyState5mStabilizedDiagnostic } : {}),
       ...(safetyState5mFinalStabilizedDiagnostic !== undefined ? { safetyState5mFinalStabilizedDiagnostic } : {}),
+      ...(momentumContextSafetyState5mDiagnostic !== undefined ? { momentumContextSafetyState5m: momentumContextSafetyState5mDiagnostic } : {}),
       ...(localTradeThesis5mDiagnostic !== undefined ? { localTradeThesis5mDiagnostic } : {}),
       ...(setupSpecificThesisDiagnostic !== undefined ? { setupSpecificThesisDiagnostic } : {}),
       ...(momentumCandidateIntegrityDiagnostic !== undefined ? { momentumCandidateIntegrityDiagnostic } : {}),

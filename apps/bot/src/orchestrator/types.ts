@@ -8,6 +8,7 @@ import type { MomentumFilterConfig, NeutralTransitionGateConfig, PlanAutoSelecti
 import type { LocalTradeThesis5mResult } from './localTradeThesis5m.js';
 import type { SetupThesisResult } from './setupThesis/types.js';
 import type { MomentumCandidateIntegrityResult } from './setupThesis/momentumThesis.js';
+import type { MomentumContextDecisionResult } from './momentumContextDecisionMatrix.js';
 
 export interface RegimeHysteresisState {
   previousRegime: MarketRegime | null;
@@ -109,6 +110,17 @@ export interface MomentumCandidateIntegrityDiagnosticState {
   lastResult: MomentumCandidateIntegrityResult;
 }
 
+/**
+ * TICKET-143 — own, independent SafetyState5m final-stabilization tracker for the Momentum Context
+ * Decision Matrix, deliberately NOT sharing state with T140B's safetyState5mFinalStabilizedDiagnostic
+ * (same reasoning as T141/T142/T142A's own trackers — see their doc comments) so Mode C's real entry
+ * decisions never depend on whether those diagnostic-only flags happen to also be enabled. Only
+ * populated/read when OrchestratorConfig.momentumContextDecisionMatrixEnabled is true.
+ */
+export interface MomentumContextSafetyState5mState {
+  tracker: SafetyState5mTrackerState;
+}
+
 export interface SymbolState {
   regimeState: RegimeHysteresisState;
   /** TICKET-056: was `openPosition: ManagedPositionState | null` + `openMeta` — up to config.maxConcurrentPositionsPerSymbol entries now, each tracked fully independently (its own TP/SL/trailing). */
@@ -127,6 +139,8 @@ export interface SymbolState {
   setupSpecificThesisDiagnostic?: SetupSpecificThesisDiagnosticState;
   /** TICKET-142A — see MomentumCandidateIntegrityDiagnosticState doc comment. Undefined when the flag is off/unused so far. */
   momentumCandidateIntegrityDiagnostic?: MomentumCandidateIntegrityDiagnosticState;
+  /** TICKET-143 — see MomentumContextSafetyState5mState doc comment. Undefined when the flag is off/unused so far. */
+  momentumContextSafetyState5m?: MomentumContextSafetyState5mState;
 }
 
 export const INITIAL_SYMBOL_STATE: SymbolState = {
@@ -509,6 +523,33 @@ export interface OrchestratorConfig {
    * Only backtest.ts's new `--momentum-candidate-integrity-enabled=true` CLI flag sets this.
    */
   momentumCandidateIntegrityEnabled?: boolean;
+  /**
+   * TICKET-143 — opt-in, default-inert Momentum Context Decision Matrix V1. `undefined`/`false` =
+   * fully disabled, byte-identical to every ticket before this one, REGARDLESS of
+   * neutralMacroConflictOverrideMode's own setting (the two never interfere when both are off — this
+   * flag, when true, replaces tryMomentumDirect()'s ENTIRE macro-alignment block — not just
+   * NEUTRAL_TRANSITION's scoped T138 override — with orchestrator/momentumContextDecisionMatrix.ts's
+   * computeMomentumContextDecision(), across every regime tryMomentumDirect() can reach. BLOCK ->
+   * candidate rejected (same effect as today's hard block). ALLOW_NORMAL -> unchanged risk. ALLOW_REDUCED_RISK
+   * -> the EXISTING 0.30 multiplier (T138's constant, reused verbatim) folds into the same
+   * riskMultiplier chain correlationRiskMultiplier/oodRiskMultiplier already use. Requires
+   * SafetyState5m, independently (re)computed via its OWN tracker (SymbolState.momentumContextSafetyState5m,
+   * see that type's doc comment) — never shares state with the T139/T140/T140B diagnostic blocks, so
+   * this works standalone without requiring any of their 3 flags. Only backtest.ts's new
+   * `--momentum-context-decision-matrix-enabled=true` CLI flag ever sets this; never wired into any
+   * production default config. Shadow/audit only — see TICKET-143 report.
+   */
+  momentumContextDecisionMatrixEnabled?: boolean;
+  /**
+   * TICKET-143 — companion to momentumContextDecisionMatrixEnabled, only meaningful when that flag is
+   * true. `'V1'` (default when enabled, including when this field itself is undefined) = the real
+   * Decision Matrix from computeMomentumContextDecision(). `'AUDIT_UNFILTERED'` = Mode B, a SEPARATE
+   * audit-only variant that never blocks on macroConflict at all (riskMultiplier stays 1.0) — used
+   * ONLY to generate the ticket's required "audit bỏ macro-conflict" comparison run, explicitly NOT a
+   * production candidate. Only backtest.ts's new `--momentum-context-decision-matrix-mode=` CLI flag
+   * ever sets this; requires momentumContextDecisionMatrixEnabled=true to have any effect at all.
+   */
+  momentumContextDecisionMatrixMode?: 'V1' | 'AUDIT_UNFILTERED';
 }
 
 /** TICKET-081 — trạng thái cầu dao cho 1 chiều (LONG hoặc SHORT) của 1 symbol. */
