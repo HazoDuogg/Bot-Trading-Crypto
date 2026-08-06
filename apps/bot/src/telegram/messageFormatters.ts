@@ -5,6 +5,7 @@
  */
 import type { CloseTradeEvent, OpenTradeEvent, PartialCloseEvent } from '../orchestrator/types.js';
 import type { MarketRegime } from '../regime/types.js';
+import type { HTFContext, SafetyState5m } from '../regime/htfSafetyTypes.js';
 import { REGIME_DESCRIPTIONS } from './regimeDescriptions.js';
 
 export type BinanceEnvLabel = 'MAINNET — TIỀN THẬT' | 'TESTNET';
@@ -153,6 +154,62 @@ export function formatRegimeChangeMessage(change: RegimeChangeInfo): string {
     ``,
     `📶 ADX(1h): ${change.adx1h?.toFixed(1) ?? 'N/A'} | ATR percentile(5m): ${change.atrPercentile5m?.toFixed(0) ?? 'N/A'}%`,
     `🕐 ${fmtTimestamp(change.timestamp)}`,
+  ].join('\n');
+}
+
+// ---- 5b. TICKET-139: HTFContext / SafetyState5m diagnostic (log-only, fires ONLY on confirmed state change) ----
+
+export interface HtfContextChangeInfo {
+  symbol: string;
+  fromContext: HTFContext;
+  toContext: HTFContext;
+  timestamp: number;
+}
+
+/** TICKET-139 diagnostic message. Exact format per ticket: "HTF Context: NEUTRAL → TREND_DOWN". */
+export function formatHtfContextChangeMessage(change: HtfContextChangeInfo): string {
+  return [
+    `🧭 [TICKET-139 DIAGNOSTIC] HTF Context`,
+    `#${change.symbol}`,
+    `HTF Context: ${change.fromContext} → ${change.toContext}`,
+    `🕐 ${fmtTimestamp(change.timestamp)}`,
+  ].join('\n');
+}
+
+export interface SafetyState5mChangeInfo {
+  symbol: string;
+  fromState: SafetyState5m;
+  toState: SafetyState5m;
+  timestamp: number;
+}
+
+/** TICKET-139 diagnostic message. Exact format per ticket: "5m Safety: NORMAL → MANIPULATED". */
+export function formatSafetyState5mChangeMessage(change: SafetyState5mChangeInfo): string {
+  return [
+    `⚡ [TICKET-139 DIAGNOSTIC] 5m Safety`,
+    `#${change.symbol}`,
+    `5m Safety: ${change.fromState} → ${change.toState}`,
+    `🕐 ${fmtTimestamp(change.timestamp)}`,
+  ].join('\n');
+}
+
+// ---- 5c. TICKET-140: stabilized SafetyState5m diagnostic (log-only, fires ONLY on confirmed stabilized-state change) ----
+
+export interface SafetyState5mStabilizedChangeInfo {
+  symbol: string;
+  fromState: SafetyState5m;
+  toState: SafetyState5m;
+  timestamp: number;
+}
+
+/** TICKET-140 §7 diagnostic message. Exact format per ticket. */
+export function formatSafetyState5mStabilizedChangeMessage(change: SafetyState5mStabilizedChangeInfo): string {
+  return [
+    `🛡️ [5M SAFETY STATE]`,
+    `#${change.symbol}`,
+    `${change.fromState} → ${change.toState}`,
+    `Candidate confirmed: 2 candles`,
+    `Minimum dwell: 3 candles`,
   ].join('\n');
 }
 

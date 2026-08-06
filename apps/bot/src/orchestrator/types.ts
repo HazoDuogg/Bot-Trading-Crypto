@@ -1,7 +1,11 @@
 import type { MarketRegime } from '../regime/types.js';
+import type { HTFContext, SafetyState5m } from '../regime/htfSafetyTypes.js';
+import type { SafetyHysteresisState } from '../regime/safetyState5m.js';
+import type { SafetyState5mTrackerState } from '../regime/safetyState5mTracker.js';
 import type { ManagedPositionState, TpLevel, TpPlan } from '../risk/slTpManager.js';
 import type { EntryRouterConfig } from '../entry/types.js';
 import type { MomentumFilterConfig, NeutralTransitionGateConfig, PlanAutoSelectionConfig } from '../xgbFilter/config.js';
+import type { LocalTradeThesis5mResult } from './localTradeThesis5m.js';
 
 export interface RegimeHysteresisState {
   previousRegime: MarketRegime | null;
@@ -34,12 +38,66 @@ export interface OpenPositionEntry {
   meta: OpenTradeMeta;
 }
 
+/**
+ * TICKET-139 — diagnostic-only state for the split HTFContext/SafetyState5m state machines.
+ * Only ever populated/read when OrchestratorConfig.htfSafetySplitDiagnosticEnabled is true;
+ * undefined otherwise (see processCandle()). Never read by any entry/risk decision.
+ */
+export interface HtfSafetyDiagnosticState {
+  previousHtfContext: HTFContext | null;
+  safetyHysteresis: SafetyHysteresisState | null;
+}
+
+/**
+ * TICKET-140 — diagnostic-only state for the stabilized SafetyState5m tracker. Only ever
+ * populated/read when OrchestratorConfig.safetyState5mStabilizationEnabled is true; undefined
+ * otherwise (see processCandle()). Never read by any entry/risk decision.
+ */
+export interface SafetyState5mStabilizedDiagnosticState {
+  tracker: SafetyState5mTrackerState;
+}
+
+/**
+ * TICKET-140B — diagnostic-only state for the FINAL stabilized SafetyState5m tracker (on top of
+ * T140's, run independently side-by-side). Only ever populated/read when
+ * OrchestratorConfig.safetyState5mFinalStabilizationEnabled is true; undefined otherwise (see
+ * processCandle()). Never read by any entry/risk decision. Reuses SafetyState5mTrackerState's shape
+ * (same fields, produced by regime/safetyState5mTrackerV2.ts's applySafetyState5mFinalStabilization()
+ * instead of T140's applySafetyState5mStabilization()) — kept as its own named type so the two
+ * diagnostics never get confused at the type level either.
+ */
+export interface SafetyState5mFinalStabilizedDiagnosticState {
+  tracker: SafetyState5mTrackerState;
+}
+
+/**
+ * TICKET-141 — diagnostic-only state for the Local Trade Thesis 5m engine's own independent
+ * SafetyState5m final-stabilization tracker (deliberately its OWN tracker, not a read of T140B's
+ * safetyState5mFinalStabilizedDiagnostic field, so localTradeThesis5mEnabled works standalone
+ * without requiring safetyState5mFinalStabilizationEnabled to also be on — see TICKET-141 report's
+ * "Judgment calls" section). Only ever populated/read when
+ * OrchestratorConfig.localTradeThesis5mEnabled is true; undefined otherwise. Never read by any
+ * entry/risk decision.
+ */
+export interface LocalTradeThesis5mDiagnosticState {
+  tracker: SafetyState5mTrackerState;
+  lastResult: LocalTradeThesis5mResult;
+}
+
 export interface SymbolState {
   regimeState: RegimeHysteresisState;
   /** TICKET-056: was `openPosition: ManagedPositionState | null` + `openMeta` — up to config.maxConcurrentPositionsPerSymbol entries now, each tracked fully independently (its own TP/SL/trailing). */
   openPositions: OpenPositionEntry[];
   /** TICKET-081 — per-side (LONG/SHORT) MOMENTUM_DIRECT loss-streak circuit breaker for THIS symbol. */
   momentumDirectCircuitBreaker: { LONG: MomentumDirectCircuitBreakerSideState; SHORT: MomentumDirectCircuitBreakerSideState };
+  /** TICKET-139 — see HtfSafetyDiagnosticState doc comment. Undefined when the flag is off/unused so far. */
+  htfSafetyDiagnostic?: HtfSafetyDiagnosticState;
+  /** TICKET-140 — see SafetyState5mStabilizedDiagnosticState doc comment. Undefined when the flag is off/unused so far. */
+  safetyState5mStabilizedDiagnostic?: SafetyState5mStabilizedDiagnosticState;
+  /** TICKET-140B — see SafetyState5mFinalStabilizedDiagnosticState doc comment. Its own field, independent of T140's above — never collides/shares state with it. Undefined when the flag is off/unused so far. */
+  safetyState5mFinalStabilizedDiagnostic?: SafetyState5mFinalStabilizedDiagnosticState;
+  /** TICKET-141 — see LocalTradeThesis5mDiagnosticState doc comment. Undefined when the flag is off/unused so far. */
+  localTradeThesis5mDiagnostic?: LocalTradeThesis5mDiagnosticState;
 }
 
 export const INITIAL_SYMBOL_STATE: SymbolState = {
@@ -339,6 +397,73 @@ export interface OrchestratorConfig {
    * (default 'NONE') ever sets this field; never wired into any production default config.
    */
   neutralMacroConflictOverrideMode?: 'NONE' | 'UNFILTERED' | 'CONDITIONAL_5M';
+  /**
+   * TICKET-139 — opt-in, default-inert HTFContext/SafetyState5m split diagnostic. `undefined`
+   * (default) or `false` = fully disabled, byte-identical to every ticket before this one:
+   * processCandle() does not even compute HTFContext/SafetyState5m in that case (gated at the
+   * computation itself, not just at the decision layer). Does NOT change regimeOutput,
+   * MarketRegime, entry routing, position sizing, or any existing decision path at ANY setting —
+   * this ticket is diagnostic groundwork only (see TICKET-139 brief). When true, processCandle()
+   * additionally computes regime/htfContext.ts's classifyHtfContextCandidate() and
+   * regime/safetyState5m.ts's classifySafetyState5mCandidate()+applySafetyState5mHysteresis()
+   * each call, tracks their own hysteresis state per symbol (SymbolState.htfSafetyDiagnostic),
+   * and fires the new onHtfContextChange/onSafetyState5mChange callbacks ONLY on a confirmed
+   * state change vs the previous candle (not every candle) — same "log only, never gate" contract
+   * the ticket requires. Only backtest.ts's new --htf-safety-split-diagnostic-enabled= CLI flag
+   * (default false) ever sets this field; never wired into any production default config.
+   */
+  htfSafetySplitDiagnosticEnabled?: boolean;
+  /**
+   * TICKET-140 — opt-in, default-inert SafetyState5m transition stabilization diagnostic. `undefined`
+   * (default) or `false` = fully disabled, byte-identical to every ticket before this one:
+   * processCandle() does not even compute the stabilized tracker in that case (gated at the
+   * computation itself, same pattern as htfSafetySplitDiagnosticEnabled). Does NOT change
+   * regimeOutput, MarketRegime, HTFContext, entry routing, position sizing, or any existing decision
+   * path at ANY setting — diagnostic groundwork only (see TICKET-140 brief). When true, processCandle()
+   * additionally runs regime/safetyState5mTracker.ts's applySafetyState5mStabilization() on top of
+   * TICKET-139's unchanged classifySafetyState5mCandidate(), tracks its own state per symbol
+   * (SymbolState.safetyState5mStabilizedDiagnostic), and fires the new onSafetyState5mStabilized
+   * callback ONLY on a confirmed state change vs the previous candle — same "log only, never gate"
+   * contract TICKET-139's flag uses. Only backtest.ts's new
+   * --safety-state-5m-stabilization-enabled= CLI flag (default false) ever sets this field; never
+   * wired into any production default config.
+   */
+  safetyState5mStabilizationEnabled?: boolean;
+  /**
+   * TICKET-140B — opt-in, default-inert FINAL SafetyState5m chattering-reduction diagnostic on top of
+   * T140's. `undefined` (default) or `false` = fully disabled, byte-identical to every ticket before
+   * this one: processCandle() does not even compute the final-stabilized tracker in that case (gated
+   * at the computation itself, same pattern as safetyState5mStabilizationEnabled). Does NOT change
+   * regimeOutput, MarketRegime, HTFContext, entry routing, position sizing, or any existing decision
+   * path at ANY setting — diagnostic groundwork only (see TICKET-140B brief). When true,
+   * processCandle() additionally runs regime/safetyState5mTrackerV2.ts's
+   * applySafetyState5mFinalStabilization() on top of TICKET-139's unchanged
+   * classifySafetyState5mCandidate(), independently of (and simultaneously with, when both flags are
+   * on) T140's own tracker — tracks its own state per symbol
+   * (SymbolState.safetyState5mFinalStabilizedDiagnostic, never sharing/colliding with T140's field),
+   * and fires the new onSafetyState5mFinalStabilized callback ONLY on a confirmed state change vs the
+   * previous candle — same "log only, never gate" contract T139/T140's flags use. Only backtest.ts's
+   * new --safety-state-5m-final-stabilization-enabled= CLI flag (default false) ever sets this field;
+   * never wired into any production default config.
+   */
+  safetyState5mFinalStabilizationEnabled?: boolean;
+  /**
+   * TICKET-141 — opt-in, default-inert 5m Local Trade Thesis Engine diagnostic. `undefined` (default)
+   * or `false` = fully disabled, byte-identical to every ticket before this one: processCandle() does
+   * not even compute the thesis in that case (gated at the computation itself, same pattern as every
+   * other T139/T140/T140B flag). Does NOT change regimeOutput, MarketRegime, HTFContext, entry
+   * routing, position sizing, or any existing decision path at ANY setting — diagnostic groundwork
+   * only (see TICKET-141 brief §1/§11/§13: "chưa được dùng thesis để ALLOW hoặc BLOCK lệnh"). When
+   * true, processCandle() additionally runs orchestrator/localTradeThesis5m.ts's
+   * computeLocalTradeThesis5m() EVERY closed 5m candle (not just on change, unlike T139/T140/T140B —
+   * §8's CSV wants one row per candle), independently re-classifying SafetyState5m via TICKET-139's
+   * unchanged classifySafetyState5mCandidate() + its OWN final-stabilization tracker (SymbolState.
+   * localTradeThesis5mDiagnostic, never sharing state with T140B's own field — see
+   * LocalTradeThesis5mDiagnosticState doc comment for why), and fires the new onLocalTradeThesis5m
+   * callback every candle. Only backtest.ts's new --local-trade-thesis-5m-enabled= CLI flag (default
+   * false) ever sets this field; never wired into any production default config.
+   */
+  localTradeThesis5mEnabled?: boolean;
 }
 
 /** TICKET-081 — trạng thái cầu dao cho 1 chiều (LONG hoặc SHORT) của 1 symbol. */

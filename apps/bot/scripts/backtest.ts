@@ -22,6 +22,7 @@ import {
   type SetupNotFiredDiagnostic,
 } from '../dist/orchestrator/orchestrator.js';
 import { INITIAL_SYMBOL_STATE, type CloseTradeEvent, type OrchestratorConfig, type SymbolState } from '../dist/orchestrator/types.js';
+import type { LocalTradeThesis5mResult } from '../dist/orchestrator/localTradeThesis5m.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import type { EntryStyleForNeutral, FunnelEvent } from '../dist/entry/types.js';
 import {
@@ -173,6 +174,38 @@ function parseArgs(): {
    * byte-identical to every ticket before this one.
    */
   neutralMacroConflictOverrideMode: 'NONE' | 'UNFILTERED' | 'CONDITIONAL_5M';
+  /**
+   * TICKET-139 — opt-in, default-inert HTFContext/SafetyState5m split diagnostic CLI flag. `false`
+   * (default, or the flag omitted entirely) means OrchestratorConfig.htfSafetySplitDiagnosticEnabled
+   * stays undefined/false — fully inert, byte-identical to every ticket before this one. When true,
+   * this script ALSO writes a per-candle diagnostic CSV (data/ticket139-htf-safety-diagnostic.csv)
+   * and, at the end of the run, generates data/ticket139-htf-context-5m-safety-validation.md.
+   */
+  htfSafetySplitDiagnosticEnabled: boolean;
+  /**
+   * TICKET-140 — opt-in, default-inert SafetyState5m transition stabilization diagnostic CLI flag.
+   * `false` (default, or the flag omitted entirely) means OrchestratorConfig.safetyState5mStabilizationEnabled
+   * stays undefined/false — fully inert, byte-identical to every ticket before this one. When true,
+   * this script ALSO writes a per-candle diagnostic CSV (data/ticket140-safety-state-5m-stabilized-<suffix>.csv)
+   * and, at the end of the run, generates data/ticket140-safety-state-5m-stabilization.md.
+   */
+  safetyState5mStabilizationEnabled: boolean;
+  /**
+   * TICKET-140B — opt-in, default-inert FINAL SafetyState5m chattering-reduction diagnostic CLI flag.
+   * `false` (default, or the flag omitted entirely) means OrchestratorConfig.safetyState5mFinalStabilizationEnabled
+   * stays undefined/false — fully inert, byte-identical to every ticket before this one. When true,
+   * this script ALSO writes a per-candle diagnostic CSV (data/ticket140b-safety-state-5m-final-stabilized-<suffix>.csv)
+   * and, at the end of the run, generates data/ticket140b-safety-state-5m-final-chattering-reduction.md.
+   */
+  safetyState5mFinalStabilizationEnabled: boolean;
+  /**
+   * TICKET-141 — opt-in, default-inert 5m Local Trade Thesis Engine diagnostic CLI flag. `false`
+   * (default, or the flag omitted entirely) means OrchestratorConfig.localTradeThesis5mEnabled stays
+   * undefined/false — fully inert, byte-identical to every ticket before this one. When true, this
+   * script ALSO writes a per-candle diagnostic CSV (data/ticket141-5m-local-trade-thesis-<suffix>.csv)
+   * and, at the end of the run, generates data/ticket141-5m-local-trade-thesis.md.
+   */
+  localTradeThesis5mEnabled: boolean;
 } {
   const args = process.argv.slice(2);
   const styleArg = args.find((a) => a.startsWith('--entry-style='));
@@ -216,6 +249,10 @@ function parseArgs(): {
   const neutral5mDirectionSelectorEnabledArg = args.find((a) => a.startsWith('--neutral-5m-direction-selector-enabled='));
   const neutral5mDirectionGatedRoutingEnabledArg = args.find((a) => a.startsWith('--neutral-5m-direction-gated-routing-enabled='));
   const neutralMacroConflictOverrideModeArg = args.find((a) => a.startsWith('--neutral-macro-conflict-override-mode='));
+  const htfSafetySplitDiagnosticEnabledArg = args.find((a) => a.startsWith('--htf-safety-split-diagnostic-enabled='));
+  const safetyState5mStabilizationEnabledArg = args.find((a) => a.startsWith('--safety-state-5m-stabilization-enabled='));
+  const safetyState5mFinalStabilizationEnabledArg = args.find((a) => a.startsWith('--safety-state-5m-final-stabilization-enabled='));
+  const localTradeThesis5mEnabledArg = args.find((a) => a.startsWith('--local-trade-thesis-5m-enabled='));
   const obValue = obArg ? obArg.split('=')[1] : '';
   return {
     entryStyleForNeutral: (styleArg ? styleArg.split('=')[1] : 'SIDEWAY_STYLE') as EntryStyleForNeutral,
@@ -308,6 +345,14 @@ function parseArgs(): {
       | 'NONE'
       | 'UNFILTERED'
       | 'CONDITIONAL_5M',
+    // TICKET-139: off by default — matches OrchestratorConfig.htfSafetySplitDiagnosticEnabled's default.
+    htfSafetySplitDiagnosticEnabled: htfSafetySplitDiagnosticEnabledArg ? htfSafetySplitDiagnosticEnabledArg.split('=')[1] === 'true' : false,
+    // TICKET-140: off by default — matches OrchestratorConfig.safetyState5mStabilizationEnabled's default.
+    safetyState5mStabilizationEnabled: safetyState5mStabilizationEnabledArg ? safetyState5mStabilizationEnabledArg.split('=')[1] === 'true' : false,
+    // TICKET-140B: off by default — matches OrchestratorConfig.safetyState5mFinalStabilizationEnabled's default.
+    safetyState5mFinalStabilizationEnabled: safetyState5mFinalStabilizationEnabledArg ? safetyState5mFinalStabilizationEnabledArg.split('=')[1] === 'true' : false,
+    // TICKET-141: off by default — matches OrchestratorConfig.localTradeThesis5mEnabled's default.
+    localTradeThesis5mEnabled: localTradeThesis5mEnabledArg ? localTradeThesis5mEnabledArg.split('=')[1] === 'true' : false,
   };
 }
 
@@ -487,6 +532,10 @@ async function main(): Promise<void> {
     neutral5mDirectionSelectorEnabled,
     neutral5mDirectionGatedRoutingEnabled,
     neutralMacroConflictOverrideMode,
+    htfSafetySplitDiagnosticEnabled,
+    safetyState5mStabilizationEnabled,
+    safetyState5mFinalStabilizationEnabled,
+    localTradeThesis5mEnabled,
   } = parseArgs();
   console.log(
     `Backtest — entryStyleForNeutral=${entryStyleForNeutral}, tpPlan=${tpPlan}, macroTrendFilterEnabled=${macroTrendFilterEnabled}, obDisabledSymbols=[${obDisabledSymbols.join(',')}], macroTrendFilterAppliesToBoxBreakout=${macroTrendFilterAppliesToBoxBreakout}, momentumFilterEnabled=${momentumFilterEnabled}, neutralTransitionEnabled=${neutralTransitionEnabled}, riskPoolMaxPct=${riskPoolMaxPct}, neutralGateThreshold=${neutralGateThreshold}, mssStalenessTolerance=${mssStalenessTolerance}, obBosLookback=${obBosLookback}, obSlBufferAtrMultiplier=${obSlBufferAtrMultiplier}, planAutoSelectionEnabled=${planAutoSelectionEnabled}, planAutoSelectionThreshold=${planAutoSelectionThreshold}, maxConcurrentPositionsPerSymbol=${maxConcurrentPositionsPerSymbol}, momentumDirectEnabled=${momentumDirectEnabled}, momentumDirectThreshold=${momentumDirectThreshold}, momentumDirectMaxAtrPercentile=${momentumDirectMaxAtrPercentile}, momentumDirectMinSlPercent=${momentumDirectMinSlPercent}, momentumDirectTpRMultiple=${momentumDirectTpRMultiple}, momentumDirectMaxTotalConcurrent=${momentumDirectMaxTotalConcurrent}, momentumDirectCorrelationRiskThreshold=${momentumDirectCorrelationRiskThreshold}, momentumDirectCorrelationRiskMultiplier=${momentumDirectCorrelationRiskMultiplier}, momentumDirectCircuitBreakerLossThreshold=${momentumDirectCircuitBreakerLossThreshold}, momentumDirectCircuitBreakerCooldownMs=${momentumDirectCircuitBreakerCooldownMs}, riskDollarOrPercent=${riskDollarOrPercent}, startBalance=${startBalance}, maxMarginCap=${maxMarginCap}, dateFrom=${dateFrom ?? '(không giới hạn)'}, dateTo=${dateTo ?? '(không giới hạn)'}, skipDays=${skipDays}, momentumModelVersion=${momentumModelVersion}, modelMode=${modelMode}, maxTotalMarginPct=${maxTotalMarginPct !== undefined ? `${(maxTotalMarginPct * 100).toFixed(1)}%` : '(không giới hạn)'}, oodGuardMode=${oodGuardMode}, oodGuardEmaRatioSlowThreshold=${oodGuardEmaRatioSlowThreshold}, oodGuardScoreCap=${oodGuardScoreCap}, oodGuardRiskReductionMultiplier=${oodGuardRiskReductionMultiplier}, neutral5mDirectionSelectorEnabled=${neutral5mDirectionSelectorEnabled}, neutral5mDirectionGatedRoutingEnabled=${neutral5mDirectionGatedRoutingEnabled}, neutralMacroConflictOverrideMode=${neutralMacroConflictOverrideMode}`,
@@ -582,6 +631,22 @@ async function main(): Promise<void> {
     // TICKET-138: 'NONE' (default) omits the field entirely -> undefined, orchestrator.ts's
     // tryMomentumDirect() macro-alignment check fires exactly as before this ticket — fully inert.
     ...(neutralMacroConflictOverrideMode !== 'NONE' ? { neutralMacroConflictOverrideMode } : {}),
+    // TICKET-139: false (default) omits the field entirely -> undefined, orchestrator.ts's
+    // processCandle() never even computes HTFContext/SafetyState5m — fully inert, matching every
+    // ticket before this one exactly.
+    ...(htfSafetySplitDiagnosticEnabled ? { htfSafetySplitDiagnosticEnabled: true } : {}),
+    // TICKET-140: false (default) omits the field entirely -> undefined, orchestrator.ts's
+    // processCandle() never even computes the stabilized tracker — fully inert, matching every
+    // ticket before this one exactly.
+    ...(safetyState5mStabilizationEnabled ? { safetyState5mStabilizationEnabled: true } : {}),
+    // TICKET-140B: false (default) omits the field entirely -> undefined, orchestrator.ts's
+    // processCandle() never even computes the final-stabilized tracker — fully inert, matching every
+    // ticket before this one exactly.
+    ...(safetyState5mFinalStabilizationEnabled ? { safetyState5mFinalStabilizationEnabled: true } : {}),
+    // TICKET-141: false (default) omits the field entirely -> undefined, orchestrator.ts's
+    // processCandle() never even computes the Local Trade Thesis 5m engine — fully inert, matching
+    // every ticket before this one exactly.
+    ...(localTradeThesis5mEnabled ? { localTradeThesis5mEnabled: true } : {}),
   };
   // TICKET-123: fail-loud proof-of-model-in-use for the report — check file existence explicitly
   // here (in addition to orchestrator.ts's own throw-on-load-failure) so a missing V7_RAW artifact
@@ -622,6 +687,25 @@ async function main(): Promise<void> {
   // offline (joined against data/all-candidates-with-outcomes.csv by symbol+timestamp+side) without
   // any new plumbing inside orchestrator.ts itself. Never read by any decision logic.
   const shortMomentumDirectEvaluations: { symbol: string; timestamp: number; score: number; passed: boolean; oodFlagged: boolean }[] = [];
+
+  // TICKET-139 — diagnostic-only per-candle row: confirmed HTFContext + SafetyState5m (read off
+  // sd.state.htfSafetyDiagnostic right after processCandle() below) alongside the OLD confirmed
+  // MarketRegime for the SAME candle, so the report can compare flip/dwell stats apples-to-apples
+  // on identical market data. Only ever populated when htfSafetySplitDiagnosticEnabled=true. Never
+  // read by any decision logic.
+  const htfSafetyDiagnosticRows: { timestamp: number; symbol: string; htfContext: string; safetyState5m: string; oldRegime: string }[] = [];
+  // TICKET-140 — diagnostic-only per-candle row: STABILIZED SafetyState5m (read off
+  // sd.state.safetyState5mStabilizedDiagnostic right after processCandle() below). Only ever
+  // populated when safetyState5mStabilizationEnabled=true. Never influences trades/report.
+  const safetyState5mStabilizedRows: { timestamp: number; symbol: string; safetyState5mStabilized: string }[] = [];
+  // TICKET-140B — diagnostic-only per-candle row: FINAL stabilized SafetyState5m (read off
+  // sd.state.safetyState5mFinalStabilizedDiagnostic right after processCandle() below). Only ever
+  // populated when safetyState5mFinalStabilizationEnabled=true. Never influences trades/report.
+  const safetyState5mFinalStabilizedRows: { timestamp: number; symbol: string; safetyState5mFinalStabilized: string }[] = [];
+  // TICKET-141 — diagnostic-only per-candle row: full Local Trade Thesis 5m result (read off
+  // sd.state.localTradeThesis5mDiagnostic right after processCandle() below). Only ever populated
+  // when localTradeThesis5mEnabled=true. Never influences trades/report above (§11/§13).
+  const localTradeThesis5mRows: LocalTradeThesis5mResult[] = [];
 
   // TICKET-130 — diagnostic-only accumulator: every NEUTRAL_TRANSITION MOMENTUM_DIRECT gate
   // evaluation (both LONG and SHORT), same pass-through-callback pattern as TICKET-122's
@@ -888,6 +972,41 @@ async function main(): Promise<void> {
       );
       sd.state = result.symbolState;
       accountBalance = result.accountBalance;
+
+      // TICKET-139 — see htfSafetyDiagnosticRows declaration above. htfSafetyDiagnostic is only ever
+      // defined when config.htfSafetySplitDiagnosticEnabled is true (see orchestrator.ts's processCandle()).
+      if (sd.state.htfSafetyDiagnostic) {
+        htfSafetyDiagnosticRows.push({
+          timestamp: currentCandle.timestamp,
+          symbol,
+          htfContext: sd.state.htfSafetyDiagnostic.previousHtfContext ?? 'NEUTRAL',
+          safetyState5m: sd.state.htfSafetyDiagnostic.safetyHysteresis?.state ?? 'NORMAL',
+          oldRegime: sd.state.regimeState.previousRegime ?? 'NEUTRAL_TRANSITION',
+        });
+      }
+
+      // TICKET-140 — see safetyState5mStabilizedRows declaration above.
+      if (sd.state.safetyState5mStabilizedDiagnostic) {
+        safetyState5mStabilizedRows.push({
+          timestamp: currentCandle.timestamp,
+          symbol,
+          safetyState5mStabilized: sd.state.safetyState5mStabilizedDiagnostic.tracker.currentState,
+        });
+      }
+
+      // TICKET-140B — see safetyState5mFinalStabilizedRows declaration above.
+      if (sd.state.safetyState5mFinalStabilizedDiagnostic) {
+        safetyState5mFinalStabilizedRows.push({
+          timestamp: currentCandle.timestamp,
+          symbol,
+          safetyState5mFinalStabilized: sd.state.safetyState5mFinalStabilizedDiagnostic.tracker.currentState,
+        });
+      }
+
+      // TICKET-141 — see localTradeThesis5mRows declaration above.
+      if (sd.state.localTradeThesis5mDiagnostic) {
+        localTradeThesis5mRows.push(sd.state.localTradeThesis5mDiagnostic.lastResult);
+      }
 
       // TICKET-101 Việc 1 — BUG FIX: openRiskBySymbol was a snapshot taken ONCE before this step's
       // per-symbol loop (the old "one-step-lag convention"), so if symbol A opened a NEW position
@@ -1178,6 +1297,221 @@ async function main(): Promise<void> {
   const reportPath = path.resolve(process.cwd(), `data/backtest-report-${suffix}.md`);
   writeFileSync(reportPath, report);
   console.log(`→ ${reportPath}`);
+
+  // TICKET-139 — diagnostic-only CSV (never influences trades/report above), consumed by
+  // ticket139GenerateReport.ts to produce data/ticket139-htf-context-5m-safety-validation.md.
+  if (htfSafetySplitDiagnosticEnabled) {
+    const diagPath = path.resolve(process.cwd(), `data/ticket139-htf-safety-diagnostic-${suffix}.csv`);
+    const diagHeader = 'timestamp,symbol,htfContext,safetyState5m,oldRegime';
+    const diagRows = htfSafetyDiagnosticRows.map((r) => [r.timestamp, r.symbol, r.htfContext, r.safetyState5m, r.oldRegime].join(','));
+    writeFileSync(diagPath, [diagHeader, ...diagRows].join('\n') + '\n');
+    console.log(`→ ${diagPath} (${htfSafetyDiagnosticRows.length} dòng)`);
+
+    const { generateTicket139Report } = await import('./ticket139GenerateReport.js');
+    const reportOutPath = path.resolve(process.cwd(), 'data/ticket139-htf-context-5m-safety-validation.md');
+    generateTicket139Report(diagPath, reportOutPath);
+    console.log(`→ ${reportOutPath}`);
+  }
+
+  // TICKET-140 — diagnostic-only CSV (never influences trades/report above), the STABILIZED half of
+  // the RAW-vs-STABILIZED comparison in data/ticket140-safety-state-5m-stabilization.md. RAW comes
+  // from TICKET-139's own htfSafetyDiagnosticRows/safetyState5m column above (needs
+  // htfSafetySplitDiagnosticEnabled=true run separately, or the same run with both flags on).
+  if (safetyState5mStabilizationEnabled) {
+    const stabilizedDiagPath = path.resolve(process.cwd(), `data/ticket140-safety-state-5m-stabilized-${suffix}.csv`);
+    const stabilizedHeader = 'timestamp,symbol,safetyState5mStabilized';
+    const stabilizedRows = safetyState5mStabilizedRows.map((r) => [r.timestamp, r.symbol, r.safetyState5mStabilized].join(','));
+    writeFileSync(stabilizedDiagPath, [stabilizedHeader, ...stabilizedRows].join('\n') + '\n');
+    console.log(`→ ${stabilizedDiagPath} (${safetyState5mStabilizedRows.length} dòng)`);
+
+    if (htfSafetySplitDiagnosticEnabled) {
+      const rawDiagPath = path.resolve(process.cwd(), `data/ticket139-htf-safety-diagnostic-${suffix}.csv`);
+      const { generateTicket140Report } = await import('./ticket140GenerateReport.js');
+      const reportOutPath = path.resolve(process.cwd(), 'data/ticket140-safety-state-5m-stabilization.md');
+      generateTicket140Report(rawDiagPath, stabilizedDiagPath, reportOutPath);
+      console.log(`→ ${reportOutPath}`);
+    } else {
+      console.log('⚠ --htf-safety-split-diagnostic-enabled=true chưa bật cùng lúc — bỏ qua bước sinh ticket140-safety-state-5m-stabilization.md (cần cả RAW lẫn STABILIZED CSV).');
+    }
+  }
+
+  // TICKET-140B — diagnostic-only CSV (never influences trades/report above), the FINAL-STABILIZED
+  // 3rd column of the RAW/T140/T140B comparison in
+  // data/ticket140b-safety-state-5m-final-chattering-reduction.md. RAW comes from TICKET-139's own
+  // htfSafetyDiagnosticRows/safetyState5m column, T140 comes from safetyState5mStabilizationEnabled's
+  // own CSV above — both need to have run in the SAME invocation (all three diagnostic flags on at
+  // once) for the 3-way report to be generated.
+  if (safetyState5mFinalStabilizationEnabled) {
+    const finalStabilizedDiagPath = path.resolve(process.cwd(), `data/ticket140b-safety-state-5m-final-stabilized-${suffix}.csv`);
+    const finalStabilizedHeader = 'timestamp,symbol,safetyState5mFinalStabilized';
+    const finalStabilizedRows = safetyState5mFinalStabilizedRows.map((r) => [r.timestamp, r.symbol, r.safetyState5mFinalStabilized].join(','));
+    writeFileSync(finalStabilizedDiagPath, [finalStabilizedHeader, ...finalStabilizedRows].join('\n') + '\n');
+    console.log(`→ ${finalStabilizedDiagPath} (${safetyState5mFinalStabilizedRows.length} dòng)`);
+
+    if (htfSafetySplitDiagnosticEnabled && safetyState5mStabilizationEnabled) {
+      const rawDiagPath = path.resolve(process.cwd(), `data/ticket139-htf-safety-diagnostic-${suffix}.csv`);
+      const t140DiagPath = path.resolve(process.cwd(), `data/ticket140-safety-state-5m-stabilized-${suffix}.csv`);
+      const { generateTicket140bReport } = await import('./ticket140bGenerateReport.js');
+      const reportOutPath = path.resolve(process.cwd(), 'data/ticket140b-safety-state-5m-final-chattering-reduction.md');
+      generateTicket140bReport(rawDiagPath, t140DiagPath, finalStabilizedDiagPath, reportOutPath);
+      console.log(`→ ${reportOutPath}`);
+    } else {
+      console.log('⚠ Cần cả --htf-safety-split-diagnostic-enabled=true VÀ --safety-state-5m-stabilization-enabled=true bật cùng lúc — bỏ qua bước sinh ticket140b-safety-state-5m-final-chattering-reduction.md (cần cả RAW, T140 lẫn T140B CSV).');
+    }
+  }
+
+  // TICKET-141 — diagnostic-only CSV (never influences trades/report above), consumed by
+  // ticket141GenerateReport.ts to produce data/ticket141-5m-local-trade-thesis.md (§8/§9/§10/§12/§14).
+  if (localTradeThesis5mEnabled) {
+    const t141Path = path.resolve(process.cwd(), `data/ticket141-5m-local-trade-thesis-${suffix}.csv`);
+    const t141Header = [
+      'symbol',
+      'timestamp',
+      'htfContext',
+      'safetyState5m',
+      'direction5m',
+      'emaRelation',
+      'emaSlope',
+      'diDirection',
+      'structureState',
+      'bosState',
+      'mssState',
+      'swingStructure',
+      'sweepReclaim',
+      'setupType',
+      'setupSide',
+      'setupValid',
+      'setupReason',
+      'entryPrice',
+      'stopLoss',
+      'riskReward',
+      'distanceFromEmaInAtr',
+      'entryQualityPassed',
+      'entryQualityReason',
+      'localThesis',
+      'thesisReason',
+    ].join(',');
+    const csvEscape = (v: string): string => `"${v.replace(/"/g, '""')}"`;
+    const t141Rows = localTradeThesis5mRows.map((r) =>
+      [
+        r.symbol,
+        r.timestamp,
+        r.htfContext,
+        r.safetyState5m,
+        r.direction5m,
+        r.emaRelation,
+        r.emaSlope ?? '',
+        r.diDirection ?? '',
+        r.structureState,
+        r.bosState,
+        r.mssState,
+        r.swingStructure,
+        r.sweepReclaim,
+        r.setupType,
+        r.setupSide,
+        r.setupValid,
+        csvEscape(r.setupReason),
+        r.entryPrice ?? '',
+        r.stopLoss ?? '',
+        r.riskReward ?? '',
+        r.distanceFromEmaInAtr ?? '',
+        r.entryQualityPassed,
+        csvEscape(r.entryQualityReason),
+        r.localThesis,
+        csvEscape(r.thesisReason),
+      ].join(','),
+    );
+    writeFileSync(t141Path, [t141Header, ...t141Rows].join('\n') + '\n');
+    console.log(`→ ${t141Path} (${localTradeThesis5mRows.length} dòng)`);
+
+    const { generateTicket141Report } = await import('./ticket141GenerateReport.js');
+    const t141ReportPath = path.resolve(process.cwd(), 'data/ticket141-5m-local-trade-thesis.md');
+    await generateTicket141Report(t141Path, t141ReportPath, config, suffix);
+    console.log(`→ ${t141ReportPath}`);
+
+    // TICKET-141A — extended diagnostic CSV (superset of TICKET-141's columns: adds zoneId/zone
+    // freshness-mitigation-retest gate fields + structureAgeCandles), consumed by
+    // ticket141aGenerateReport.ts to produce data/ticket141a-local-thesis-candidate-integrity.md.
+    // Never influences trades/report above — same diagnostic-only guarantee as TICKET-141's own CSV.
+    const t141aPath = path.resolve(process.cwd(), `data/ticket141a-local-thesis-candidate-integrity-${suffix}.csv`);
+    const t141aHeader = [
+      'symbol',
+      'timestamp',
+      'htfContext',
+      'safetyState5m',
+      'direction5m',
+      'emaRelation',
+      'emaSlope',
+      'diDirection',
+      'structureState',
+      'bosState',
+      'mssState',
+      'swingStructure',
+      'sweepReclaim',
+      'structureAgeCandles',
+      'setupType',
+      'setupSide',
+      'setupValid',
+      'setupReason',
+      'zoneId',
+      'zoneFormedTimestamp',
+      'zoneAgeCandles',
+      'zoneFresh',
+      'zoneNotConsumed',
+      'zoneRetested',
+      'entryPrice',
+      'stopLoss',
+      'riskReward',
+      'distanceFromEmaInAtr',
+      'entryQualityPassed',
+      'entryQualityReason',
+      'localThesis',
+      'thesisReason',
+    ].join(',');
+    const t141aRows = localTradeThesis5mRows.map((r) =>
+      [
+        r.symbol,
+        r.timestamp,
+        r.htfContext,
+        r.safetyState5m,
+        r.direction5m,
+        r.emaRelation,
+        r.emaSlope ?? '',
+        r.diDirection ?? '',
+        r.structureState,
+        r.bosState,
+        r.mssState,
+        r.swingStructure,
+        r.sweepReclaim,
+        r.structureAgeCandles ?? '',
+        r.setupType,
+        r.setupSide,
+        r.setupValid,
+        csvEscape(r.setupReason),
+        r.zoneId ?? '',
+        r.zoneFormedTimestamp ?? '',
+        r.zoneAgeCandles ?? '',
+        r.zoneFresh,
+        r.zoneNotConsumed,
+        r.zoneRetested,
+        r.entryPrice ?? '',
+        r.stopLoss ?? '',
+        r.riskReward ?? '',
+        r.distanceFromEmaInAtr ?? '',
+        r.entryQualityPassed,
+        csvEscape(r.entryQualityReason),
+        r.localThesis,
+        csvEscape(r.thesisReason),
+      ].join(','),
+    );
+    writeFileSync(t141aPath, [t141aHeader, ...t141aRows].join('\n') + '\n');
+    console.log(`→ ${t141aPath} (${localTradeThesis5mRows.length} dòng)`);
+
+    const { generateTicket141aReport } = await import('./ticket141aGenerateReport.js');
+    const t141aReportPath = path.resolve(process.cwd(), 'data/ticket141a-local-thesis-candidate-integrity.md');
+    await generateTicket141aReport(t141aPath, t141aReportPath, config, suffix);
+    console.log(`→ ${t141aReportPath}`);
+  }
 }
 
 main().catch((err) => {

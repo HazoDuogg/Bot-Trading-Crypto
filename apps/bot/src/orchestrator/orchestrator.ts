@@ -8,6 +8,12 @@ import { detectRegime } from '../regime/regimeDetector.js';
 import { RegimeConfig } from '../regime/config.js';
 import { lastDefined, wilderATRSeries, wilderDIDirectionSeries } from '../regime/indicators.js';
 import { MarketRegime, type CandleData, type ComputedMetrics, type RegimeOutput } from '../regime/types.js';
+import { classifyHtfContextCandidate } from '../regime/htfContext.js';
+import { classifySafetyState5mCandidate, applySafetyState5mHysteresis } from '../regime/safetyState5m.js';
+import { applySafetyState5mStabilization } from '../regime/safetyState5mTracker.js';
+import { applySafetyState5mFinalStabilization } from '../regime/safetyState5mTrackerV2.js';
+import { HTFContext, SafetyState5m } from '../regime/htfSafetyTypes.js';
+import { computeLocalTradeThesis5m, type LocalTradeThesis5mResult } from './localTradeThesis5m.js';
 import { routeEntry } from '../entry/entryRouter.js';
 import { EntryConfig } from '../entry/config.js';
 import { detectMomentumDirect } from '../entry/momentumDirect.js';
@@ -1056,6 +1062,24 @@ export async function processCandle(
   // MOMENTUM_DIRECT sides + NEUTRAL_TRANSITION's own gate), passed AND rejected — never read here,
   // never affects any decision. See MomentumGateEvaluation's own doc comment.
   onMomentumGateEvaluation?: (evaluation: MomentumGateEvaluation) => void,
+  // TICKET-139 — diagnostic-only, fires ONLY when config.htfSafetySplitDiagnosticEnabled is true
+  // AND the confirmed HTFContext actually changed vs the previous candle (not every candle). Never
+  // read here, never affects any decision — see OrchestratorConfig.htfSafetySplitDiagnosticEnabled.
+  onHtfContextChange?: (change: { symbol: string; from: HTFContext; to: HTFContext; timestamp: number }) => void,
+  // TICKET-139 — same contract as onHtfContextChange, for the confirmed SafetyState5m instead.
+  onSafetyState5mChange?: (change: { symbol: string; from: SafetyState5m; to: SafetyState5m; timestamp: number }) => void,
+  // TICKET-140 — diagnostic-only, fires ONLY when config.safetyState5mStabilizationEnabled is true
+  // AND the confirmed STABILIZED SafetyState5m actually changed vs the previous candle. Never read
+  // here, never affects any decision — see OrchestratorConfig.safetyState5mStabilizationEnabled.
+  onSafetyState5mStabilized?: (change: { symbol: string; from: SafetyState5m; to: SafetyState5m; timestamp: number }) => void,
+  // TICKET-140B — diagnostic-only, fires ONLY when config.safetyState5mFinalStabilizationEnabled is
+  // true AND the confirmed FINAL-stabilized SafetyState5m actually changed vs the previous candle.
+  // Never read here, never affects any decision — see OrchestratorConfig.safetyState5mFinalStabilizationEnabled.
+  onSafetyState5mFinalStabilized?: (change: { symbol: string; from: SafetyState5m; to: SafetyState5m; timestamp: number }) => void,
+  // TICKET-141 — diagnostic-only, fires ONLY when config.localTradeThesis5mEnabled is true, EVERY
+  // closed 5m candle (not just on change — §8's CSV wants one row per candle). Never read here,
+  // never affects any decision — see OrchestratorConfig.localTradeThesis5mEnabled.
+  onLocalTradeThesis5m?: (result: LocalTradeThesis5mResult) => void,
 ): Promise<ProcessCandleResult> {
   // Step 1 — regime, always runs.
   const regimeOutput = detectRegime({
@@ -1078,6 +1102,110 @@ export async function processCandle(
   const currentCandle = input.candles5m[input.candles5m.length - 1];
 
   onRegimeMetrics?.(regimeOutput.computedMetrics);
+
+  // TICKET-139 — gated entirely behind the flag: when off/unset, htfSafetyDiagnostic stays
+  // undefined and nothing below this block runs, so this is byte-identical to pre-TICKET-139
+  // behavior. Diagnostic only — never read by any decision below.
+  let htfSafetyDiagnostic: NonNullable<SymbolState['htfSafetyDiagnostic']> | undefined;
+  if (config.htfSafetySplitDiagnosticEnabled) {
+    const htfContextCandidate = classifyHtfContextCandidate(regimeOutput.computedMetrics);
+    const safetyCandidate = classifySafetyState5mCandidate(regimeOutput.computedMetrics);
+    const previousDiagnostic = state.htfSafetyDiagnostic ?? { previousHtfContext: null, safetyHysteresis: null };
+    const newSafetyHysteresis = applySafetyState5mHysteresis(safetyCandidate, previousDiagnostic.safetyHysteresis);
+
+    if (previousDiagnostic.previousHtfContext !== null && previousDiagnostic.previousHtfContext !== htfContextCandidate) {
+      onHtfContextChange?.({ symbol: input.symbol, from: previousDiagnostic.previousHtfContext, to: htfContextCandidate, timestamp: currentCandle.timestamp });
+    }
+    if (
+      previousDiagnostic.safetyHysteresis !== null &&
+      previousDiagnostic.safetyHysteresis.state !== newSafetyHysteresis.state
+    ) {
+      onSafetyState5mChange?.({
+        symbol: input.symbol,
+        from: previousDiagnostic.safetyHysteresis.state,
+        to: newSafetyHysteresis.state,
+        timestamp: currentCandle.timestamp,
+      });
+    }
+
+    htfSafetyDiagnostic = { previousHtfContext: htfContextCandidate, safetyHysteresis: newSafetyHysteresis };
+  }
+
+  // TICKET-140 — gated entirely behind its own flag, independent of htfSafetySplitDiagnosticEnabled
+  // above: when off/unset, safetyState5mStabilizedDiagnostic stays undefined and nothing below this
+  // block runs, so this is byte-identical to pre-TICKET-140 behavior. Diagnostic only — never read
+  // by any decision below. Reuses TICKET-139's unchanged classifySafetyState5mCandidate() formula.
+  let safetyState5mStabilizedDiagnostic: NonNullable<SymbolState['safetyState5mStabilizedDiagnostic']> | undefined;
+  if (config.safetyState5mStabilizationEnabled) {
+    const safetyCandidate = classifySafetyState5mCandidate(regimeOutput.computedMetrics);
+    const previousTracker = state.safetyState5mStabilizedDiagnostic?.tracker ?? null;
+    const newTracker = applySafetyState5mStabilization(safetyCandidate, currentCandle.timestamp, previousTracker);
+
+    if (previousTracker !== null && previousTracker.currentState !== newTracker.currentState) {
+      onSafetyState5mStabilized?.({
+        symbol: input.symbol,
+        from: previousTracker.currentState,
+        to: newTracker.currentState,
+        timestamp: currentCandle.timestamp,
+      });
+    }
+
+    safetyState5mStabilizedDiagnostic = { tracker: newTracker };
+  }
+
+  // TICKET-140B — gated entirely behind its own flag, fully independent of both
+  // htfSafetySplitDiagnosticEnabled and safetyState5mStabilizationEnabled above (can run
+  // simultaneously with either/both, each with its own per-symbol state field, never colliding):
+  // when off/unset, safetyState5mFinalStabilizedDiagnostic stays undefined and nothing below this
+  // block runs — byte-identical to pre-TICKET-140B behavior. Diagnostic only — never read by any
+  // decision below. Reuses TICKET-139's unchanged classifySafetyState5mCandidate() formula.
+  let safetyState5mFinalStabilizedDiagnostic: NonNullable<SymbolState['safetyState5mFinalStabilizedDiagnostic']> | undefined;
+  if (config.safetyState5mFinalStabilizationEnabled) {
+    const safetyCandidate = classifySafetyState5mCandidate(regimeOutput.computedMetrics);
+    const previousTracker = state.safetyState5mFinalStabilizedDiagnostic?.tracker ?? null;
+    const newTracker = applySafetyState5mFinalStabilization(safetyCandidate, currentCandle.timestamp, previousTracker);
+
+    if (previousTracker !== null && previousTracker.currentState !== newTracker.currentState) {
+      onSafetyState5mFinalStabilized?.({
+        symbol: input.symbol,
+        from: previousTracker.currentState,
+        to: newTracker.currentState,
+        timestamp: currentCandle.timestamp,
+      });
+    }
+
+    safetyState5mFinalStabilizedDiagnostic = { tracker: newTracker };
+  }
+
+  // TICKET-141 — gated entirely behind its own flag, fully independent of the T139/T140/T140B blocks
+  // above (its own tracker field, never shares state with T140B's — see LocalTradeThesis5mDiagnosticState
+  // doc comment). When off/unset, localTradeThesis5mDiagnostic stays undefined and nothing below this
+  // block runs — byte-identical to pre-TICKET-141 behavior. Diagnostic only — never read by any
+  // decision below, never used to ALLOW/BLOCK any entry (§11/§13). Runs EVERY closed 5m candle (not
+  // just on change), unlike the change-only callbacks above — §8's CSV wants one row per candle.
+  let localTradeThesis5mDiagnostic: NonNullable<SymbolState['localTradeThesis5mDiagnostic']> | undefined;
+  if (config.localTradeThesis5mEnabled) {
+    const htfContextCandidate = classifyHtfContextCandidate(regimeOutput.computedMetrics);
+    const safetyCandidate = classifySafetyState5mCandidate(regimeOutput.computedMetrics);
+    const previousTracker = state.localTradeThesis5mDiagnostic?.tracker ?? null;
+    const newTracker = applySafetyState5mFinalStabilization(safetyCandidate, currentCandle.timestamp, previousTracker);
+
+    const thesisResult = computeLocalTradeThesis5m({
+      symbol: input.symbol,
+      timestamp: currentCandle.timestamp,
+      candles5m: input.candles5m,
+      candles15m: input.candles15m,
+      candles1m: input.candles1m,
+      computedMetrics: regimeOutput.computedMetrics,
+      safetyState5m: newTracker.currentState,
+      htfContext: htfContextCandidate,
+      obSlBufferAtrMultiplier: config.entryRouterConfig.obSlBufferAtrMultiplier,
+      tpPlan: config.tpPlan,
+    });
+
+    onLocalTradeThesis5m?.(thesisResult);
+    localTradeThesis5mDiagnostic = { tracker: newTracker, lastResult: thesisResult };
+  }
 
   // TICKET-027 — diagnostic-only, no effect on any decision below: fires once per fresh transition
   // into MANIPULATED (state.regimeState.previousRegime was something else, now confirmed MANIPULATED).
@@ -1215,7 +1343,15 @@ export async function processCandle(
   }
 
   return {
-    symbolState: { regimeState, openPositions: remainingPositions, momentumDirectCircuitBreaker: circuitBreakerState },
+    symbolState: {
+      regimeState,
+      openPositions: remainingPositions,
+      momentumDirectCircuitBreaker: circuitBreakerState,
+      ...(htfSafetyDiagnostic !== undefined ? { htfSafetyDiagnostic } : {}),
+      ...(safetyState5mStabilizedDiagnostic !== undefined ? { safetyState5mStabilizedDiagnostic } : {}),
+      ...(safetyState5mFinalStabilizedDiagnostic !== undefined ? { safetyState5mFinalStabilizedDiagnostic } : {}),
+      ...(localTradeThesis5mDiagnostic !== undefined ? { localTradeThesis5mDiagnostic } : {}),
+    },
     accountBalance,
     events,
   };

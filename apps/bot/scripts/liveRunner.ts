@@ -47,7 +47,16 @@ import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import { DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, DEFAULT_PLAN_AUTO_SELECTION_CONFIG } from '../dist/xgbFilter/config.js';
 import { loadTelegramConfig } from '../dist/telegram/telegramClient.js';
 import { TelegramMessageQueue } from '../dist/telegram/messageQueue.js';
-import { formatBotStartMessage, formatFullCloseMessage, formatPartialCloseMessage, formatPositionOpenedMessage, formatRegimeChangeMessage } from '../dist/telegram/messageFormatters.js';
+import {
+  formatBotStartMessage,
+  formatFullCloseMessage,
+  formatPartialCloseMessage,
+  formatPositionOpenedMessage,
+  formatRegimeChangeMessage,
+  formatHtfContextChangeMessage,
+  formatSafetyState5mChangeMessage,
+  formatSafetyState5mStabilizedChangeMessage,
+} from '../dist/telegram/messageFormatters.js';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
 const TICK_INTERVAL_MS = 5_000; // how often we check "has a new 5m candle closed" — cheap, reads already-polled in-memory buffers only
@@ -59,6 +68,14 @@ const TICK_INTERVAL_MS = 5_000; // how often we check "has a new 5m candle close
 // from `data/ticket123-final-decision-report.md` §6 (Variant B) — do NOT retune here without a fresh
 // backtest re-verification, same rule as the rest of CONFIG.
 const OOD_GUARD_ENABLED = process.env.OOD_GUARD_ENABLED === 'true';
+// TICKET-139 — opt-in, default-inert HTFContext/SafetyState5m split diagnostic. Default OFF (env
+// var unset or anything other than 'true'). Diagnostic Telegram messages only — never gates or
+// sizes any trade. See OrchestratorConfig.htfSafetySplitDiagnosticEnabled's doc comment.
+const HTF_SAFETY_SPLIT_DIAGNOSTIC_ENABLED = process.env.HTF_SAFETY_SPLIT_DIAGNOSTIC_ENABLED === 'true';
+// TICKET-140 — opt-in, default-inert SafetyState5m transition stabilization diagnostic. Default OFF
+// (env var unset or anything other than 'true'). Diagnostic Telegram messages only — never gates or
+// sizes any trade. See OrchestratorConfig.safetyState5mStabilizationEnabled's doc comment.
+const SAFETY_STATE_5M_STABILIZATION_ENABLED = process.env.SAFETY_STATE_5M_STABILIZATION_ENABLED === 'true';
 const OOD_GUARD_EMA_RATIO_SLOW_THRESHOLD = 1.037776; // Bearish TRAIN-split P97.5, TICKET-122/123
 const OOD_GUARD_RISK_REDUCTION_MULTIPLIER = 0.3; // TICKET-122/123 Risk Reduction P97.5 variant
 
@@ -101,6 +118,8 @@ const CONFIG: OrchestratorConfig = {
         },
       }
     : {}),
+  htfSafetySplitDiagnosticEnabled: HTF_SAFETY_SPLIT_DIAGNOSTIC_ENABLED,
+  safetyState5mStabilizationEnabled: SAFETY_STATE_5M_STABILIZATION_ENABLED,
 };
 
 const WINDOW_5M = 320;
@@ -386,6 +405,22 @@ async function main(): Promise<void> {
                 `[OOD_GUARD${OOD_GUARD_ENABLED ? '' : ' shadow'}] ${evaluation.symbol} SHORT MOMENTUM_DIRECT flagged (score=${evaluation.score.toFixed(4)}, passed=${evaluation.passed})`,
               );
             }
+          },
+          // TICKET-139 — no-op unless HTF_SAFETY_SPLIT_DIAGNOSTIC_ENABLED (processCandle() itself
+          // never fires these callbacks when config.htfSafetySplitDiagnosticEnabled is off).
+          (change) => {
+            console.log(`[TICKET-139 HTF] ${symbol}: ${change.from} → ${change.to}`);
+            telegramQueue.enqueue(formatHtfContextChangeMessage({ symbol, fromContext: change.from, toContext: change.to, timestamp: change.timestamp }));
+          },
+          (change) => {
+            console.log(`[TICKET-139 SAFETY5M] ${symbol}: ${change.from} → ${change.to}`);
+            telegramQueue.enqueue(formatSafetyState5mChangeMessage({ symbol, fromState: change.from, toState: change.to, timestamp: change.timestamp }));
+          },
+          // TICKET-140 — no-op unless SAFETY_STATE_5M_STABILIZATION_ENABLED (processCandle() itself
+          // never fires this callback when config.safetyState5mStabilizationEnabled is off).
+          (change) => {
+            console.log(`[TICKET-140 SAFETY5M STABILIZED] ${symbol}: ${change.from} → ${change.to}`);
+            telegramQueue.enqueue(formatSafetyState5mStabilizedChangeMessage({ symbol, fromState: change.from, toState: change.to, timestamp: change.timestamp }));
           },
         );
 
