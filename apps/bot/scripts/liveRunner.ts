@@ -121,6 +121,9 @@ const CONFIG: OrchestratorConfig = {
     : {}),
   htfSafetySplitDiagnosticEnabled: HTF_SAFETY_SPLIT_DIAGNOSTIC_ENABLED,
   safetyState5mStabilizationEnabled: SAFETY_STATE_5M_STABILIZATION_ENABLED,
+  // TICKET-143A/144: explicitly activated live per user confirmation 2026-08-06. Real-money-affecting
+  // switch — BTCUSDT/ETHUSDT+macroConflict now BLOCK, SOLUSDT/XRPUSDT+macroConflict now ALLOW_REDUCED_RISK@0.30.
+  momentumContextDecisionMatrixV2Enabled: true,
 };
 
 const WINDOW_5M = 320;
