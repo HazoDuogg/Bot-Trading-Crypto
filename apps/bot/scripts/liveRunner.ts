@@ -38,7 +38,13 @@ import {
   ReconcileGuard,
 } from '../dist/live/liveStateSync.js';
 import { loadBinanceEnvConfig } from '../dist/live/envConfig.js';
-import { processCandle, type ProcessCandleInput, type MomentumGateEvaluation, type MomentumContextDecisionDiagnostic } from '../dist/orchestrator/orchestrator.js';
+import {
+  processCandle,
+  type ProcessCandleInput,
+  type MomentumGateEvaluation,
+  type MomentumContextDecisionDiagnostic,
+  type SameSidePositionBlockedDiagnostic,
+} from '../dist/orchestrator/orchestrator.js';
 import {
   INITIAL_SYMBOL_STATE,
   type CloseTradeEvent,
@@ -54,6 +60,7 @@ import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import { DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, DEFAULT_PLAN_AUTO_SELECTION_CONFIG } from '../dist/xgbFilter/config.js';
 import { loadTelegramConfig } from '../dist/telegram/telegramClient.js';
 import { TelegramMessageQueue } from '../dist/telegram/messageQueue.js';
+import { SentEventTracker } from '../dist/telegram/dedupe.js';
 import {
   formatBotStartMessage,
   formatFullCloseMessage,
@@ -212,6 +219,16 @@ async function main(): Promise<void> {
 
   const telegramConfig = loadTelegramConfig();
   const telegramQueue = new TelegramMessageQueue(telegramConfig);
+
+  // TICKET-152 — dedupes the "SAME_SIDE_POSITION_BLOCKED" Telegram alert (log line is NOT deduped,
+  // fires every tick the block condition re-fires — only Telegram is throttled). Keyed per
+  // `${symbol}:${side}` ("blocking episode"): one small SentEventTracker per key, evicted (deleted
+  // from this Map, not just tracker.reset() — reset() would clear ALL keys globally, which would
+  // wrongly un-dedupe every OTHER symbol/side too) once the blocking position itself closes, so a
+  // FUTURE distinct same-side block on that symbol (a new position opens same side, gets blocked
+  // again later) still gets its own fresh Telegram alert instead of being silently suppressed
+  // forever by a stale key from a long-closed position.
+  const sameSideBlockTrackers = new Map<string, SentEventTracker>();
 
   const feed = new LiveCandleFeed({
     symbols: SYMBOLS,
@@ -555,6 +572,26 @@ async function main(): Promise<void> {
               }),
             );
           },
+          // TICKET-152 — same-side duplicate-position guard notification. Log line fires every time
+          // (unconditional, exact format per ticket §5); Telegram is deduped per symbol+side via
+          // sameSideBlockTrackers (see its own doc comment above) so a persistent signal re-forming
+          // every candle while blocked doesn't spam Telegram every tick.
+          (diagnostic: SameSidePositionBlockedDiagnostic) => {
+            console.log(
+              `[SAME_SIDE_POSITION_BLOCKED] symbol=${diagnostic.symbol} side=${diagnostic.side} reason=EXISTING_${diagnostic.side}_OPEN openSameSideCount=${diagnostic.openSameSideCount}`,
+            );
+            const key = `${diagnostic.symbol}:${diagnostic.side}`;
+            let tracker = sameSideBlockTrackers.get(key);
+            if (!tracker) {
+              tracker = new SentEventTracker();
+              sameSideBlockTrackers.set(key, tracker);
+            }
+            if (tracker.markSent(key)) {
+              telegramQueue.enqueue(
+                `⛔ BỎ QUA LỆNH ${diagnostic.symbol} ${diagnostic.side}\nLý do: Đã có ${diagnostic.side} đang mở trên ${diagnostic.symbol}`,
+              );
+            }
+          },
         );
 
         // TICKET-101 Việc 1: refresh immediately so the NEXT symbol in this tick's loop sees this
@@ -619,6 +656,12 @@ async function main(): Promise<void> {
             await handlePartialCloseEvent(symbol, event, owner?.meta.entryTimestamp ?? -1, remainingQuantity).catch((e) => console.error(`[PARTIAL_HANDLER_ERROR] ${symbol}: ${(e as Error).message}`));
           } else if (event.type === 'CLOSE') {
             await handleCloseEvent(symbol, event).catch((e) => console.error(`[CLOSE_HANDLER_ERROR] ${symbol}: ${(e as Error).message}`));
+            // TICKET-152 — this position closing may have just ended a "blocking episode": if no
+            // position on this side remains open for this symbol, evict the dedupe key so a FUTURE
+            // same-side block on this symbol (a new position opens this side, gets blocked again
+            // later) gets its own fresh Telegram alert instead of staying silently suppressed.
+            const stillOpenSameSide = result.symbolState.openPositions.some((e) => e.position.side === event.side);
+            if (!stillOpenSameSide) sameSideBlockTrackers.delete(`${symbol}:${event.side}`);
           }
           // SKIPPED events are diagnostic-only (risk pool full / neutral gate rejected) — logged, no Telegram spam per candle.
         }

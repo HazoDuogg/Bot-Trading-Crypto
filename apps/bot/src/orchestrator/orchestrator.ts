@@ -836,6 +836,23 @@ interface EntryAttemptResult {
 }
 
 /**
+ * TICKET-152 — diagnostic-only payload fired when a new-entry candidate is blocked because a
+ * position on the SAME symbol AND SAME side is already open (ONE_WAY account mode: the exchange
+ * itself never distinguishes two same-side positions on one symbol, so opening a 2nd is a real
+ * duplicate-exposure bug, not an independent position). Pure pass-through, never read here, never
+ * affects any decision — the guard itself is the early return in tryOpenNewPosition() below, this
+ * diagnostic just lets a caller (e.g. Telegram) observe it. Only built/delivered when the caller
+ * passes onSameSidePositionBlocked to processCandle.
+ */
+export interface SameSidePositionBlockedDiagnostic {
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  timestamp: number;
+  /** How many existing open positions on this symbol already share this side (generically computed, not hardcoded — TICKET-152 §incident had 1, but leftover pre-fix state could have more). */
+  openSameSideCount: number;
+}
+
+/**
  * TICKET-056 — extracted verbatim from the old single-position Step 2 (no behavior change, only
  * restructured to RETURN its outcome instead of early-returning from processCandle() directly) so
  * a symbol that already has an open position can still attempt another one, up to
@@ -855,6 +872,11 @@ async function tryOpenNewPosition(
   onMomentumGateEvaluation: ((evaluation: MomentumGateEvaluation) => void) | undefined,
   momentumContextSafetyState5m: SafetyState5m | undefined,
   onMomentumContextDecision: ((diagnostic: MomentumContextDecisionDiagnostic) => void) | undefined,
+  // TICKET-152 — this symbol's currently open positions (the SAME array the caller's own
+  // maxConcurrentPositionsPerSymbol gate already checked), used ONLY for the same-side duplicate
+  // guard right below. Never used for anything else in this function.
+  openPositions: OpenPositionEntry[],
+  onSameSidePositionBlocked: ((diagnostic: SameSidePositionBlockedDiagnostic) => void) | undefined,
 ): Promise<EntryAttemptResult> {
   // TICKET-017 Phần A: same direction function as adxDirection1h, applied to 1D candles instead.
   const macroDirectionSeries = wilderDIDirectionSeries(input.candles1d, EntryConfig.MACRO_TREND_ADX_PERIOD_1D);
@@ -912,6 +934,26 @@ async function tryOpenNewPosition(
   }
 
   if (effectiveDraftSetup === null) return { event: null, newEntry: null };
+
+  // TICKET-152 — same-side duplicate-position guard. Runs BEFORE the account-balance check,
+  // DynamicRMarginSizer, wouldExceedRiskPool, and the OPEN event construction below — a blocked
+  // candidate allocates NO risk and sends NO exchange order. Binance runs this account in ONE_WAY
+  // position mode (confirmed: binanceOrderExecutor.ts never sends positionSide on any mutating
+  // call), so the exchange itself cannot distinguish two same-side positions on one symbol — a 2nd
+  // same-side entry is a real duplicate-exposure bug (the incident this ticket fixes), not an
+  // independently-tracked position. Opposite-side candidates are NOT touched by this guard — they
+  // continue to be gated only by the existing maxConcurrentPositionsPerSymbol total-count check at
+  // the call site, unchanged.
+  const sameSideOpen = openPositions.filter((p) => p.position.side === effectiveDraftSetup!.side);
+  if (sameSideOpen.length > 0) {
+    onSameSidePositionBlocked?.({
+      symbol: input.symbol,
+      side: effectiveDraftSetup.side,
+      timestamp: currentCandle.timestamp,
+      openSameSideCount: sameSideOpen.length,
+    });
+    return { event: null, newEntry: null };
+  }
 
   // TICKET-036 — mandatory Momentum Gate, NEUTRAL_TRANSITION only. Runs BEFORE anything else
   // (account-balance check, soft momentumMultiplier below) since it can outright discard the
@@ -1203,6 +1245,11 @@ export async function processCandle(
   // its V2 sibling is true, once per real tryMomentumDirect() candidate that reaches the decision
   // point. Never read here, never affects any decision — see MomentumContextDecisionDiagnostic's own doc comment.
   onMomentumContextDecision?: (diagnostic: MomentumContextDecisionDiagnostic) => void,
+  // TICKET-152 — diagnostic-only, fires whenever a new-entry candidate is blocked by the same-side
+  // duplicate-position guard (see SameSidePositionBlockedDiagnostic's own doc comment). Never read
+  // here, never affects any decision — the guard itself always runs regardless of whether a caller
+  // passes this callback.
+  onSameSidePositionBlocked?: (diagnostic: SameSidePositionBlockedDiagnostic) => void,
 ): Promise<ProcessCandleResult> {
   // Step 1 — regime, always runs.
   const regimeOutput = detectRegime({
@@ -1584,6 +1631,11 @@ export async function processCandle(
       onMomentumGateEvaluation,
       momentumContextSafetyState5mDiagnostic?.tracker.currentState,
       onMomentumContextDecision,
+      // TICKET-152: same INCOMING array the concurrency gate above just checked (state.openPositions,
+      // NOT remainingPositions) — consistent with the existing "gate on incoming count, not
+      // same-candle-close-adjusted count" rule documented above.
+      state.openPositions,
+      onSameSidePositionBlocked,
     );
     if (event) events.push(event);
     if (newEntry) remainingPositions.push(newEntry);

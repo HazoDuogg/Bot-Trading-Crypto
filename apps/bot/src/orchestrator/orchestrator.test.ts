@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { processCandle, selectTpPlan, type ProcessCandleInput } from './orchestrator.js';
+import { processCandle, selectTpPlan, type ProcessCandleInput, type SameSidePositionBlockedDiagnostic } from './orchestrator.js';
 import { INITIAL_SYMBOL_STATE, type OpenTradeEvent, type OpenTradeMeta, type OrchestratorConfig, type SymbolState } from './types.js';
 import { MarketRegime, type CandleData } from '../regime/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../entry/entryRouter.js';
@@ -121,6 +121,19 @@ const farAwayLongInput: SlTpManagerInput = {
   side: 'LONG',
   tpPlan: 'PLAN_A',
   positionSize: 495,
+  takerFeeRate: 0.0004,
+};
+
+// TICKET-152: mirrors farAwayLongInput but SHORT and far ABOVE fullOpenFlowFixture()'s ~94-106
+// price range (entry=150) so it's guaranteed untouched by any candle from that fixture — same
+// isolation technique, used by the same-side duplicate-position guard tests below.
+const farAwayShortInput: SlTpManagerInput = {
+  scenario: 'TREND',
+  entryPrice: 150,
+  slPrice: 151,
+  side: 'SHORT',
+  tpPlan: 'PLAN_A',
+  positionSize: 1485,
   takerFeeRate: 0.0004,
 };
 
@@ -941,7 +954,15 @@ describe('processCandle — multi-position per symbol (TICKET-056)', () => {
   });
 
   it('maxConcurrentPositionsPerSymbol=2: opens a 2nd position on the same symbol while the 1st stays open', async () => {
-    const existingPos = openPosition(farAwayLongInput);
+    // TICKET-152 UPDATE: existing position changed from farAwayLongInput (LONG) to farAwayShortInput
+    // (SHORT) — fullOpenFlowFixture() opens a LONG. Before TICKET-152 this test used a SAME-side
+    // (LONG+LONG) combo, which is EXACTLY the duplicate-position bug TICKET-152 fixes — with the new
+    // guard in place that combo now correctly BLOCKs (see the dedicated TICKET-152 describe block's
+    // own "1 LONG open + LONG candidate -> BLOCK" test for that coverage). This test's own purpose
+    // (TICKET-056: two concurrent positions on one symbol coexist correctly) is independent of side,
+    // so it's switched to an opposite-side existing position to keep validating that, untouched by
+    // TICKET-152's guard, exactly as the ticket's own §5/§6 (LONG+SHORT stays unchanged) requires.
+    const existingPos = openPosition(farAwayShortInput);
     const state: SymbolState = {
       regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
       momentumDirectCircuitBreaker: { LONG: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null }, SHORT: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null } },
@@ -959,11 +980,16 @@ describe('processCandle — multi-position per symbol (TICKET-056)', () => {
     expect(result.symbolState.openPositions).toHaveLength(2);
     expect(result.events.some((e) => e.type === 'OPEN')).toBe(true);
     // The 1st position (far from this candle's price range) is untouched — still open, still at its own entry.
-    expect(result.symbolState.openPositions.find((p) => p.position.entryPrice === 50)).toBeDefined();
+    expect(result.symbolState.openPositions.find((p) => p.position.entryPrice === 150)).toBeDefined();
   });
 
   it('maxConcurrentPositionsPerSymbol=2: Risk Pool correctly REJECTS the 2nd entry when adding it to the EXISTING same-coin risk would exceed the pool', async () => {
-    const existingPos = openPosition(farAwayLongInput);
+    // TICKET-152 UPDATE: same reasoning as the sibling test above — existing position switched from
+    // farAwayLongInput (LONG, same side as this fixture's LONG candidate — now correctly BLOCKed by
+    // TICKET-152's new guard before ever reaching the Risk Pool check this test wants to isolate) to
+    // farAwayShortInput (SHORT), so this test still exercises the Risk Pool rejection path this
+    // TICKET-056 test was written for, independent of TICKET-152's unrelated same-side guard.
+    const existingPos = openPosition(farAwayShortInput);
     const state: SymbolState = {
       regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
       momentumDirectCircuitBreaker: { LONG: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null }, SHORT: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null } },
@@ -1029,6 +1055,269 @@ describe('processCandle — multi-position per symbol (TICKET-056)', () => {
     expect(result.symbolState.openPositions).toHaveLength(1); // posB still tracked
     expect(result.symbolState.openPositions[0].position.entryPrice).toBe(50);
     expect(result.symbolState.openPositions[0].position.closed).toBe(false);
+  });
+});
+
+// TICKET-152 — same-side duplicate-position guard: a symbol already holding an open position on
+// side X must never open a 2nd position also on side X (real mainnet incident: XRPUSDT LONG +
+// XRPUSDT LONG). Binance runs this account in ONE_WAY mode (binanceOrderExecutor.ts never sends
+// positionSide on any mutating call), so a same-symbol/same-side duplicate is a real doubled
+// exposure, not an independently-tracked position. Opposite-side candidates are explicitly OUT of
+// scope — they stay gated only by the existing maxConcurrentPositionsPerSymbol total-count check,
+// unchanged (verified below, not just assumed).
+describe('processCandle — same-side duplicate-position guard (TICKET-152)', () => {
+  // Identical to the TICKET-056 describe block's own fullOpenFlowFixture()/fullOpenFlowFixtureShort()
+  // — a real OB+MSS LONG/SHORT setup that WOULD open a position if routeEntry() is even attempted.
+  // Redefined locally (not imported) — each describe block in this file owns its own copy, same
+  // convention already used between the TICKET-025/TICKET-056/TICKET-059 fixtures above.
+  function fullOpenFlowFixtureLong() {
+    const candles1h = makeCandles(40, 3_600_000, (i) => 100 + i * 2, () => 1);
+    const fillerCount = 310;
+    const filler5m = makeCandles(fillerCount, 300_000, () => 100, () => 0.5);
+    const obPattern5m: CandleData[] = [
+      c(99, 99, 100, 98),
+      c(100.5, 100.5, 102, 99),
+      c(103, 103, 105, 101), // swing high (105)
+      c(101, 101, 102, 100),
+      c(99, 99, 100, 98),
+      c(101, 99, 101, 99), // OB candidate (down), zone [99, 101]
+      c(99, 102, 102.5, 99),
+      c(102, 106, 106, 101.5), // BOS confirmed, close 106 > 105
+    ];
+    const lastFillerTs = filler5m[filler5m.length - 1].timestamp;
+    const obPatternWithTs = obPattern5m.map((candle, i) => ({ ...candle, timestamp: lastFillerTs + (i + 1) * 300_000 }));
+    const candles5m = [...filler5m, ...obPatternWithTs];
+    const obCandleIndex = fillerCount + 5;
+    const candles15m = makeCandles(325, 900_000, () => 100, () => 1);
+    const mssStartTs = candles5m[obCandleIndex].timestamp;
+    const mssPattern1m: CandleData[] = [
+      c(99.5, 99.5, 100, 99),
+      c(99.25, 99.25, 100, 98.5),
+      c(97.5, 97.5, 99.5, 96), // swing low (96)
+      c(99.25, 99.25, 100, 98.5),
+      c(99.5, 99.5, 100, 99),
+      c(100.5, 100.5, 102, 99), // swing high BETWEEN the two lows (102)
+      c(99.25, 99.25, 100, 98.5),
+      c(99.5, 99.5, 100, 99),
+      c(98.75, 98.75, 99.5, 98), // higher-low vs the first low
+      c(99.25, 99.25, 100, 98.5),
+      c(99.5, 99.5, 100, 99),
+      c(102.5, 103, 103.2, 102.3), // MSS confirmed here, close = 103
+    ].map((candle, i) => ({ ...candle, timestamp: mssStartTs + i * 60_000 }));
+    return { candles5m, candles15m, candles1h, candles1m: mssPattern1m };
+  }
+
+  function fullOpenFlowFixtureShort() {
+    const fullCandles1h = makeCandles(250, 3_600_000, (i) => 300 - i * 0.5, () => 1);
+    const candles1h = fullCandles1h.slice(-40);
+    const fillerCount = 310;
+    const filler5m = makeCandles(fillerCount, 300_000, () => 100, () => 0.5);
+    const obPatternBearish5m: CandleData[] = [
+      c(101, 101, 102, 100),
+      c(99.5, 99.5, 101, 98),
+      c(97, 97, 99, 95), // swing low (95)
+      c(99, 99, 100, 98),
+      c(101, 101, 102, 100),
+      c(99, 101, 101, 99), // OB candidate (up), zone [99, 101]
+      c(101, 98, 101, 97.5),
+      c(98, 94, 98.5, 94), // BOS confirmed, close 94 < 95
+    ];
+    const lastFillerTs = filler5m[filler5m.length - 1].timestamp;
+    const obPatternWithTs = obPatternBearish5m.map((candle, i) => ({ ...candle, timestamp: lastFillerTs + (i + 1) * 300_000 }));
+    const candles5m = [...filler5m, ...obPatternWithTs];
+    const obCandleIndex = fillerCount + 5;
+    const candles15m = makeCandles(325, 900_000, () => 100, () => 1);
+    const mssStartTs = candles5m[obCandleIndex].timestamp;
+    const mssPatternBearish1m: CandleData[] = [
+      c(99.5, 99.5, 100, 99),
+      c(99.75, 99.75, 100.5, 99),
+      c(101.5, 101.5, 103, 100), // swing high #1 (103)
+      c(99.75, 99.75, 100.5, 99),
+      c(99.5, 99.5, 100, 99),
+      c(98, 98, 100, 96), // swing low BETWEEN the two highs (96)
+      c(99.75, 99.75, 100.5, 99),
+      c(99.5, 99.5, 100, 99),
+      c(100.5, 100.5, 102, 99), // swing high #2 (102) — lower-high vs the first
+      c(99.75, 99.75, 100.5, 99),
+      c(99.5, 99.5, 100, 99),
+      c(96.5, 95, 96.8, 94.8), // MSS confirmed here, close = 95
+    ].map((candle, i) => ({ ...candle, timestamp: mssStartTs + i * 60_000 }));
+    return { candles5m, candles15m, candles1h, candles1m: mssPatternBearish1m, candles1hMomentum: fullCandles1h };
+  }
+
+  function stateWith(...entries: Array<{ position: ReturnType<typeof openPosition>; meta?: Partial<OpenTradeMeta> }>): SymbolState {
+    return {
+      regimeState: { previousRegime: null, previousCandidateRegime: null, streakCount: 0, previousDangerZoneTimestamp: null },
+      momentumDirectCircuitBreaker: { LONG: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null }, SHORT: { consecutiveSlLosses: 0, cooldownUntilTimestamp: null } },
+      openPositions: entries.map((e) => ({ position: e.position, meta: makeMeta(e.meta) })),
+    };
+  }
+
+  it('0 positions + LONG candidate -> ALLOW (unchanged regression check)', async () => {
+    const fixture = fullOpenFlowFixtureLong();
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, baseConfig);
+
+    expect(result.events.some((e) => e.type === 'OPEN' && e.side === 'LONG')).toBe(true);
+    expect(result.symbolState.openPositions).toHaveLength(1);
+  });
+
+  it('0 positions + SHORT candidate -> ALLOW (unchanged regression check)', async () => {
+    const fixture = fullOpenFlowFixtureShort();
+    const result = await processCandle(baseInput(fixture), INITIAL_SYMBOL_STATE, baseConfig);
+
+    expect(result.events.some((e) => e.type === 'OPEN' && e.side === 'SHORT')).toBe(true);
+    expect(result.symbolState.openPositions).toHaveLength(1);
+  });
+
+  it('1 LONG open + LONG candidate -> BLOCK (new behavior)', async () => {
+    const existingPos = openPosition(farAwayLongInput); // far below fixture's ~94-106 range, untouched
+    const state = stateWith({ position: existingPos });
+    const fixture = fullOpenFlowFixtureLong();
+    const config: OrchestratorConfig = { ...baseConfig, maxConcurrentPositionsPerSymbol: 2 }; // past the total-count gate, so ONLY the same-side guard can be what blocks this
+
+    const blocked: SameSidePositionBlockedDiagnostic[] = [];
+    const result = await processCandle(
+      baseInput({ ...fixture, allOpenPositionsRisk: [{ id: 'BTCUSDT', actualRiskDollar: 10 }] }),
+      state,
+      config,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (d) => blocked.push(d),
+    );
+
+    expect(result.events.some((e) => e.type === 'OPEN')).toBe(false);
+    expect(result.symbolState.openPositions).toHaveLength(1); // still just the original — 2nd entry blocked
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0]).toMatchObject({ symbol: 'BTCUSDT', side: 'LONG', openSameSideCount: 1 });
+  });
+
+  it('1 SHORT open + SHORT candidate -> BLOCK (new behavior)', async () => {
+    const existingPos = openPosition(farAwayShortInput); // far above fixture's ~94-106 range, untouched
+    const state = stateWith({ position: existingPos });
+    const fixture = fullOpenFlowFixtureShort();
+    const config: OrchestratorConfig = { ...baseConfig, maxConcurrentPositionsPerSymbol: 2 };
+
+    const blocked: SameSidePositionBlockedDiagnostic[] = [];
+    const result = await processCandle(
+      baseInput({ ...fixture, allOpenPositionsRisk: [{ id: 'BTCUSDT', actualRiskDollar: 10 }] }),
+      state,
+      config,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (d) => blocked.push(d),
+    );
+
+    expect(result.events.some((e) => e.type === 'OPEN')).toBe(false);
+    expect(result.symbolState.openPositions).toHaveLength(1);
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0]).toMatchObject({ symbol: 'BTCUSDT', side: 'SHORT', openSameSideCount: 1 });
+  });
+
+  it('1 LONG open + SHORT candidate -> ALLOW, verified UNCHANGED vs current ONE_WAY behavior (gated only by the pre-existing total-count check, not by this ticket)', async () => {
+    const existingPos = openPosition(farAwayLongInput);
+    const state = stateWith({ position: existingPos });
+    const fixture = fullOpenFlowFixtureShort();
+    const config: OrchestratorConfig = { ...baseConfig, maxConcurrentPositionsPerSymbol: 2, riskPoolMaxPct: 0.5 }; // generous pool so the SHORT isn't skipped for unrelated reasons
+
+    const result = await processCandle(baseInput({ ...fixture, allOpenPositionsRisk: [{ id: 'BTCUSDT', actualRiskDollar: 10 }] }), state, config);
+
+    expect(result.events.some((e) => e.type === 'OPEN' && e.side === 'SHORT')).toBe(true); // opposite side: same-side guard never touches this
+    expect(result.symbolState.openPositions).toHaveLength(2); // LONG + SHORT coexist internally (ONE_WAY-mode caveat unchanged by this ticket, see report)
+  });
+
+  it('1 SHORT open + LONG candidate -> ALLOW, mirrored (verified UNCHANGED vs current ONE_WAY behavior)', async () => {
+    const existingPos = openPosition(farAwayShortInput);
+    const state = stateWith({ position: existingPos });
+    const fixture = fullOpenFlowFixtureLong();
+    const config: OrchestratorConfig = { ...baseConfig, maxConcurrentPositionsPerSymbol: 2, riskPoolMaxPct: 0.5 };
+
+    const result = await processCandle(baseInput({ ...fixture, allOpenPositionsRisk: [{ id: 'BTCUSDT', actualRiskDollar: 10 }] }), state, config);
+
+    expect(result.events.some((e) => e.type === 'OPEN' && e.side === 'LONG')).toBe(true);
+    expect(result.symbolState.openPositions).toHaveLength(2);
+  });
+
+  it('2 same-side (LONG) positions already open (leftover pre-fix state) + a 3rd LONG candidate -> BLOCK', async () => {
+    const posA = openPosition(farAwayLongInput);
+    const posB = openPosition({ ...farAwayLongInput, entryPrice: 60, slPrice: 59 });
+    const state = stateWith({ position: posA }, { position: posB });
+    const fixture = fullOpenFlowFixtureLong();
+    const config: OrchestratorConfig = { ...baseConfig, maxConcurrentPositionsPerSymbol: 3 }; // past the total-count gate (2 < 3)
+
+    const blocked: SameSidePositionBlockedDiagnostic[] = [];
+    const result = await processCandle(
+      baseInput({ ...fixture, allOpenPositionsRisk: [{ id: 'BTCUSDT', actualRiskDollar: 20 }] }),
+      state,
+      config,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (d) => blocked.push(d),
+    );
+
+    expect(result.events.some((e) => e.type === 'OPEN')).toBe(false);
+    expect(result.symbolState.openPositions).toHaveLength(2); // still just the original 2 — 3rd correctly blocked
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0].openSameSideCount).toBe(2); // computed generically via .filter().length, not hardcoded
+  });
+
+  it('a blocked candidate allocates NO risk and sends no exchange order: no OPEN/SKIPPED event, newEntry stays null, openPositions unchanged', async () => {
+    // Same fixture+config the sibling ALLOW test above proves DOES reach DynamicRMarginSizer/
+    // wouldExceedRiskPool/the OPEN event construction when unblocked (TREND_RIDER/OB path, never
+    // touches the NEUTRAL_TRANSITION early-return that could otherwise produce a same "zero Step-2
+    // events" signature for an unrelated reason) — so "zero OPEN/SKIPPED events" here is a strong
+    // proxy for "never got past the guard's early return" rather than a coincidence.
+    // A wide-R LONG (R=6, SL=94, TP1=entry+1.2R=107.2) straddling this fixture's final 5m candle
+    // (c(102,106,106,101.5): high=106, low=101.5) WITHOUT crossing either threshold — unlike
+    // farAwayLongInput (R=1), whose tight TP1 (51.2) the sibling TICKET-056 tests above deliberately
+    // accept getting touched. This test wants a genuinely clean "zero events" candle so a single
+    // Step-2-only event (if the guard failed to block) would be unambiguous, not mixed with Step-3 noise.
+    const wideRLongInput: SlTpManagerInput = { ...farAwayLongInput, entryPrice: 100, slPrice: 94 };
+    const existingPos = openPosition(wideRLongInput);
+    const state = stateWith({ position: existingPos });
+    const fixture = fullOpenFlowFixtureLong();
+    const config: OrchestratorConfig = { ...baseConfig, maxConcurrentPositionsPerSymbol: 2 };
+
+    const result = await processCandle(baseInput({ ...fixture, allOpenPositionsRisk: [{ id: 'BTCUSDT', actualRiskDollar: 10 }] }), state, config);
+
+    expect(result.events).toHaveLength(0); // no OPEN, no SKIPPED, no PARTIAL_CLOSE — Step 2 never reached the sizer/riskPool/event-construction code at all
+    expect(result.symbolState.openPositions).toHaveLength(1); // newEntry was exactly null — nothing appended
+    expect(result.symbolState.openPositions[0].position.entryPrice).toBe(100); // still just the pre-existing LONG, untouched
   });
 });
 
