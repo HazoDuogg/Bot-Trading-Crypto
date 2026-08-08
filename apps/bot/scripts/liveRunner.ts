@@ -733,6 +733,13 @@ async function main(): Promise<void> {
   //   1. refuses unless envLabel === 'testnet' (checked from the REAL loadBinanceEnvConfig() result,
   //      not from an env var someone could also set on mainnet by mistake).
   //   2. refuses unless process.env.TEST_MANUAL_OPEN_SYMBOL is explicitly set — never fires by default.
+  // Optional knobs (all test-only, none touch any real risk-sizing/strategy formula):
+  //   TEST_MANUAL_OPEN_COUNT (default 1) — open this many positions on the SAME symbol in a row
+  //     (Test H: multi-position-per-symbol known-limitation verification, capped at
+  //     CONFIG.maxConcurrentPositionsPerSymbol since more would never happen in real production either).
+  //   TEST_MANUAL_SL_DISTANCE_PCT (default 0.015) — how far the SL sits from entry, as a fraction.
+  //     Set small (e.g. 0.0015 = 0.15%) to make Test G (bot's own real SL/TP close) converge fast on
+  //     normal testnet price noise instead of waiting for a full 1.5% move.
   if (process.env.TEST_MANUAL_OPEN_SYMBOL) {
     if (envLabel !== 'testnet') {
       throw new Error(`TEST_MANUAL_OPEN_SYMBOL is set but envLabel=${envLabel} — REFUSING. This test-only trigger must NEVER run on mainnet.`);
@@ -741,65 +748,73 @@ async function main(): Promise<void> {
     if (!SYMBOLS.includes(testManualOpenSymbol)) {
       throw new Error(`TEST_MANUAL_OPEN_SYMBOL=${testManualOpenSymbol} không nằm trong SYMBOLS=${SYMBOLS.join(',')}`);
     }
-    console.warn(`[TEST_MANUAL_TRIGGER] TICKET-151A: chuẩn bị mở 1 vị thế THẬT (testnet) trên ${testManualOpenSymbol} qua ĐÚNG execution path production — KHÔNG qua strategy signal thật.`);
-
-    const side: PositionSide = process.env.TEST_MANUAL_OPEN_SIDE === 'SHORT' ? 'SHORT' : 'LONG';
-    const priceRes = await fetch(`${envConfig.baseUrl}/fapi/v1/ticker/price?symbol=${testManualOpenSymbol}`);
-    const entryPrice = Number((await priceRes.json() as { price: string }).price);
-    const slDistancePct = 0.015; // synthetic, test-only — 1.5% away from entry, not a real risk-sizing formula
-    const slPrice = side === 'LONG' ? entryPrice * (1 - slDistancePct) : entryPrice * (1 + slDistancePct);
-    const testMarginRequired = 20; // small, fixed, test-only margin — real CONFIG.leverage applied for notional
-    const positionSizeNotional = testMarginRequired * CONFIG.leverage;
-
-    const managedPosition = openPosition({
-      scenario: 'TREND',
-      entryPrice,
-      slPrice,
-      side,
-      tpPlan: CONFIG.tpPlan,
-      positionSize: positionSizeNotional,
-      takerFeeRate: CONFIG.takerFeeRate,
-    });
-
-    const entryTimestamp = Date.now();
-    const openEvent: OpenTradeEvent = {
-      type: 'OPEN',
-      symbol: testManualOpenSymbol,
-      side,
-      regime: MarketRegime.SIDEWAY_SCALPER, // arbitrary label, test-only — never fed into any regime decision
-      setupType: 'BOX_BREAKOUT', // arbitrary label, test-only
-      tpPlan: CONFIG.tpPlan,
-      entryTimestamp,
-      entryPrice,
-      riskMultiplier: 1,
-      actualRiskDollar: testMarginRequired,
-      marginRequired: testMarginRequired,
-      slPrice,
-      tpLevels: managedPosition.tpLevels,
-      riskPoolPctBefore: 0,
-      riskPoolPctAfter: 0,
-    };
-
-    const canonicalQty = await handleOpenEvent(testManualOpenSymbol, openEvent, accountBalance).catch((e) => {
-      console.error(`[TEST_MANUAL_TRIGGER_ERROR] ${(e as Error).message}`);
-      return null;
-    });
-
-    const finalPosition =
-      canonicalQty !== null ? { ...managedPosition, positionSize: canonicalQty * entryPrice, remainingPositionSize: canonicalQty * entryPrice } : managedPosition;
-    runnerState[testManualOpenSymbol].symbolState = {
-      ...runnerState[testManualOpenSymbol].symbolState,
-      openPositions: [
-        ...runnerState[testManualOpenSymbol].symbolState.openPositions,
-        {
-          position: finalPosition,
-          meta: { regime: openEvent.regime, setupType: openEvent.setupType, entryTimestamp, actualRiskDollar: testMarginRequired, marginRequired: testMarginRequired, riskMultiplier: 1 },
-        },
-      ],
-    };
+    const openCount = Math.min(Math.max(Number(process.env.TEST_MANUAL_OPEN_COUNT ?? '1'), 1), CONFIG.maxConcurrentPositionsPerSymbol);
+    const slDistancePct = Number(process.env.TEST_MANUAL_SL_DISTANCE_PCT ?? '0.015');
     console.warn(
-      `[TEST_MANUAL_TRIGGER] Đã mở xong — bot giờ tin nó đang có vị thế THẬT ${side} ${testManualOpenSymbol} (canonicalQty=${canonicalQty}, entry=${entryPrice}, sl=${slPrice}). ` +
-        `Đóng tay trên UI để test Reconcile (Test F), hoặc để tự nhiên chạm SL/TP (Test G).`,
+      `[TEST_MANUAL_TRIGGER] TICKET-151A: chuẩn bị mở ${openCount} vị thế THẬT (testnet) trên ${testManualOpenSymbol} qua ĐÚNG execution path production (slDistancePct=${slDistancePct}) — KHÔNG qua strategy signal thật.`,
+    );
+
+    for (let i = 0; i < openCount; i++) {
+      const side: PositionSide = process.env.TEST_MANUAL_OPEN_SIDE === 'SHORT' ? 'SHORT' : 'LONG';
+      const priceRes = await fetch(`${envConfig.baseUrl}/fapi/v1/ticker/price?symbol=${testManualOpenSymbol}`);
+      const entryPrice = Number((await priceRes.json() as { price: string }).price);
+      const slPrice = side === 'LONG' ? entryPrice * (1 - slDistancePct) : entryPrice * (1 + slDistancePct);
+      const testMarginRequired = 20; // small, fixed, test-only margin — real CONFIG.leverage applied for notional
+      const positionSizeNotional = testMarginRequired * CONFIG.leverage;
+
+      const managedPosition = openPosition({
+        scenario: 'TREND',
+        entryPrice,
+        slPrice,
+        side,
+        tpPlan: CONFIG.tpPlan,
+        positionSize: positionSizeNotional,
+        takerFeeRate: CONFIG.takerFeeRate,
+      });
+
+      const entryTimestamp = Date.now();
+      const openEvent: OpenTradeEvent = {
+        type: 'OPEN',
+        symbol: testManualOpenSymbol,
+        side,
+        regime: MarketRegime.SIDEWAY_SCALPER, // arbitrary label, test-only — never fed into any regime decision
+        setupType: 'BOX_BREAKOUT', // arbitrary label, test-only
+        tpPlan: CONFIG.tpPlan,
+        entryTimestamp,
+        entryPrice,
+        riskMultiplier: 1,
+        actualRiskDollar: testMarginRequired,
+        marginRequired: testMarginRequired,
+        slPrice,
+        tpLevels: managedPosition.tpLevels,
+        riskPoolPctBefore: 0,
+        riskPoolPctAfter: 0,
+      };
+
+      const canonicalQty = await handleOpenEvent(testManualOpenSymbol, openEvent, accountBalance).catch((e) => {
+        console.error(`[TEST_MANUAL_TRIGGER_ERROR] ${(e as Error).message}`);
+        return null;
+      });
+
+      const finalPosition =
+        canonicalQty !== null ? { ...managedPosition, positionSize: canonicalQty * entryPrice, remainingPositionSize: canonicalQty * entryPrice } : managedPosition;
+      runnerState[testManualOpenSymbol].symbolState = {
+        ...runnerState[testManualOpenSymbol].symbolState,
+        openPositions: [
+          ...runnerState[testManualOpenSymbol].symbolState.openPositions,
+          {
+            position: finalPosition,
+            meta: { regime: openEvent.regime, setupType: openEvent.setupType, entryTimestamp, actualRiskDollar: testMarginRequired, marginRequired: testMarginRequired, riskMultiplier: 1 },
+          },
+        ],
+      };
+      console.warn(
+        `[TEST_MANUAL_TRIGGER] (${i + 1}/${openCount}) Đã mở xong — bot giờ tin nó đang có vị thế THẬT ${side} ${testManualOpenSymbol} (canonicalQty=${canonicalQty}, entry=${entryPrice}, sl=${slPrice}, entryTimestamp=${entryTimestamp}).`,
+      );
+      if (i < openCount - 1) await new Promise((resolve) => setTimeout(resolve, 1100)); // ensure distinct entryTimestamp per position (orderIds map key)
+    }
+    console.warn(
+      `[TEST_MANUAL_TRIGGER] Xong — ${openCount} vị thế đã mở trên ${testManualOpenSymbol}. Đóng tay/qua script để test Reconcile (Test F/H), hoặc để tự nhiên chạm SL/TP (Test G).`,
     );
   }
 
