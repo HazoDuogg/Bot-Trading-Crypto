@@ -317,7 +317,16 @@ async function main(): Promise<void> {
           console.error(`[CANONICAL_QTY_FALLBACK_ERROR] ${symbol}: getPositionRisk() fallback lỗi, sẽ dùng submittedQty (đã round stepSize) làm phương án cuối: ${(e as Error).message}`);
         }
       }
-      const canonical = resolveCanonicalOpenQty({ submittedQty: quantity, orderRaw: openResult.raw, positionRiskAmt });
+      // TICKET-151B — Binance one-way mode merges same-symbol/same-side positions into ONE
+      // positionAmt, so with maxConcurrentPositionsPerSymbol>=2 a positionRiskAmt fallback for the
+      // 2nd+ position on this side must subtract the OTHER already-open same-side positions' known
+      // qty to recover just THIS order's incremental fill — runnerState[symbol].symbolState here is
+      // still the pre-this-candle state (reassigned to result.symbolState only after this events loop
+      // finishes), so it correctly reflects "already open BEFORE this new position".
+      const existingSameSideQtyBaseAsset = runnerState[symbol].symbolState.openPositions
+        .filter((e) => e.position.side === event.side)
+        .reduce((sum, e) => sum + e.position.remainingPositionSize / e.position.entryPrice, 0);
+      const canonical = resolveCanonicalOpenQty({ submittedQty: quantity, orderRaw: openResult.raw, positionRiskAmt, existingSameSideQtyBaseAsset });
       canonicalQty = canonical.qty;
       console.log(`[CANONICAL_QTY] ${symbol} source=${canonical.source} submittedQty=${quantity} canonicalQty=${canonical.qty}`);
       if (canonical.source === 'SUBMITTED_QTY_FALLBACK') {

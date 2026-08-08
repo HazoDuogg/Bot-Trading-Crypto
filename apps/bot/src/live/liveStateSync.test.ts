@@ -41,6 +41,26 @@ describe('resolveCanonicalOpenQty (P0-A)', () => {
     const result = resolveCanonicalOpenQty({ submittedQty: 0.02, orderRaw: { executedQty: 'not-a-number' }, positionRiskAmt: null });
     expect(result).toEqual({ qty: 0.02, source: 'SUBMITTED_QTY_FALLBACK' });
   });
+
+  // TICKET-151B — found during T151A testnet Test H: Binance one-way mode merges same-symbol/
+  // same-side positions into ONE positionAmt. Reproduced live on testnet: opening a 2nd 0.313 ETH
+  // position while a 1st 0.313 ETH position was still open returned positionRiskAmt=0.626 (the
+  // MERGED total), which — without subtracting the already-known 1st position's qty — would wrongly
+  // become the 2nd position's own canonicalQty (double its real size).
+  it('subtracts existingSameSideQtyBaseAsset from a merged positionRiskAmt to recover the incremental (2nd position) qty', () => {
+    const result = resolveCanonicalOpenQty({ submittedQty: 0.313, orderRaw: { executedQty: '0' }, positionRiskAmt: 0.626, existingSameSideQtyBaseAsset: 0.313 });
+    expect(result).toEqual({ qty: 0.313, source: 'POSITION_RISK' });
+  });
+
+  it('defaults existingSameSideQtyBaseAsset to 0, reproducing the exact pre-T151B single-position behavior', () => {
+    const result = resolveCanonicalOpenQty({ submittedQty: 0.01, orderRaw: {}, positionRiskAmt: 0.01 });
+    expect(result).toEqual({ qty: 0.01, source: 'POSITION_RISK' });
+  });
+
+  it('falls back to submittedQty (never a zero/negative qty) when existingSameSideQtyBaseAsset >= positionRiskAmt (internal bookkeeping cannot be trusted)', () => {
+    const result = resolveCanonicalOpenQty({ submittedQty: 0.313, orderRaw: {}, positionRiskAmt: 0.3, existingSameSideQtyBaseAsset: 0.313 });
+    expect(result).toEqual({ qty: 0.313, source: 'SUBMITTED_QTY_FALLBACK' });
+  });
 });
 
 // ---- P0-B: step-size-aware tolerance + RECONCILE_QTY_SYNC -------------------------------------

@@ -40,15 +40,39 @@ export interface CanonicalQtyResult {
  *
  * `positionRiskAmt` should be `null` when the caller didn't/couldn't fetch it (e.g. dry-run) —
  * this function never calls the network itself, it only interprets already-fetched data.
+ *
+ * TICKET-151B (found during T151A testnet verification, Test H): Binance Futures one-way mode
+ * (`positionSide:"BOTH"`) reports ONE MERGED `positionAmt` per symbol+side — it does NOT distinguish
+ * "this specific order's fill" from "the account's total position on this side". With
+ * `maxConcurrentPositionsPerSymbol>=2`, opening a 2nd same-symbol same-side position while the 1st
+ * is still open means a naive `positionRiskAmt` read returns the SUM of both, not just the new
+ * order's own qty — silently double-counting the new position's size (a real, reproduced-on-testnet
+ * bug, not theoretical). `existingSameSideQtyBaseAsset` (sum of base-asset qty of OTHER already-open
+ * same-symbol-same-side positions the caller already knows about internally, BEFORE this new one)
+ * must be subtracted to recover the incremental (this order's own) qty. Defaults to 0, which
+ * reproduces the exact pre-T151B single-position behavior byte-for-byte.
  */
-export function resolveCanonicalOpenQty(params: { submittedQty: number; orderRaw: unknown; positionRiskAmt: number | null }): CanonicalQtyResult {
+export function resolveCanonicalOpenQty(params: {
+  submittedQty: number;
+  orderRaw: unknown;
+  positionRiskAmt: number | null;
+  existingSameSideQtyBaseAsset?: number;
+}): CanonicalQtyResult {
   const raw = params.orderRaw as { executedQty?: string | number } | null | undefined;
   const executedQty = raw != null ? Number(raw.executedQty) : NaN;
   if (Number.isFinite(executedQty) && executedQty > 0) {
     return { qty: executedQty, source: 'EXECUTED_QTY' };
   }
   if (params.positionRiskAmt !== null && Number.isFinite(params.positionRiskAmt) && Math.abs(params.positionRiskAmt) > 0) {
-    return { qty: Math.abs(params.positionRiskAmt), source: 'POSITION_RISK' };
+    const existing = params.existingSameSideQtyBaseAsset ?? 0;
+    const incremental = Math.abs(params.positionRiskAmt) - existing;
+    // Only trust the derived incremental value when it's still a sane positive qty — if our own
+    // existing-qty bookkeeping doesn't reconcile cleanly against the exchange's merged total (e.g.
+    // existing >= total, which should never happen if internal state is accurate), fall through to
+    // submittedQty rather than return a zero/negative/nonsensical "canonical" qty.
+    if (incremental > 0) {
+      return { qty: incremental, source: 'POSITION_RISK' };
+    }
   }
   return { qty: params.submittedQty, source: 'SUBMITTED_QTY_FALLBACK' };
 }
