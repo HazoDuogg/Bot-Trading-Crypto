@@ -49,6 +49,8 @@ import {
   type SymbolState,
 } from '../dist/orchestrator/types.js';
 import { computeCorrelatedRiskRatio } from '../dist/regime/correlatedRisk.js';
+import { MarketRegime } from '../dist/regime/types.js'; // TICKET-151A test-only manual trigger (see below)
+import { openPosition } from '../dist/risk/slTpManager.js'; // TICKET-151A test-only manual trigger (see below)
 import { RegimeConfig } from '../dist/regime/config.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import { DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, DEFAULT_PLAN_AUTO_SELECTION_CONFIG } from '../dist/xgbFilter/config.js';
@@ -717,6 +719,88 @@ async function main(): Promise<void> {
     } finally {
       reconcileGuard.finish(symbol);
     }
+  }
+
+  // ============================================================================================
+  // TEST-ONLY MANUAL TRIGGER (TICKET-151A Test F/G verification) — REMOVE BEFORE FINAL PRODUCTION
+  // MERGE. Fires the REAL open-position execution path (executor.openMarketPosition() -> canonical
+  // qty resolution (P0-A) -> placeInitialOrders() (real SL/TP on the exchange) -> insertion into
+  // runnerState[symbol].symbolState.openPositions), using a synthetic OpenTradeEvent so Test F/G
+  // don't have to wait for a real strategy signal. This does NOT touch entry/regime/xgbFilter code
+  // at all — only bypasses the SIGNAL that would normally produce an OpenTradeEvent; every step
+  // AFTER that (the actual thing T151 changed) runs for real, unmodified.
+  // HARD GUARDS (never remove without removing the whole block):
+  //   1. refuses unless envLabel === 'testnet' (checked from the REAL loadBinanceEnvConfig() result,
+  //      not from an env var someone could also set on mainnet by mistake).
+  //   2. refuses unless process.env.TEST_MANUAL_OPEN_SYMBOL is explicitly set — never fires by default.
+  if (process.env.TEST_MANUAL_OPEN_SYMBOL) {
+    if (envLabel !== 'testnet') {
+      throw new Error(`TEST_MANUAL_OPEN_SYMBOL is set but envLabel=${envLabel} — REFUSING. This test-only trigger must NEVER run on mainnet.`);
+    }
+    const testManualOpenSymbol = process.env.TEST_MANUAL_OPEN_SYMBOL;
+    if (!SYMBOLS.includes(testManualOpenSymbol)) {
+      throw new Error(`TEST_MANUAL_OPEN_SYMBOL=${testManualOpenSymbol} không nằm trong SYMBOLS=${SYMBOLS.join(',')}`);
+    }
+    console.warn(`[TEST_MANUAL_TRIGGER] TICKET-151A: chuẩn bị mở 1 vị thế THẬT (testnet) trên ${testManualOpenSymbol} qua ĐÚNG execution path production — KHÔNG qua strategy signal thật.`);
+
+    const side: PositionSide = process.env.TEST_MANUAL_OPEN_SIDE === 'SHORT' ? 'SHORT' : 'LONG';
+    const priceRes = await fetch(`${envConfig.baseUrl}/fapi/v1/ticker/price?symbol=${testManualOpenSymbol}`);
+    const entryPrice = Number((await priceRes.json() as { price: string }).price);
+    const slDistancePct = 0.015; // synthetic, test-only — 1.5% away from entry, not a real risk-sizing formula
+    const slPrice = side === 'LONG' ? entryPrice * (1 - slDistancePct) : entryPrice * (1 + slDistancePct);
+    const testMarginRequired = 20; // small, fixed, test-only margin — real CONFIG.leverage applied for notional
+    const positionSizeNotional = testMarginRequired * CONFIG.leverage;
+
+    const managedPosition = openPosition({
+      scenario: 'TREND',
+      entryPrice,
+      slPrice,
+      side,
+      tpPlan: CONFIG.tpPlan,
+      positionSize: positionSizeNotional,
+      takerFeeRate: CONFIG.takerFeeRate,
+    });
+
+    const entryTimestamp = Date.now();
+    const openEvent: OpenTradeEvent = {
+      type: 'OPEN',
+      symbol: testManualOpenSymbol,
+      side,
+      regime: MarketRegime.SIDEWAY_SCALPER, // arbitrary label, test-only — never fed into any regime decision
+      setupType: 'BOX_BREAKOUT', // arbitrary label, test-only
+      tpPlan: CONFIG.tpPlan,
+      entryTimestamp,
+      entryPrice,
+      riskMultiplier: 1,
+      actualRiskDollar: testMarginRequired,
+      marginRequired: testMarginRequired,
+      slPrice,
+      tpLevels: managedPosition.tpLevels,
+      riskPoolPctBefore: 0,
+      riskPoolPctAfter: 0,
+    };
+
+    const canonicalQty = await handleOpenEvent(testManualOpenSymbol, openEvent, accountBalance).catch((e) => {
+      console.error(`[TEST_MANUAL_TRIGGER_ERROR] ${(e as Error).message}`);
+      return null;
+    });
+
+    const finalPosition =
+      canonicalQty !== null ? { ...managedPosition, positionSize: canonicalQty * entryPrice, remainingPositionSize: canonicalQty * entryPrice } : managedPosition;
+    runnerState[testManualOpenSymbol].symbolState = {
+      ...runnerState[testManualOpenSymbol].symbolState,
+      openPositions: [
+        ...runnerState[testManualOpenSymbol].symbolState.openPositions,
+        {
+          position: finalPosition,
+          meta: { regime: openEvent.regime, setupType: openEvent.setupType, entryTimestamp, actualRiskDollar: testMarginRequired, marginRequired: testMarginRequired, riskMultiplier: 1 },
+        },
+      ],
+    };
+    console.warn(
+      `[TEST_MANUAL_TRIGGER] Đã mở xong — bot giờ tin nó đang có vị thế THẬT ${side} ${testManualOpenSymbol} (canonicalQty=${canonicalQty}, entry=${entryPrice}, sl=${slPrice}). ` +
+        `Đóng tay trên UI để test Reconcile (Test F), hoặc để tự nhiên chạm SL/TP (Test G).`,
+    );
   }
 
   const reconciler = new StateReconciler({
