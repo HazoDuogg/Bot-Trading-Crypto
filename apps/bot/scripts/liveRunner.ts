@@ -30,6 +30,13 @@ import 'dotenv/config';
 import { LiveCandleFeed, type CandleData } from '../dist/live/liveCandleFeed.js';
 import { BinanceOrderExecutor, initializeLeverageForSymbols, type PositionSide } from '../dist/live/binanceOrderExecutor.js';
 import { StateReconciler, resolveAccountBalanceAfterReconcile, type InternalStateSnapshot } from '../dist/live/stateReconciler.js';
+import {
+  resolveCanonicalOpenQty,
+  computeQuantityTolerance,
+  cancelAlgoOrderIdempotent,
+  reconcileExternalPositionClose,
+  ReconcileGuard,
+} from '../dist/live/liveStateSync.js';
 import { loadBinanceEnvConfig } from '../dist/live/envConfig.js';
 import { processCandle, type ProcessCandleInput, type MomentumGateEvaluation, type MomentumContextDecisionDiagnostic } from '../dist/orchestrator/orchestrator.js';
 import {
@@ -181,6 +188,16 @@ async function main(): Promise<void> {
   await executor.loadExchangeInfo(SYMBOLS);
   console.log('exchangeInfo (LOT_SIZE/PRICE_FILTER/MIN_NOTIONAL) đã tải cho 4 coin.');
 
+  // TICKET-151 P0-B — stateReconciler.ts's own DEFAULT_QUANTITY_TOLERANCE (1e-8) is far tighter
+  // than any real lot-size rounding gap. compareStates() only takes a single scalar tolerance
+  // (kept unchanged/untouched — see stateReconciler.ts's own doc comments, still pure/log-only by
+  // design), so this uses the COARSEST stepSize across all 4 traded symbols as a conservative
+  // global bound — real per-symbol precision is applied where it matters (the active
+  // reconcile/sync decision below, via liveStateSync.ts's checkQuantityMismatch()/
+  // computeQuantityTolerance()), this value only controls whether stateReconciler.ts's periodic
+  // LOG-ONLY sweep flags POSITION_SIZE_MISMATCH at all.
+  const reconcilerQuantityTolerance = computeQuantityTolerance(Math.max(...SYMBOLS.map((s) => executor.getSymbolFilters(s).stepSize)));
+
   // TICKET-100: CHỦ ĐỘNG đặt đúng CONFIG.leverage cho cả 4 symbol — không tin tưởng cấu hình có sẵn
   // trên sàn (có thể lệch, gây sai risk$ thật ở mọi phép tính size sau này). "Đang có vị thế mở" ->
   // cảnh báo + tiếp tục (không crash); lỗi khác -> dừng khởi động (initializeLeverageForSymbols ném lại).
@@ -230,6 +247,12 @@ async function main(): Promise<void> {
     runnerState[symbol] = { symbolState: INITIAL_SYMBOL_STATE, lastProcessedCandleTimestamp: null, orderIds: new Map() };
   }
 
+  // TICKET-151 §11 — per-symbol in-flight reconcile marker. Checked before starting a new
+  // external-close reconcile for a symbol (no double-close/double-release) AND at the top of this
+  // symbol's per-tick processing (frozen — no new candle processed, no new entry opened, no close
+  // handled — while its reconcile is in flight, per the ticket's 11-step workflow's step 1).
+  const reconcileGuard = new ReconcileGuard();
+
   let regimeChangeCount = 0;
   let willOpenCount = 0;
   let tickErrorCount = 0;
@@ -260,15 +283,46 @@ async function main(): Promise<void> {
     return { slAlgoId, tpAlgoIds };
   }
 
-  async function handleOpenEvent(symbol: string, event: OpenTradeEvent, balanceAtOpen: number): Promise<void> {
+  /**
+   * TICKET-151 P0-A — returns the CANONICAL executed base-asset quantity when a real order was
+   * placed (null in dryRun, where there's nothing to confirm). This used to be silently discarded
+   * — `quantity` (the pre-normalization calculated value) was used for SL/TP sizing AND is what
+   * ended up in the internal simulated position's size, while the exchange had actually filled the
+   * real stepSize-rounded amount. The caller (tick()) uses the returned qty to correct the just-
+   * opened ManagedPositionState's positionSize/remainingPositionSize to match reality.
+   */
+  async function handleOpenEvent(symbol: string, event: OpenTradeEvent, balanceAtOpen: number): Promise<number | null> {
     const quantity = roundQty(event.marginRequired * CONFIG.leverage / event.entryPrice);
+    let canonicalQty: number | null = null;
     if (dryRun) {
       console.log(`[SẼ MỞ LỆNH] ${symbol} ${event.side} entry=${event.entryPrice} sl=${event.slPrice} qty=${quantity} setupType=${event.setupType}`);
       willOpenCount++;
     } else {
       const openResult = await executor.openMarketPosition(symbol, event.side, quantity);
       if (!('orderId' in openResult)) throw new Error(`liveRunner: openMarketPosition trả về DryRunResult dù dryRun=false — không nên xảy ra`);
-      const orderIds = await placeInitialOrders(symbol, event.side, event, quantity);
+
+      // TICKET-151 P0-A priority order: executedQty from the fill response first; only fall back
+      // to a fresh getPositionRisk() read when executedQty is missing/unusable — never fall back
+      // silently to the pre-normalization `quantity` (that IS the incident this fixes).
+      let positionRiskAmt: number | null = null;
+      const rawExecutedQty = Number((openResult.raw as { executedQty?: string | number } | undefined)?.executedQty);
+      if (!Number.isFinite(rawExecutedQty) || rawExecutedQty <= 0) {
+        try {
+          const posRisk = (await executor.getPositionRisk(symbol)) as Array<{ symbol?: string; positionAmt?: string }>;
+          const found = Array.isArray(posRisk) ? posRisk.find((p) => p.symbol === symbol) : undefined;
+          positionRiskAmt = found ? Number(found.positionAmt) : null;
+        } catch (e) {
+          console.error(`[CANONICAL_QTY_FALLBACK_ERROR] ${symbol}: getPositionRisk() fallback lỗi, sẽ dùng submittedQty (đã round stepSize) làm phương án cuối: ${(e as Error).message}`);
+        }
+      }
+      const canonical = resolveCanonicalOpenQty({ submittedQty: quantity, orderRaw: openResult.raw, positionRiskAmt });
+      canonicalQty = canonical.qty;
+      console.log(`[CANONICAL_QTY] ${symbol} source=${canonical.source} submittedQty=${quantity} canonicalQty=${canonical.qty}`);
+      if (canonical.source === 'SUBMITTED_QTY_FALLBACK') {
+        console.warn(`[CANONICAL_QTY_WARNING] ${symbol}: không xác nhận được executedQty/positionAmt thật từ sàn — dùng submittedQty làm phương án cuối, CẦN kiểm tra thủ công.`);
+      }
+
+      const orderIds = await placeInitialOrders(symbol, event.side, event, canonicalQty);
       runnerState[symbol].orderIds.set(event.entryTimestamp, orderIds);
     }
     // TICKET-124 — real-trade-level guard visibility: with momentumDirectCorrelationRiskThreshold=999
@@ -282,6 +336,7 @@ async function main(): Promise<void> {
         (dryRun ? '\n\n[DRY-RUN]' : '') +
         (oodGuardApplied ? '\n[OOD Guard: size đã giảm theo Risk Reduction P97.5]' : ''),
     );
+    return canonicalQty;
   }
 
   async function handlePartialCloseEvent(symbol: string, event: PartialCloseEvent, entryTimestampOfPosition: number, remainingQuantity: number): Promise<void> {
@@ -303,8 +358,32 @@ async function main(): Promise<void> {
     } else {
       const ids = runnerState[symbol].orderIds.get(event.entryTimestamp);
       if (ids) {
-        if (ids.slAlgoId != null) await executor.cancelAlgoOrder(symbol, ids.slAlgoId).catch((e) => console.error(`[CLEANUP] hủy SL lỗi: ${(e as Error).message}`));
-        for (const tpId of ids.tpAlgoIds) await executor.cancelAlgoOrder(symbol, tpId).catch((e) => console.error(`[CLEANUP] hủy TP lỗi: ${(e as Error).message}`));
+        // TICKET-151 P0-E — a -2011 ("Unknown order sent") when cancelling the OTHER (non-triggering)
+        // SL/TP algo order here is expected (Binance does NOT auto-cancel the sibling order once one
+        // side fills). Only treat it as terminal/safe-to-ignore AFTER a FRESH getPositionRisk() query
+        // confirms the position is actually flat right now — never inferred from the close event
+        // itself, per the ticket's explicit "chỉ xử lý như terminal khi position state đã được xác
+        // nhận an toàn" rule. A getPositionRisk() failure here keeps isConfirmedClosed=false (safer
+        // default — an unconfirmed -2011 stays a loud error rather than being silently swallowed).
+        let isConfirmedClosed = false;
+        try {
+          const posRisk = (await executor.getPositionRisk(symbol)) as Array<{ symbol?: string; positionAmt?: string }>;
+          const amt = Array.isArray(posRisk) ? Number(posRisk.find((p) => p.symbol === symbol)?.positionAmt ?? '0') : NaN;
+          isConfirmedClosed = Number.isFinite(amt) && Math.abs(amt) < 1e-9;
+        } catch (e) {
+          console.error(`[CLOSE_CONFIRM_ERROR] ${symbol}: không xác nhận được vị thế qua getPositionRisk() trước khi hủy SL/TP còn treo — coi mọi -2011 sau đây là lỗi thật (an toàn hơn): ${(e as Error).message}`);
+        }
+
+        if (ids.slAlgoId != null) {
+          const outcome = await cancelAlgoOrderIdempotent(executor, symbol, ids.slAlgoId, `handleCloseEvent(${symbol}) SL`, isConfirmedClosed);
+          if (outcome.status === 'ALREADY_TERMINAL') console.log(outcome.logLine);
+          else if (outcome.status === 'ERROR') console.error(`[CLEANUP] hủy SL lỗi: ${outcome.error.message}`);
+        }
+        for (const tpId of ids.tpAlgoIds) {
+          const outcome = await cancelAlgoOrderIdempotent(executor, symbol, tpId, `handleCloseEvent(${symbol}) TP`, isConfirmedClosed);
+          if (outcome.status === 'ALREADY_TERMINAL') console.log(outcome.logLine);
+          else if (outcome.status === 'ERROR') console.error(`[CLEANUP] hủy TP lỗi: ${outcome.error.message}`);
+        }
         runnerState[symbol].orderIds.delete(event.entryTimestamp);
       }
     }
@@ -348,6 +427,15 @@ async function main(): Promise<void> {
 
       for (const symbol of SYMBOLS) {
         const rs = runnerState[symbol];
+        // TICKET-151 §5 P0-C step 1 / §11 — freeze ALL mutation for this symbol while its external-
+        // close reconcile is in flight: no new candle processed, no new entry opened, no close/partial
+        // handled. The reconcile itself is a bounded handful of read-only calls (+ idempotent cancels
+        // of already-stale SL/TP orders), so losing one 5s tick for this symbol is a safe trade-off
+        // against acting on a symbol whose internal/exchange state is actively being resolved.
+        if (reconcileGuard.isReconciling(symbol)) {
+          console.warn(`[RECONCILE_FREEZE] ${symbol}: đang đối soát vị thế đóng ngoài — bỏ qua tick này cho symbol này.`);
+          continue;
+        }
         const closed5m = feed.getClosedCandles(symbol, '5m', now);
         if (closed5m.length === 0) continue;
         const latestClosed = closed5m[closed5m.length - 1];
@@ -488,7 +576,33 @@ async function main(): Promise<void> {
 
         for (const event of result.events) {
           if (event.type === 'OPEN') {
-            await handleOpenEvent(symbol, event, accountBalance).catch((e) => console.error(`[OPEN_HANDLER_ERROR] ${symbol}: ${(e as Error).message}`));
+            const canonicalQty = await handleOpenEvent(symbol, event, accountBalance).catch((e) => {
+              console.error(`[OPEN_HANDLER_ERROR] ${symbol}: ${(e as Error).message}`);
+              return null;
+            });
+            // TICKET-151 P0-A — inject the exchange-confirmed real quantity into the JUST-created
+            // ManagedPositionState for this open (matched by entryTimestamp, unique per position
+            // within a symbol — same key convention as runnerState[symbol].orderIds). This is a
+            // targeted data correction, NOT a change to slTpManager.ts's sizing FORMULA: only this
+            // one freshly-opened position's positionSize/remainingPositionSize (currently equal,
+            // always true right at open before any tier has filled) are overwritten to
+            // canonicalQty × entryPrice, exactly analogous to how resolveAccountBalanceAfterReconcile()
+            // already overrides accountBalance from a confirmed exchange value elsewhere in this file.
+            if (canonicalQty !== null) {
+              const openedEntry = result.symbolState.openPositions.find((e) => e.meta.entryTimestamp === event.entryTimestamp);
+              if (openedEntry) {
+                const correctedNotional = canonicalQty * openedEntry.position.entryPrice;
+                if (Math.abs(correctedNotional - openedEntry.position.positionSize) > 1e-9) {
+                  console.log(
+                    `[POSITION_SIZE_CORRECTED] ${symbol} entryTimestamp=${event.entryTimestamp}: positionSize ${openedEntry.position.positionSize.toFixed(6)} → ${correctedNotional.toFixed(6)} (canonicalQty=${canonicalQty})`,
+                  );
+                }
+                openedEntry.position.positionSize = correctedNotional;
+                openedEntry.position.remainingPositionSize = correctedNotional;
+              } else {
+                console.error(`[POSITION_SIZE_CORRECTION_ERROR] ${symbol}: không tìm thấy openPositions entry vừa mở (entryTimestamp=${event.entryTimestamp}) để áp canonicalQty — CẦN kiểm tra thủ công.`);
+              }
+            }
           } else if (event.type === 'PARTIAL_CLOSE') {
             // Find the still-open position this partial fill belongs to (same symbol+side, only one such position expected per TICKET-056's 2-slot design when a partial just fired on it).
             const owner = result.symbolState.openPositions.find((e) => e.position.side === event.side);
@@ -520,8 +634,94 @@ async function main(): Promise<void> {
   // Balance is different: there is only ever ONE correct number (the exchange's), so once a mismatch is
   // confirmed, overwriting accountBalance from the stale internal value is unambiguously correct —
   // every size/risk$/Telegram calculation downstream must use the real number, not a drifted one.
+  /**
+   * TICKET-151 §5 P0-C — active workflow for POSITION_MISSING_ON_EXCHANGE. Read-only against the
+   * exchange except for idempotent cleanup of already-stale SL/TP algo orders (P0-E) — never
+   * re-opens, reverses, or hedges anything. Guarded by `reconcileGuard` (§11): only one in-flight
+   * reconcile per symbol, and the symbol's own tick() processing is frozen (see the loop above)
+   * for the duration, so this can never race a new entry or a second reconcile on the same symbol.
+   *
+   * KNOWN LIMITATION (honest, not hidden): only handles the common case of EXACTLY ONE internal
+   * open position for the symbol. With `maxConcurrentPositionsPerSymbol=2` (CONFIG above), if two
+   * positions are open on the same symbol when the exchange shows zero, this function conservatively
+   * refuses to auto-resolve (which of the two internal entries closed cannot be disambiguated from
+   * stateReconciler.ts's per-symbol-only comparison) and only logs a loud warning for manual review.
+   */
+  async function handlePositionMissingOnExchange(symbol: string, exchangeBalanceUsd: number): Promise<void> {
+    const rs = runnerState[symbol];
+    if (rs.symbolState.openPositions.length !== 1) {
+      console.warn(
+        `[RECONCILE_SKIP_MULTI_POSITION] ${symbol}: có ${rs.symbolState.openPositions.length} vị thế nội bộ (không phải đúng 1) trong khi sàn báo không còn vị thế nào — P0-C hiện chỉ tự động xử lý đúng 1 vị thế/symbol, KHÔNG tự sửa trường hợp này. CẦN KIỂM TRA THỦ CÔNG NGAY.`,
+      );
+      return;
+    }
+    if (!reconcileGuard.tryStart(symbol)) return; // already reconciling this symbol this cycle
+    try {
+      const entry = rs.symbolState.openPositions[0];
+      const orderIds = rs.orderIds.get(entry.meta.entryTimestamp);
+
+      const workflowResult = await reconcileExternalPositionClose(executor, {
+        symbol,
+        side: entry.position.side,
+        entryPrice: entry.position.entryPrice,
+        slPrice: entry.position.currentSlPrice,
+        tpLevels: entry.position.tpLevels,
+        internalQtyBeforeBaseAsset: entry.position.remainingPositionSize / entry.position.entryPrice,
+        actualRiskDollar: entry.meta.actualRiskDollar,
+        marginRequired: entry.meta.marginRequired,
+        incomeWindowStartMs: entry.meta.entryTimestamp,
+        incomeWindowEndMs: Date.now(),
+      });
+
+      if (!workflowResult.confirmedClosed) {
+        console.warn(`[RECONCILE_FALSE_ALARM] ${symbol}: fresh getPositionRisk() vẫn thấy vị thế còn mở — có thể là dữ liệu đối soát cũ/race, KHÔNG đóng nội bộ.`);
+        return;
+      }
+      console.warn(workflowResult.logLine);
+
+      // P0-E: SL/TP algo orders are NOT auto-cancelled by Binance when the position closes —
+      // clean up whichever ones the bot still thinks are resting, idempotently.
+      if (orderIds) {
+        if (orderIds.slAlgoId != null) {
+          const outcome = await cancelAlgoOrderIdempotent(executor, symbol, orderIds.slAlgoId, `reconcile(${symbol}) SL`, true);
+          if (outcome.status === 'ALREADY_TERMINAL') console.log(outcome.logLine);
+          else if (outcome.status === 'ERROR') console.error(`[RECONCILE_CLEANUP_ERROR] ${symbol} SL algoId=${orderIds.slAlgoId}: ${outcome.error.message}`);
+        }
+        for (const tpId of orderIds.tpAlgoIds) {
+          const outcome = await cancelAlgoOrderIdempotent(executor, symbol, tpId, `reconcile(${symbol}) TP`, true);
+          if (outcome.status === 'ALREADY_TERMINAL') console.log(outcome.logLine);
+          else if (outcome.status === 'ERROR') console.error(`[RECONCILE_CLEANUP_ERROR] ${symbol} TP algoId=${tpId}: ${outcome.error.message}`);
+        }
+        rs.orderIds.delete(entry.meta.entryTimestamp);
+      }
+
+      // P0-C/P0-F: removing the ghost position is the ENTIRE fix for risk-pool/margin/concurrency
+      // exposure — openRiskBySymbol/openMarginBySymbol/momentumDirectOpenPositions* are all derived
+      // fresh from symbolState.openPositions at the top of every tick() (see above), never cached
+      // separately, so this alone zeroes them for this symbol starting next tick.
+      rs.symbolState = { ...rs.symbolState, openPositions: rs.symbolState.openPositions.filter((e) => e !== entry) };
+
+      // P0-G/P0-D: refresh balance from the SAME exchange read this reconcile cycle already made
+      // (no extra network call). Never fabricates a locally-computed PnL — the simulation can no
+      // longer emit a CLOSE event for a position no longer in openPositions, so there is no
+      // double-apply risk between this override and a later simulated close.
+      accountBalance = exchangeBalanceUsd;
+
+      telegramQueue.enqueue(
+        `[RECONCILE] ${symbol} ${entry.position.side}: vị thế đã bị đóng BÊN NGOÀI bot (sàn xác nhận không còn vị thế) — closeReason=${workflowResult.closeReason}, ` +
+          `realizedPnlUsd=${workflowResult.realizedPnlUsd ?? 'không xác định'} (reconciled_external_close). Risk/margin/slot đã được giải phóng.` +
+          (envLabel === 'testnet' ? '\n[TESTNET]' : ''),
+      );
+    } catch (err) {
+      console.error(`[RECONCILE_ERROR] ${symbol}: ${(err as Error).message}`);
+    } finally {
+      reconcileGuard.finish(symbol);
+    }
+  }
+
   const reconciler = new StateReconciler({
     executor,
+    quantityTolerance: reconcilerQuantityTolerance,
     getInternalState: (): InternalStateSnapshot => ({
       balanceUsd: accountBalance,
       positions: SYMBOLS.flatMap((s) =>
@@ -543,6 +743,23 @@ async function main(): Promise<void> {
       }
 
       console.log(`[SUMMARY] regimeChangeCount=${regimeChangeCount}, willOpenCount(dryRun)=${willOpenCount}, tickErrorCount=${tickErrorCount}, oodGuardEnabled=${OOD_GUARD_ENABLED}, oodGuardShortEvalCount=${oodGuardShortEvalCount}, oodGuardFlaggedCount=${oodGuardFlaggedCount}, oodGuardFlaggedPassedCount=${oodGuardFlaggedPassedCount}`);
+
+      // TICKET-151 P0-C — active reconcile ONLY for POSITION_MISSING_ON_EXCHANGE, decided directly
+      // from this cycle's exchangePositions/internal openPositions (not by parsing `mismatch.detail`
+      // strings). Every OTHER mismatch type (side mismatch, missing internally, size mismatch outside
+      // this immediate open-time correction path) stays exactly log-only, unchanged — same TICKET-102
+      // rationale as the balance override above: those can come from several different real causes
+      // that must not be silently auto-resolved. Fire-and-forget (async) — never blocks the reconcile
+      // timer's own tick loop; `reconcileGuard` + the per-symbol tick-freeze above prevent races.
+      if (result.mismatches.some((m) => m.type === 'POSITION_MISSING_ON_EXCHANGE')) {
+        for (const symbol of SYMBOLS) {
+          const hasInternal = runnerState[symbol].symbolState.openPositions.length > 0;
+          const hasExchange = result.exchangePositions.some((p) => p.symbol === symbol);
+          if (hasInternal && !hasExchange && !reconcileGuard.isReconciling(symbol)) {
+            void handlePositionMissingOnExchange(symbol, result.exchangeBalanceUsd);
+          }
+        }
+      }
     },
     onClean: () => {
       console.log(`[RECONCILE] OK — nội bộ khớp với sàn.`);
