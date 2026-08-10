@@ -481,6 +481,19 @@ describe('routeEntry — OB disabled per symbol (TICKET-017 Phần B)', () => {
   });
 });
 
+describe('routeEntry global OB rollback', () => {
+  it('preserves fallback behavior and reproduces enabled output after rollback', () => {
+    const input = baseInput({ regime: MarketRegime.TREND_RIDER, symbol: 'BTCUSDT', adxDirection1h: 'UP', candles5m: trendCandles5m, candlesMss: mssCandles });
+    const enabledBefore = routeEntry(input, { ...DEFAULT_ENTRY_ROUTER_CONFIG, obEnabled: true });
+    const disabled = routeEntry(input, { ...DEFAULT_ENTRY_ROUTER_CONFIG, obEnabled: false });
+    const enabledAfter = routeEntry(input, { ...DEFAULT_ENTRY_ROUTER_CONFIG, obEnabled: true });
+    expect(enabledBefore?.setupType).toBe('OB');
+    expect(disabled).not.toBeNull();
+    expect(disabled?.setupType).not.toBe('OB');
+    expect(enabledAfter).toEqual(enabledBefore);
+  });
+});
+
 // TICKET-042 — Entry Funnel Analytics: pure observability, routeEntry()'s decision logic must be
 // byte-for-byte identical whether or not a caller passes onFunnelEvent.
 describe('routeEntry — Entry Funnel Analytics (TICKET-042)', () => {

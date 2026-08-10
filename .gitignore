@@ -12,6 +12,7 @@ apps/ml-training/__pycache__/
 # data files are test fixtures the trader drops in locally, not committed
 data/*
 !data/README.md
+data/live-telemetry/
 
 coverage/
 .DS_Store

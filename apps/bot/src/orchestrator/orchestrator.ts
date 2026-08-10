@@ -29,6 +29,7 @@ import { detectSwingPoints, latestSwingPointBefore } from '../entry/detectors/sw
 import { computeDirection5m, type Direction5m } from './neutral5mDirectionSelector.js';
 import { computeDirection5mRelaxed } from './neutral5mDirectionGatedRouting.js';
 import { is5mConfirmed } from './neutralMacroConflictOverride.js';
+import { advanceMomentumPullback, armMomentumPullback, computeMomentumTimingGeometry, momentumGuardBlockReason, type MomentumPullbackArm } from '../backtest/momentumEntryTimingResearch.js';
 import { buildFeatureVector, computeMomentumCrossFeatures, loadFeatureSchema, type FeatureSchema } from '../xgbFilter/featureBuilder.js';
 import { scoreMomentum } from '../xgbFilter/momentumScorer.js';
 import { computeMomentumMultiplier } from '../xgbFilter/momentumMultiplier.js';
@@ -833,6 +834,11 @@ async function tryMomentumDirect(
 interface EntryAttemptResult {
   event: OpenTradeEvent | SkippedEntryEvent | null;
   newEntry: OpenPositionEntry | null;
+  momentumPullbackArm?: MomentumPullbackArm | null;
+}
+
+export function shouldBlockSameSideDuplicate(config: Pick<OrchestratorConfig, 'sameSideDuplicateGuardEnabled'>, openSides: Array<'LONG' | 'SHORT'>, candidateSide: 'LONG' | 'SHORT'): boolean {
+  return config.sameSideDuplicateGuardEnabled !== false && openSides.includes(candidateSide);
 }
 
 /**
@@ -877,6 +883,7 @@ async function tryOpenNewPosition(
   // guard right below. Never used for anything else in this function.
   openPositions: OpenPositionEntry[],
   onSameSidePositionBlocked: ((diagnostic: SameSidePositionBlockedDiagnostic) => void) | undefined,
+  momentumPullbackArm: MomentumPullbackArm | undefined,
 ): Promise<EntryAttemptResult> {
   // TICKET-017 Phần A: same direction function as adxDirection1h, applied to 1D candles instead.
   const macroDirectionSeries = wilderDIDirectionSeries(input.candles1d, EntryConfig.MACRO_TREND_ADX_PERIOD_1D);
@@ -920,17 +927,45 @@ async function tryOpenNewPosition(
   // straight through to the early return below, byte-identical to every ticket before this one.
   let effectiveDraftSetup: DraftSetup | null = draftSetup;
   if (effectiveDraftSetup === null && config.momentumDirectEnabled) {
-    effectiveDraftSetup = await tryMomentumDirect(
-      input,
-      config,
-      regimeOutput,
-      currentCandle,
-      macroDirection,
-      circuitBreakerState,
-      onMomentumGateEvaluation,
-      momentumContextSafetyState5m,
-      onMomentumContextDecision,
-    );
+    const timing = config.momentumEntryTimingResearch;
+    if (timing?.mode === 'BREAKOUT_PULLBACK_CONTINUATION' && momentumPullbackArm) {
+      const advanced = advanceMomentumPullback(
+        momentumPullbackArm,
+        currentCandle,
+        input.candles1m,
+        timing.maxExtensionAtr ?? 1,
+        timing.minAvailableRewardR ?? 1.2,
+        config.momentumDirectTpRMultiple,
+      );
+      effectiveDraftSetup = advanced.draft;
+      momentumPullbackArm = advanced.arm ?? undefined;
+      if (advanced.status === 'WAITING') return { event: null, newEntry: null, momentumPullbackArm };
+      if (advanced.status !== 'CONFIRMED') return { event: null, newEntry: null, momentumPullbackArm: null };
+    } else {
+      effectiveDraftSetup = await tryMomentumDirect(
+        input,
+        config,
+        regimeOutput,
+        currentCandle,
+        macroDirection,
+        circuitBreakerState,
+        onMomentumGateEvaluation,
+        momentumContextSafetyState5m,
+        onMomentumContextDecision,
+      );
+      if (effectiveDraftSetup?.setupType === 'MOMENTUM_DIRECT' && timing && timing.mode !== 'CURRENT_ENTRY') {
+        const atr14 = lastDefined(wilderATRSeries(input.candles5m, RegimeConfig.ATR_PERIOD_5M));
+        const geometry = atr14 === undefined ? null : computeMomentumTimingGeometry(input.candles5m, effectiveDraftSetup.side, effectiveDraftSetup.entryPrice, effectiveDraftSetup.slPrice, atr14);
+        const blocked = momentumGuardBlockReason(geometry, timing.maxExtensionAtr ?? 1, timing.minAvailableRewardR ?? 1.2);
+        if (timing.mode === 'OVEREXTENSION_GUARD') {
+          if (blocked) return { event: null, newEntry: null, momentumPullbackArm: null };
+        } else {
+          if (blocked || !geometry) return { event: null, newEntry: null, momentumPullbackArm: null };
+          momentumPullbackArm = armMomentumPullback(effectiveDraftSetup, geometry, currentCandle.timestamp, timing.maxWaitCandles5m ?? 12);
+          return { event: null, newEntry: null, momentumPullbackArm };
+        }
+      }
+    }
   }
 
   if (effectiveDraftSetup === null) return { event: null, newEntry: null };
@@ -945,7 +980,7 @@ async function tryOpenNewPosition(
   // continue to be gated only by the existing maxConcurrentPositionsPerSymbol total-count check at
   // the call site, unchanged.
   const sameSideOpen = openPositions.filter((p) => p.position.side === effectiveDraftSetup!.side);
-  if (sameSideOpen.length > 0) {
+  if (shouldBlockSameSideDuplicate(config, openPositions.map((p) => p.position.side), effectiveDraftSetup.side)) {
     onSameSidePositionBlocked?.({
       symbol: input.symbol,
       side: effectiveDraftSetup.side,
@@ -1618,8 +1653,9 @@ export async function processCandle(
   // stays byte-for-byte identical to every ticket before this one (close now, re-enter next candle).
   // PM-confirmed (2026-07-22): `accountBalance` passed to the sizer here already reflects this same
   // candle's own close(s) above, same sequencing already used across symbols within one backtest step.
+  let nextMomentumPullbackArm = state.momentumPullbackArm;
   if (state.openPositions.length < config.maxConcurrentPositionsPerSymbol) {
-    const { event, newEntry } = await tryOpenNewPosition(
+    const { event, newEntry, momentumPullbackArm: returnedMomentumPullbackArm } = await tryOpenNewPosition(
       input,
       config,
       regimeOutput,
@@ -1636,7 +1672,10 @@ export async function processCandle(
       // same-candle-close-adjusted count" rule documented above.
       state.openPositions,
       onSameSidePositionBlocked,
+      state.momentumPullbackArm,
     );
+    if (returnedMomentumPullbackArm !== undefined) nextMomentumPullbackArm = returnedMomentumPullbackArm ?? undefined;
+    if (config.momentumEntryTimingResearch?.mode === 'BREAKOUT_PULLBACK_CONTINUATION' && newEntry?.meta.setupType === 'MOMENTUM_DIRECT') nextMomentumPullbackArm = undefined;
     if (event) events.push(event);
     if (newEntry) remainingPositions.push(newEntry);
   }
@@ -1646,6 +1685,7 @@ export async function processCandle(
       regimeState,
       openPositions: remainingPositions,
       momentumDirectCircuitBreaker: circuitBreakerState,
+      ...(nextMomentumPullbackArm !== undefined ? { momentumPullbackArm: nextMomentumPullbackArm } : {}),
       ...(htfSafetyDiagnostic !== undefined ? { htfSafetyDiagnostic } : {}),
       ...(safetyState5mStabilizedDiagnostic !== undefined ? { safetyState5mStabilizedDiagnostic } : {}),
       ...(safetyState5mFinalStabilizedDiagnostic !== undefined ? { safetyState5mFinalStabilizedDiagnostic } : {}),

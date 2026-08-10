@@ -8,8 +8,10 @@ import { detectFairValueGap } from './detectors/fairValueGap.js';
 import { detectLiquiditySweep } from './detectors/liquiditySweep.js';
 import { classifyMssFailReason, detectMarketStructureShift } from './detectors/marketStructureShift.js';
 import { classifyBoxBreakoutFailReason, detectBoxBreakout } from './detectors/boxBreakout.js';
+import { detectObV2 } from '../backtest/obV2Research.js';
 
 export const DEFAULT_ENTRY_ROUTER_CONFIG: EntryRouterConfig = {
+  obEnabled: true,
   // TICKET-036: re-enabled — picks the cascade routeEntry() runs for NEUTRAL_TRANSITION.
   entryStyleForNeutral: 'SIDEWAY_STYLE',
   // TICKET-017/018: off by default — baseline behavior unchanged unless a caller (backtest.ts CLI) opts in.
@@ -100,6 +102,18 @@ function runTrendStyle(input: EntryRouterInput, config: EntryRouterConfig, regim
   const side: 'LONG' | 'SHORT' = direction === 'BULLISH' ? 'LONG' : 'SHORT';
   const now = input.candles5m[input.candles5m.length - 1].timestamp;
 
+  if (config.obResearchMode) {
+    const researchAtr=lastDefined(wilderATRSeries(input.candles5m,RegimeConfig.ATR_PERIOD_5M));
+    const candidate=researchAtr===undefined?null:detectObV2(input.symbol,input.candles5m,input.candlesMss,direction,{mode:config.obResearchMode,expiryBars:config.obResearchExpiryBars??48,slBufferAtr:config.obSlBufferAtrMultiplier,atr:researchAtr,centralCostBps:config.obResearchCentralCostBps??6},config.onObResearchLifecycleEvent);
+    if (candidate) {
+      if (config.macroTrendFilterEnabled&&((candidate.side==='LONG'&&input.macroDirection==='DOWN')||(candidate.side==='SHORT'&&input.macroDirection==='UP'))) return null;
+      onFunnelEvent?.(input.symbol,now,{stage:'SETUP',passed:true,setupType:'OB'});
+      onFunnelEvent?.(input.symbol,now,{stage:'MACRO',passed:true});
+      onFunnelEvent?.(input.symbol,now,{stage:'MSS',passed:true});
+      return{side:candidate.side,entryPrice:candidate.entryPrice,slPrice:candidate.slPrice,setupType:'OB',regime,riskMultiplier:config.regimeRiskMultiplier[regime]};
+    }
+  }
+
   // Priority per PM: OB -> FVG -> Sweep (fallback signal #3, only when neither zone-based setup exists).
   // TICKET-042: cascade now runs BEFORE the macro-trend-filter check below (was after) — pure
   // functions, no side effects, so the FINAL decision (return null vs DraftSetup, and its values)
@@ -113,7 +127,7 @@ function runTrendStyle(input: EntryRouterInput, config: EntryRouterConfig, regim
   // falls through to FVG/Sweep exactly as if no OB were found.
   // TICKET-041: lookforwardK reads config.obBosLookforwardK (defaults to EntryConfig.OB_BOS_LOOKFORWARD_K)
   // instead of the constant directly, so backtest.ts's CLI can A/B test it without touching config.ts.
-  const ob = config.obDisabledSymbols.includes(input.symbol)
+  const ob = config.obEnabled === false || config.obResearchMode || config.obDisabledSymbols.includes(input.symbol)
     ? null
     : detectOrderBlock(input.candles5m, direction, { fractalN: EntryConfig.FRACTAL_N, lookforwardK: config.obBosLookforwardK });
   if (ob) {

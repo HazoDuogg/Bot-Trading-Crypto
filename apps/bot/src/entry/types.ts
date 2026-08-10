@@ -105,6 +105,13 @@ export interface FunnelEvent {
 export type FunnelCallback = (symbol: string, timestamp: number, event: FunnelEvent) => void;
 
 export interface EntryRouterConfig {
+  /** Reversible global OB switch; undefined is enabled for backward-compatible callers. */
+  obEnabled?: boolean;
+  /** Research-only OB challenger; undefined preserves the production V1 path. */
+  obResearchMode?: 'OB_V2_LIFECYCLE' | 'OB_V2_STRUCTURAL_RETEST' | 'OB_V2_STRUCTURAL_RETEST_REWARD';
+  obResearchExpiryBars?: 24 | 48 | 96;
+  obResearchCentralCostBps?: number;
+  onObResearchLifecycleEvent?: (event:{zoneId:string;state:string;timestamp:number})=>void;
   /**
    * TICKET-036: NEUTRAL_TRANSITION re-enabled (was disabled by TICKET-012) — routeEntry() picks
    * runTrendStyle() or runBoxBreakoutStyle() per this field, same as TREND_RIDER/SIDEWAY_SCALPER.
