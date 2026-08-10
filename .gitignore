@@ -9,10 +9,40 @@ apps/ml-training/__pycache__/
 .env.*
 !.env.example
 
-# data files are test fixtures the trader drops in locally, not committed
+# data files are test fixtures/research outputs the trader drops in locally, not committed by default.
+# TICKET-160A: narrow allowlist for minimum reproducibility evidence only (small manifests/summaries/
+# reports). Never allowlist raw OHLCV, live telemetry, or whole archive directories here.
 data/*
 !data/README.md
 data/live-telemetry/
+
+!data/archive/
+data/archive/*
+
+!data/archive/ticket153b/
+data/archive/ticket153b/*
+!data/archive/ticket153b/ticket153b-run-manifest.json
+!data/archive/ticket153b/ticket153b-central-summary.json
+!data/archive/ticket153b/ticket153b-scenario-summary.csv
+
+!data/archive/ticket158/
+data/archive/ticket158/*
+!data/archive/ticket158/ticket158-run-manifest.json
+!data/archive/ticket158/ticket158-scenario-portfolio-comparison.csv
+
+!data/archive/ticket159/
+data/archive/ticket159/*
+!data/archive/ticket159/ticket159-run-manifest.json
+!data/archive/ticket159/ticket159-parity-leakage-report.md
+!data/archive/ticket159/ticket159-scenario-portfolio-comparison.csv
+
+!data/ticket160-before-after-summary.md
+!data/ticket160-regression-parity-report.md
+!data/ticket160-reference-integrity-report.md
+!data/ticket160a-evidence-allowlist.csv
+!data/ticket160a-reference-integrity-report.md
+!data/ticket160a-parity-report.md
+!data/ticket160a-final-summary.md
 
 coverage/
 .DS_Store
@@ -22,4 +52,27 @@ Thumbs.db
 .claude
 skills-lock.json
 README.md
+
+# docs/ is ignored by default (local working notes). TICKET-160A: narrow allowlist for the active
+# baseline index, baseline registry, T154 schema doc, and T157-T159 final decision reports only.
 docs
+!docs/
+docs/*
+!docs/active-baseline-and-artifact-index.md
+!docs/baseline-registry.md
+!docs/ticket154-execution-telemetry-schema.md
+
+!docs/archive/
+docs/archive/*
+
+!docs/archive/ticket157/
+docs/archive/ticket157/*
+!docs/archive/ticket157/ticket157-ob-v2-architecture-challenger-validation-report.md
+
+!docs/archive/ticket158/
+docs/archive/ticket158/*
+!docs/archive/ticket158/ticket158-formal-ob-disabled-portfolio-experiment-report.md
+
+!docs/archive/ticket159/
+docs/archive/ticket159/*
+!docs/archive/ticket159/ticket159-unified-entry-timing-optimization-report.md

@@ -1,0 +1,74 @@
+{
+  "ticket": "T158",
+  "createdAt": "2026-08-09T09:53:13.913Z",
+  "inputManifest": "ticket153b-run-manifest.json",
+  "inputManifestHash": "0040ec0ad76a206d141042b5d93e82b95ae62e960a358d291a38c9dae3d93535",
+  "comparisonControl": "obEnabled true vs false; all other config identical",
+  "runs": [
+    {
+      "runId": "T158-OB_ENABLED-FEE_ONLY-2a6699454c74",
+      "mode": "OB_ENABLED",
+      "scenario": "FEE_ONLY",
+      "configHash": "2a6699454c74c5062be1e1f64b48c386a78e82550238d30e36d81a4433531cd3",
+      "summaryHash": "e45f5a1032e58277d787cf16d41261f52056d7474199dd766282ac11bb24112f",
+      "ledgerHash": "5ad19c15a15329a318e1b34ccb19068191bb3b2617d5c697530d9e4745f03f57"
+    },
+    {
+      "runId": "T158-OB_DISABLED-FEE_ONLY-1e8c838a5f7d",
+      "mode": "OB_DISABLED",
+      "scenario": "FEE_ONLY",
+      "configHash": "1e8c838a5f7d9a0f64653a4ac5493d0b61c0e7fe2312e857edfa534b777be5e3",
+      "summaryHash": "4e7e396c47fede04f80325e28f433d401b60b97d56c9e0bf7782a840dadae33c",
+      "ledgerHash": "fb684e93a623c7d031e14324affb94658db12c3a84f6df0f9ff9e0e9655f2fdb"
+    },
+    {
+      "runId": "T158-OB_ENABLED-LIGHT-2a6699454c74",
+      "mode": "OB_ENABLED",
+      "scenario": "LIGHT",
+      "configHash": "2a6699454c74c5062be1e1f64b48c386a78e82550238d30e36d81a4433531cd3",
+      "summaryHash": "a53d8c9a3074fc58ce8c36d1c5bf973a346abe491331e45445eebb51d1d3c141",
+      "ledgerHash": "9f8d1e988f162963aa3d13ce2f5feaa8d025507432301c6b038ed7f7d932779c"
+    },
+    {
+      "runId": "T158-OB_DISABLED-LIGHT-1e8c838a5f7d",
+      "mode": "OB_DISABLED",
+      "scenario": "LIGHT",
+      "configHash": "1e8c838a5f7d9a0f64653a4ac5493d0b61c0e7fe2312e857edfa534b777be5e3",
+      "summaryHash": "47323ef6cd4b08e8b11fb6552670af9536714361fffb179ab89a9a4e60cfd8a4",
+      "ledgerHash": "6154eac436e3a68b9b85426f2dad5eadbbe2946aa9ff330d132fb78aa8e4bcef"
+    },
+    {
+      "runId": "T158-OB_ENABLED-CENTRAL-2a6699454c74",
+      "mode": "OB_ENABLED",
+      "scenario": "CENTRAL",
+      "configHash": "2a6699454c74c5062be1e1f64b48c386a78e82550238d30e36d81a4433531cd3",
+      "summaryHash": "c627714d4a02cd278a624b99eb38fc40e34006b5f13afbb84eb447a431dde6e5",
+      "ledgerHash": "5ae6b562cb34a4b348b97037642b9b46953c4bed6edaacf2b07a59ce3782387e"
+    },
+    {
+      "runId": "T158-OB_DISABLED-CENTRAL-1e8c838a5f7d",
+      "mode": "OB_DISABLED",
+      "scenario": "CENTRAL",
+      "configHash": "1e8c838a5f7d9a0f64653a4ac5493d0b61c0e7fe2312e857edfa534b777be5e3",
+      "summaryHash": "b7f9255253c58f8e032bc6b9519d5c9979da753c1b18eaef9d6ba9df7c25f975",
+      "ledgerHash": "996509c1637d91c6dd1f4291c3bdfab418b377264af07395ff0670e0c6148b52"
+    },
+    {
+      "runId": "T158-OB_ENABLED-CONSERVATIVE-2a6699454c74",
+      "mode": "OB_ENABLED",
+      "scenario": "CONSERVATIVE",
+      "configHash": "2a6699454c74c5062be1e1f64b48c386a78e82550238d30e36d81a4433531cd3",
+      "summaryHash": "ec5e43720467b586bb466cb2913d0cdf65f78ca0f2fbd69a9601ed001befa86d",
+      "ledgerHash": "d1d650d2795c86dfd59047d1613eb3f81e20fcbef4ca33243d7d5f493d9bb870"
+    },
+    {
+      "runId": "T158-OB_DISABLED-CONSERVATIVE-1e8c838a5f7d",
+      "mode": "OB_DISABLED",
+      "scenario": "CONSERVATIVE",
+      "configHash": "1e8c838a5f7d9a0f64653a4ac5493d0b61c0e7fe2312e857edfa534b777be5e3",
+      "summaryHash": "f47b24aece0208dd423861594b62f3fda6c0ffca90d5b2c4cfc8c1af22456002",
+      "ledgerHash": "d020403e23baca88e1cebaccd9f53b50628b7df1698a8399c73f408b5ab92dc7"
+    }
+  ],
+  "productionDeployed": false
+}
