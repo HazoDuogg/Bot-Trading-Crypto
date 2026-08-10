@@ -26,6 +26,29 @@ function fmtSigned(n: number): string {
   return (n >= 0 ? '+' : '') + n.toFixed(2);
 }
 
+/**
+ * Exchange-authoritative balance breakdown for a Telegram message (Wallet/Margin-Equity/Available —
+ * exact Binance /fapi/v2/account field names, see liveBalanceSync.ts). `undefined` on a ctx means
+ * "caller didn't opt in" (legacy single-number display, unchanged); `null` means a fresh fetch was
+ * attempted and failed/timed out — must show literally "pending exchange sync", never a computed
+ * fallback number passed off as confirmed.
+ */
+export interface ExchangeBalanceDisplay {
+  walletBalance: number;
+  marginBalance: number;
+  availableBalance: number;
+}
+
+function formatBalanceBlock(exchangeBalance: ExchangeBalanceDisplay | null | undefined, legacyLabel: string, legacyValue: number): string {
+  if (exchangeBalance === null) return `💼 Balance: pending exchange sync`;
+  if (exchangeBalance === undefined) return `💼 ${legacyLabel}: $${fmtUsd(legacyValue)}`;
+  return [
+    `💼 Wallet Balance: $${fmtUsd(exchangeBalance.walletBalance)}`,
+    `📊 Margin Balance (Equity): $${fmtUsd(exchangeBalance.marginBalance)}`,
+    `💵 Available Balance: $${fmtUsd(exchangeBalance.availableBalance)}`,
+  ].join('\n');
+}
+
 const SETUP_LABEL: Record<OpenTradeEvent['setupType'], string> = {
   OB: 'OB',
   FVG: 'FVG',
@@ -77,7 +100,7 @@ function formatTpBreakdown(event: OpenTradeEvent): string {
 
 export function formatPositionOpenedMessage(
   event: OpenTradeEvent,
-  ctx: { env: 'mainnet' | 'testnet'; accountBalanceAtOpen: number },
+  ctx: { env: 'mainnet' | 'testnet'; accountBalanceAtOpen: number; exchangeBalance?: ExchangeBalanceDisplay | null },
 ): string {
   const sideLabel = event.side === 'LONG' ? '🟢 LONG' : '🔴 SHORT';
   const riskPct = (event.actualRiskDollar / ctx.accountBalanceAtOpen) * 100;
@@ -88,6 +111,7 @@ export function formatPositionOpenedMessage(
     `💢 SL: $${event.slPrice.toFixed(4)}`,
     `🎯 TP: ${formatTpBreakdown(event)}`,
     `💳 Đòn bẩy: 30x | Risk: $${fmtUsd(event.actualRiskDollar)} (~${riskPct.toFixed(1)}%)`,
+    ...(ctx.exchangeBalance !== undefined ? [formatBalanceBlock(ctx.exchangeBalance, 'Vốn hiện tại', ctx.accountBalanceAtOpen)] : []),
     ``,
     `➖ Vì sao vào lệnh ➖`,
     `🧭 Regime: ${event.regime}`,
@@ -104,7 +128,7 @@ export function formatPositionOpenedMessage(
 
 // ---- 3. CHỐT MỘT PHẦN (Partial close, TP1/TP2) ----
 
-export function formatPartialCloseMessage(event: PartialCloseEvent, ctx: { env: 'mainnet' | 'testnet' }): string {
+export function formatPartialCloseMessage(event: PartialCloseEvent, ctx: { env: 'mainnet' | 'testnet'; exchangeBalance?: ExchangeBalanceDisplay | null }): string {
   const slAdjustment = event.tier === 'TP1' ? 'về Breakeven' : 'lên TP1';
   const remainingLabel = event.tier === 'TP1' ? 'chờ TP2' : 'chờ Runner chạy theo ATR trailing';
   return [
@@ -113,14 +137,14 @@ export function formatPartialCloseMessage(event: PartialCloseEvent, ctx: { env: 
     `💰 Đã chốt ${(event.closePercent * 100).toFixed(0)}%: ${fmtSigned(event.pnlUsd)}$`,
     `🔒 Điều chỉnh để ăn tiếp: SL dời ${slAdjustment} ($${event.newSlPrice.toFixed(4)})`,
     `📌 Còn lại ${(event.remainingPercent * 100).toFixed(0)}% vẫn đang mở, ${remainingLabel}`,
-    `💼 Vốn hiện tại: $${fmtUsd(event.accountBalanceAfter)}`,
+    formatBalanceBlock(ctx.exchangeBalance, 'Vốn hiện tại', event.accountBalanceAfter),
     `🕐 ${fmtTimestamp(event.timestamp)}`,
   ].join('\n');
 }
 
 // ---- 4. CHỐT HẾT (Full close) ----
 
-export function formatFullCloseMessage(event: CloseTradeEvent, ctx: { env: 'mainnet' | 'testnet' }): string {
+export function formatFullCloseMessage(event: CloseTradeEvent, ctx: { env: 'mainnet' | 'testnet'; exchangeBalance?: ExchangeBalanceDisplay | null }): string {
   const isWin = event.pnlUsd >= 0;
   const header = isWin ? '✅ WIN' : '❌ LOSS';
   return [
@@ -129,7 +153,7 @@ export function formatFullCloseMessage(event: CloseTradeEvent, ctx: { env: 'main
     `💡 Lý do đóng: ${event.exitReason}`,
     `📋 Entry: ${event.side} @ $${event.entryPrice.toFixed(4)} → Exit @ $${event.exitPrice.toFixed(4)}`,
     `📋 Bối cảnh lúc đóng: Regime ${event.regime} | ADX(1h) ${event.adx1h?.toFixed(1) ?? 'N/A'}`,
-    `💼 Vốn hiện tại: $${fmtUsd(event.accountBalanceAfter)}`,
+    formatBalanceBlock(ctx.exchangeBalance, 'Vốn hiện tại', event.accountBalanceAfter),
     `🕐 ${fmtTimestamp(event.exitTimestamp)}`,
   ].join('\n');
 }

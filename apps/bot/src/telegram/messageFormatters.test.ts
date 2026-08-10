@@ -196,6 +196,55 @@ describe('formatFullCloseMessage', () => {
   });
 });
 
+describe('exchange-authoritative balance display (opt-in via ctx.exchangeBalance)', () => {
+  const exchangeBalance = { walletBalance: 346.04, marginBalance: 350.1, availableBalance: 330.2 };
+
+  it('formatFullCloseMessage shows Wallet/Margin/Available separately when exchangeBalance is provided', () => {
+    const closeEvent: CloseTradeEvent = {
+      type: 'CLOSE', symbol: 'BTCUSDT', side: 'LONG', regime: MarketRegime.TREND_RIDER, setupType: 'OB', tpPlan: 'PLAN_A',
+      entryTimestamp: 0, entryPrice: 60000, exitTimestamp: Date.UTC(2026, 0, 1), exitPrice: 62500, exitReason: 'TP2',
+      pnlUsd: 45.2, pnlPct: 12.3, riskMultiplier: 1, accountBalanceAfter: 999999, // proves the stale internal number is NOT what gets shown
+    };
+    const text = formatFullCloseMessage(closeEvent, { env: 'testnet', exchangeBalance });
+    expect(text).toContain('Wallet Balance: $346.04');
+    expect(text).toContain('Margin Balance (Equity): $350.10');
+    expect(text).toContain('Available Balance: $330.20');
+    expect(text).not.toContain('999999');
+  });
+
+  it('formatFullCloseMessage shows "pending exchange sync" when exchangeBalance is explicitly null (fetch failed/timed out)', () => {
+    const closeEvent: CloseTradeEvent = {
+      type: 'CLOSE', symbol: 'BTCUSDT', side: 'LONG', regime: MarketRegime.TREND_RIDER, setupType: 'OB', tpPlan: 'PLAN_A',
+      entryTimestamp: 0, entryPrice: 60000, exitTimestamp: Date.UTC(2026, 0, 1), exitPrice: 62500, exitReason: 'SL',
+      pnlUsd: -10, pnlPct: -3, riskMultiplier: 1, accountBalanceAfter: 318.41,
+    };
+    const text = formatFullCloseMessage(closeEvent, { env: 'testnet', exchangeBalance: null });
+    expect(text).toContain('Balance: pending exchange sync');
+    expect(text).not.toContain('318.41');
+  });
+
+  it('formatPartialCloseMessage and formatPositionOpenedMessage support the same opt-in breakdown', () => {
+    const partial: PartialCloseEvent = {
+      type: 'PARTIAL_CLOSE', symbol: 'ETHUSDT', side: 'LONG', tier: 'TP1', closePercent: 0.4, pnlUsd: 4.75,
+      newSlPrice: 3000, remainingPercent: 0.6, accountBalanceAfter: 999999, timestamp: Date.UTC(2026, 0, 1),
+    };
+    expect(formatPartialCloseMessage(partial, { env: 'testnet', exchangeBalance }).includes('Wallet Balance: $346.04')).toBe(true);
+
+    const text = formatPositionOpenedMessage(baseOpenEvent, { env: 'testnet', accountBalanceAtOpen: 400, exchangeBalance });
+    expect(text).toContain('Wallet Balance: $346.04');
+  });
+
+  it('omitting ctx.exchangeBalance keeps the exact legacy single-line display (backward compatible)', () => {
+    const closeEvent: CloseTradeEvent = {
+      type: 'CLOSE', symbol: 'BTCUSDT', side: 'LONG', regime: MarketRegime.TREND_RIDER, setupType: 'OB', tpPlan: 'PLAN_A',
+      entryTimestamp: 0, entryPrice: 60000, exitTimestamp: Date.UTC(2026, 0, 1), exitPrice: 62500, exitReason: 'TP2',
+      pnlUsd: 45.2, pnlPct: 12.3, riskMultiplier: 1, accountBalanceAfter: 445.2,
+    };
+    const text = formatFullCloseMessage(closeEvent, { env: 'testnet' });
+    expect(text).toContain('Vốn hiện tại: $445.20');
+  });
+});
+
 describe('formatRegimeChangeMessage', () => {
   it('shows the transition and the destination regime\'s description', () => {
     const text = formatRegimeChangeMessage({

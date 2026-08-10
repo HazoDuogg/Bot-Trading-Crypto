@@ -27,6 +27,8 @@
  * ENV=testnet|mainnet in .env selects the Binance environment (default testnet, per envConfig.ts).
  */
 import 'dotenv/config';
+import { createHash } from 'node:crypto';
+import path from 'node:path';
 import { LiveCandleFeed, type CandleData } from '../dist/live/liveCandleFeed.js';
 import { BinanceOrderExecutor, initializeLeverageForSymbols, type PositionSide } from '../dist/live/binanceOrderExecutor.js';
 import { StateReconciler, resolveAccountBalanceAfterReconcile, type InternalStateSnapshot } from '../dist/live/stateReconciler.js';
@@ -37,7 +39,14 @@ import {
   reconcileExternalPositionClose,
   ReconcileGuard,
 } from '../dist/live/liveStateSync.js';
+import {
+  syncBalanceForTelegramEvent,
+  formatBalanceDivergenceIncidentLog,
+  formatBalanceDivergenceTelegramWarning,
+  type ExchangeBalanceSnapshot,
+} from '../dist/live/liveBalanceSync.js';
 import { loadBinanceEnvConfig } from '../dist/live/envConfig.js';
+import { ExecutionTelemetry, stableTelemetryId, type TelemetryEventDraft } from '../dist/live/executionTelemetry.js';
 import {
   processCandle,
   type ProcessCandleInput,
@@ -74,6 +83,7 @@ import {
 } from '../dist/telegram/messageFormatters.js';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
+const EXECUTION_TELEMETRY_ENABLED = process.env.EXECUTION_TELEMETRY_ENABLED === 'true';
 const TICK_INTERVAL_MS = 5_000; // how often we check "has a new 5m candle closed" — cheap, reads already-polled in-memory buffers only
 
 // TICKET-124 — feature flag for TICKET-123's chosen production improvement (Variant B: V1 model +
@@ -181,6 +191,20 @@ async function main(): Promise<void> {
   const dryRun = process.argv.includes('--dry-run=false') ? false : true; // default true, NEVER default false — TICKET-086's hard rule
   console.log(`dryRun=${dryRun}${dryRun ? ' (KHÔNG gọi API đặt lệnh thật — chỉ log)' : ' !!! SẼ ĐẶT LỆNH THẬT !!!'}`);
 
+  const telemetry = new ExecutionTelemetry({
+    enabled: EXECUTION_TELEMETRY_ENABLED,
+    rootDir: path.resolve(process.cwd(), process.env.EXECUTION_TELEMETRY_DIR ?? 'data/live-telemetry'),
+    strategyVersion: 'current-production-t152-semantics',
+    configHash: createHash('sha256').update(JSON.stringify(CONFIG)).digest('hex'),
+    modelVersion: 'xgb-momentum-v1',
+    maxQueueSize: Number(process.env.EXECUTION_TELEMETRY_MAX_QUEUE ?? 5000),
+    maxFileBytes: Number(process.env.EXECUTION_TELEMETRY_MAX_FILE_BYTES ?? 25 * 1024 * 1024),
+    retentionDays: Number(process.env.EXECUTION_TELEMETRY_RETENTION_DAYS ?? 90),
+    onHealthAlert: (message) => console.error(`[TELEMETRY_HEALTH] ${message}`),
+  });
+  const emitTelemetry = (event: TelemetryEventDraft): void => { telemetry.emit(event); };
+  console.log(`executionTelemetry=${EXECUTION_TELEMETRY_ENABLED ? `ENABLED session=${telemetry.getSessionId()}` : 'DISABLED'}`);
+
   const executor = new BinanceOrderExecutor({
     credentials: { apiKey: envConfig.apiKey, apiSecret: envConfig.apiSecret, baseUrl: envConfig.baseUrl },
     dryRun,
@@ -270,6 +294,13 @@ async function main(): Promise<void> {
   // handled — while its reconcile is in flight, per the ticket's 11-step workflow's step 1).
   const reconcileGuard = new ReconcileGuard();
 
+  // TICKET — Exchange-Authoritative Live Balance §7: set true when a per-event fresh balance read
+  // diverges from accountBalance beyond tolerance; checked at the top of the tick loop below to
+  // BLOCK all candle processing (including new entries) until a subsequent sync comes back clean.
+  // Global (not per-symbol) — balance is account-wide, not a single symbol's concern.
+  let entriesBlockedDueToBalanceDivergence = false;
+  let balanceDivergenceWarningSent = false;
+
   let regimeChangeCount = 0;
   let willOpenCount = 0;
   let tickErrorCount = 0;
@@ -282,6 +313,46 @@ async function main(): Promise<void> {
 
   function slice(candles: CandleData[], windowSize: number): CandleData[] {
     return candles.length > windowSize ? candles.slice(candles.length - windowSize) : candles;
+  }
+
+  /**
+   * TICKET — Exchange-Authoritative Live Balance §1/§2/§4/§6/§7: called before EVERY open/partial/
+   * close Telegram message, in dryRun and live alike (getAccountInfo() is a read, never gated by
+   * dryRun — same convention as stateReconciler.ts). Returns the fresh snapshot to display, or null
+   * (caller must show "pending exchange sync", never a self-calculated fallback). Also updates the
+   * enclosing `accountBalance`/`entriesBlockedDueToBalanceDivergence` — exchange always wins over
+   * the internal simulated number (extends TICKET-102's resolveAccountBalanceAfterReconcile to
+   * every event, not just the 7-minute sweep).
+   */
+  async function refreshBalanceForTelegram(): Promise<ExchangeBalanceSnapshot | null> {
+    const outcome = await syncBalanceForTelegramEvent(executor, accountBalance);
+    if (outcome.snapshot === null) return null;
+    accountBalance = outcome.correctedInternalBalance;
+
+    if (outcome.diverged && outcome.divergence) {
+      if (!entriesBlockedDueToBalanceDivergence) {
+        entriesBlockedDueToBalanceDivergence = true;
+        const incident = {
+          timestampMs: Date.now(),
+          exchangeWalletBalance: outcome.snapshot.walletBalance,
+          internalBalanceBefore: accountBalance,
+          diffUsd: outcome.divergence.diffUsd,
+          diffPct: outcome.divergence.diffPct,
+          tolerancePct: 0.01,
+        };
+        console.error(formatBalanceDivergenceIncidentLog(incident));
+        if (!balanceDivergenceWarningSent) {
+          balanceDivergenceWarningSent = true;
+          telegramQueue.enqueue(formatBalanceDivergenceTelegramWarning(incident));
+        }
+      }
+    } else if (entriesBlockedDueToBalanceDivergence) {
+      entriesBlockedDueToBalanceDivergence = false;
+      balanceDivergenceWarningSent = false;
+      console.log('[BALANCE_DIVERGENCE_RESOLVED] số dư nội bộ đã khớp lại với sàn — bỏ chặn lệnh mới.');
+      telegramQueue.enqueue('✅ [ĐỐI SOÁT SỐ DƯ OK] Số dư nội bộ đã khớp lại với sàn — đã bỏ chặn lệnh mới.');
+    }
+    return outcome.snapshot;
   }
 
   /** Places the SL + fixed-price TP algo orders for a freshly-opened position, mirroring scripts/testOrderLifecycleTestnet.ts's exact pattern. Real calls only when !dryRun. */
@@ -310,13 +381,35 @@ async function main(): Promise<void> {
    */
   async function handleOpenEvent(symbol: string, event: OpenTradeEvent, balanceAtOpen: number): Promise<number | null> {
     const quantity = roundQty(event.marginRequired * CONFIG.leverage / event.entryPrice);
+    const traceId = stableTelemetryId('trace', symbol, event.entryTimestamp, event.side, event.setupType);
+    const candidateId = stableTelemetryId('candidate', traceId);
+    const decisionId = stableTelemetryId('decision', traceId);
+    const riskAdmissionId = stableTelemetryId('risk', traceId);
+    const common = { traceId, symbol, side: event.side, setupType: event.setupType, source: 'LIVE_RUNNER', candidateId, decisionId, riskAdmissionId } as const;
+    emitTelemetry({ ...common, eventType: 'CANDIDATE_CREATED', eventTimestampUtc: new Date(event.entryTimestamp).toISOString(), quality: { entryProposal: 'DERIVED', stopProposal: 'DERIVED', takeProfitProposal: 'DERIVED' }, data: { timeframe: '5m', candleOpenTimestamp: event.entryTimestamp, entryProposal: event.entryPrice, stopProposal: event.slPrice, takeProfitProposal: event.tpLevels, regime: event.regime, xgbScore: event.momentumScore ?? 'MISSING', t152SameSideGuardEnabled: true } });
+    emitTelemetry({ ...common, eventType: 'DECISION_MADE', quality: { decision: 'DERIVED' }, data: { decision: 'ALLOW', reasonCode: 'ORCHESTRATOR_OPEN_EVENT', openPositionCount: runnerState[symbol].symbolState.openPositions.length } });
+    emitTelemetry({ ...common, eventType: 'RISK_ADMISSION', quality: { balance: 'OBSERVED', requestedRisk: 'DERIVED', quantity: 'DERIVED' }, data: { admission: 'ALLOW', balance: balanceAtOpen, requestedRiskDollar: event.actualRiskDollar, requestedNotional: event.marginRequired * CONFIG.leverage, proposedQuantity: quantity, marginRequired: event.marginRequired, leverage: CONFIG.leverage, riskPoolPctBefore: event.riskPoolPctBefore, riskPoolPctAfter: event.riskPoolPctAfter, riskMultiplier: event.riskMultiplier } });
+    emitTelemetry({ ...common, eventType: 'MARKET_SNAPSHOT', quality: { bestBid: 'MISSING', bestAsk: 'MISSING', mid: 'MISSING', markPrice: 'MISSING', indexPrice: 'MISSING' }, data: { captureStatus: 'MISSING', reasonCode: 'NO_NON_BLOCKING_BOOK_TICKER_FEED', candleReferencePrice: event.entryPrice } });
     let canonicalQty: number | null = null;
     if (dryRun) {
       console.log(`[SẼ MỞ LỆNH] ${symbol} ${event.side} entry=${event.entryPrice} sl=${event.slPrice} qty=${quantity} setupType=${event.setupType}`);
       willOpenCount++;
     } else {
-      const openResult = await executor.openMarketPosition(symbol, event.side, quantity);
+      const clientOrderId = stableTelemetryId('clientOrder', traceId, 'ENTRY');
+      emitTelemetry({ ...common, clientOrderId, eventType: 'ORDER_SUBMIT_INTENT', quality: { requestedQuantity: 'DERIVED' }, data: { intentTimestampMs: Date.now(), orderRole: 'ENTRY', type: 'MARKET', reduceOnly: false, requestedQuantity: quantity } });
+      emitTelemetry({ ...common, clientOrderId, eventType: 'ORDER_SENT', quality: { localSendTimestamp: 'OBSERVED' }, data: { localSendTimestampMs: Date.now(), attempt: 1 } });
+      let openResult;
+      try {
+        openResult = await executor.openMarketPosition(symbol, event.side, quantity);
+      } catch (err) {
+        emitTelemetry({ ...common, clientOrderId, eventType: 'EXCHANGE_REJECT', quality: { error: 'OBSERVED' }, data: { localAckTimestampMs: Date.now(), sanitizedErrorCode: (err as Error).name } });
+        throw err;
+      }
       if (!('orderId' in openResult)) throw new Error(`liveRunner: openMarketPosition trả về DryRunResult dù dryRun=false — không nên xảy ra`);
+
+      const telemetryRaw = openResult.raw as { updateTime?: number; transactTime?: number; executedQty?: string; avgPrice?: string; status?: string };
+      emitTelemetry({ ...common, clientOrderId, exchangeOrderId: String(openResult.orderId), eventType: 'EXCHANGE_ACK', quality: { exchangeOrderId: 'OBSERVED', exchangeTimestamp: telemetryRaw.updateTime || telemetryRaw.transactTime ? 'OBSERVED' : 'MISSING' }, data: { localAckTimestampMs: Date.now(), exchangeTimestampMs: telemetryRaw.updateTime ?? telemetryRaw.transactTime ?? 'MISSING', status: openResult.status, executedQty: telemetryRaw.executedQty ?? 'MISSING', averageFillPrice: telemetryRaw.avgPrice ?? 'MISSING' } });
+      if (Number(telemetryRaw.executedQty) > 0) emitTelemetry({ ...common, clientOrderId, exchangeOrderId: String(openResult.orderId), fillId: stableTelemetryId('fill', openResult.orderId, telemetryRaw.updateTime ?? Date.now()), eventType: telemetryRaw.status === 'FILLED' ? 'FILL_COMPLETE' : 'FILL_PARTIAL', quality: { fillQuantity: 'OBSERVED', averageFillPrice: telemetryRaw.avgPrice ? 'OBSERVED' : 'MISSING', commission: 'MISSING', funding: 'MISSING' }, data: { fillTimestampMs: telemetryRaw.updateTime ?? telemetryRaw.transactTime ?? 'MISSING', localReceiveTimestampMs: Date.now(), fillQuantity: telemetryRaw.executedQty, averageFillPrice: telemetryRaw.avgPrice ?? 'MISSING', commissionAmount: 'MISSING', commissionAsset: 'MISSING', makerTaker: 'MISSING', fundingStatus: 'MISSING', terminalStatus: telemetryRaw.status ?? openResult.status } });
 
       // TICKET-151 P0-A priority order: executedQty from the fill response first; only fall back
       // to a fresh getPositionRisk() read when executedQty is missing/unusable — never fall back
@@ -357,8 +450,9 @@ async function main(): Promise<void> {
     // which real trades had their size reduced by it, not just the shadow-eval counters.
     const oodGuardApplied = OOD_GUARD_ENABLED && event.setupType === 'MOMENTUM_DIRECT' && event.side === 'SHORT' && event.riskMultiplier < 1;
     if (oodGuardApplied) console.log(`[OOD_GUARD] ${symbol} SHORT MOMENTUM_DIRECT mở lệnh với size đã giảm (riskMultiplier=${event.riskMultiplier.toFixed(3)})`);
+    const exchangeBalance = await refreshBalanceForTelegram();
     telegramQueue.enqueue(
-      formatPositionOpenedMessage(event, { env: envLabel, accountBalanceAtOpen: balanceAtOpen }) +
+      formatPositionOpenedMessage(event, { env: envLabel, accountBalanceAtOpen: balanceAtOpen, exchangeBalance }) +
         (dryRun ? '\n\n[DRY-RUN]' : '') +
         (oodGuardApplied ? '\n[OOD Guard: size đã giảm theo Risk Reduction P97.5]' : ''),
     );
@@ -375,10 +469,13 @@ async function main(): Promise<void> {
         if ('algoId' in newSl) ids.slAlgoId = newSl.algoId;
       }
     }
-    telegramQueue.enqueue(formatPartialCloseMessage(event, { env: envLabel }) + (dryRun ? '\n\n[DRY-RUN]' : ''));
+    const exchangeBalance = await refreshBalanceForTelegram();
+    telegramQueue.enqueue(formatPartialCloseMessage(event, { env: envLabel, exchangeBalance }) + (dryRun ? '\n\n[DRY-RUN]' : ''));
   }
 
   async function handleCloseEvent(symbol: string, event: CloseTradeEvent): Promise<void> {
+    const closeTraceId = stableTelemetryId('trace', symbol, event.entryTimestamp, event.side, event.setupType);
+    emitTelemetry({ traceId: closeTraceId, symbol, side: event.side, setupType: event.setupType, positionId: stableTelemetryId('position', closeTraceId), eventType: 'TRADE_CLOSED', eventTimestampUtc: new Date(event.exitTimestamp).toISOString(), source: 'LIVE_RUNNER', quality: { pnl: 'MODELED', fees: 'MODELED', funding: 'MISSING', entryVwap: 'MISSING', exitVwap: 'MISSING' }, data: { exitReason: event.exitReason, modeledNetPnl: event.pnlUsd, referenceEntry: event.entryPrice, referenceExit: event.exitPrice, holdingDurationMs: event.exitTimestamp - event.entryTimestamp, observedFees: 'MISSING', funding: 'MISSING' } });
     if (dryRun) {
       console.log(`[SẼ ĐÓNG LỆNH] ${symbol} exitReason=${event.exitReason} pnlUsd=${event.pnlUsd.toFixed(2)}`);
     } else {
@@ -413,7 +510,8 @@ async function main(): Promise<void> {
         runnerState[symbol].orderIds.delete(event.entryTimestamp);
       }
     }
-    telegramQueue.enqueue(formatFullCloseMessage(event, { env: envLabel }) + (dryRun ? '\n\n[DRY-RUN]' : ''));
+    const exchangeBalance = await refreshBalanceForTelegram();
+    telegramQueue.enqueue(formatFullCloseMessage(event, { env: envLabel, exchangeBalance }) + (dryRun ? '\n\n[DRY-RUN]' : ''));
   }
 
   async function tick(): Promise<void> {
@@ -453,6 +551,16 @@ async function main(): Promise<void> {
 
       for (const symbol of SYMBOLS) {
         const rs = runnerState[symbol];
+        // TICKET — Exchange-Authoritative Live Balance §7: freeze the WHOLE tick for EVERY symbol
+        // (not per-symbol — balance divergence is account-wide) while accountBalance is confirmed
+        // diverged from Binance beyond tolerance. Blunt but safe: orchestrator.ts/processCandle()
+        // has no "exchange staleness" concept and must not gain one (sim core stays pure) — already-
+        // open positions stay protected by their resting real SL/TP orders, so losing ticks here is
+        // the same accepted trade-off as reconcileGuard's per-symbol freeze below.
+        if (entriesBlockedDueToBalanceDivergence) {
+          console.warn(`[ENTRY_BLOCKED_BALANCE_DIVERGENCE] ${symbol}: bỏ qua tick — số dư nội bộ đang lệch với sàn, chờ đối soát lại trước khi mở lệnh mới.`);
+          continue;
+        }
         // TICKET-151 §5 P0-C step 1 / §11 — freeze ALL mutation for this symbol while its external-
         // close reconcile is in flight: no new candle processed, no new entry opened, no close/partial
         // handled. The reconcile itself is a bounded handful of read-only calls (+ idempotent cancels
@@ -577,6 +685,8 @@ async function main(): Promise<void> {
           // sameSideBlockTrackers (see its own doc comment above) so a persistent signal re-forming
           // every candle while blocked doesn't spam Telegram every tick.
           (diagnostic: SameSidePositionBlockedDiagnostic) => {
+            const traceId = stableTelemetryId('blockedTrace', diagnostic.symbol, diagnostic.timestamp, diagnostic.side, 'SAME_SIDE');
+            emitTelemetry({ traceId, symbol: diagnostic.symbol, side: diagnostic.side, setupType: 'UNKNOWN_CANDIDATE_SETUP', eventType: 'DECISION_MADE', eventTimestampUtc: new Date(diagnostic.timestamp).toISOString(), source: 'ORCHESTRATOR_T152_GUARD', candidateId: stableTelemetryId('candidate', traceId), decisionId: stableTelemetryId('decision', traceId), quality: { decision: 'DERIVED', openSameSideCount: 'DERIVED' }, data: { decision: 'BLOCK', reasonCode: 'SAME_SIDE_POSITION_BLOCKED', t152SameSideGuardEnabled: true, openSameSideCount: diagnostic.openSameSideCount } });
             console.log(
               `[SAME_SIDE_POSITION_BLOCKED] symbol=${diagnostic.symbol} side=${diagnostic.side} reason=EXISTING_${diagnostic.side}_OPEN openSameSideCount=${diagnostic.openSameSideCount}`,
             );
@@ -781,6 +891,7 @@ async function main(): Promise<void> {
       ),
     }),
     onMismatch: (result) => {
+      emitTelemetry({ traceId: stableTelemetryId('reconcile', result.timestamp), symbol: 'PORTFOLIO', side: 'NONE', setupType: 'NOT_APPLICABLE', eventType: 'POSITION_RECONCILED', eventTimestampUtc: new Date(result.timestamp).toISOString(), source: 'STATE_RECONCILER', quality: { internalState: 'DERIVED', exchangeState: 'OBSERVED' }, data: { status: 'MISMATCH', mismatches: result.mismatches, internalBalanceUsd: result.internalBalanceUsd, exchangeBalanceUsd: result.exchangeBalanceUsd, internalPositions: result.internalPositions, exchangePositions: result.exchangePositions } });
       console.warn(`[RECONCILE_MISMATCH] ${result.mismatches.length} lệch được phát hiện:`);
       for (const m of result.mismatches) console.warn(`  - ${m.type}: ${m.detail}`);
 
@@ -792,6 +903,18 @@ async function main(): Promise<void> {
       accountBalance = resolveAccountBalanceAfterReconcile(accountBalance, result);
       if (accountBalance !== oldBalance) {
         console.warn(`[RECONCILE_BALANCE_OVERRIDE] accountBalance ghi đè theo đúng số Sàn: $${oldBalance.toFixed(2)} → $${accountBalance.toFixed(2)}`);
+      }
+
+      // TICKET — Exchange-Authoritative Live Balance §7: this periodic reconciler runs on its OWN
+      // timer (not the frozen tick loop below), so it's the only thing that can UN-block entries once
+      // a per-event divergence froze the tick loop entirely. Cleared only when THIS cycle shows no
+      // BALANCE_MISMATCH — the per-event block is a stricter, event-level check than this sweep's
+      // own tolerance, so this is a conservative "confirmed OK now" signal, not a weaker override.
+      if (entriesBlockedDueToBalanceDivergence && !result.mismatches.some((m) => m.type === 'BALANCE_MISMATCH')) {
+        entriesBlockedDueToBalanceDivergence = false;
+        balanceDivergenceWarningSent = false;
+        console.log('[BALANCE_DIVERGENCE_RESOLVED] đối soát định kỳ xác nhận số dư đã khớp — bỏ chặn lệnh mới.');
+        telegramQueue.enqueue('✅ [ĐỐI SOÁT SỐ DƯ OK] Số dư nội bộ đã khớp lại với sàn — đã bỏ chặn lệnh mới.');
       }
 
       console.log(`[SUMMARY] regimeChangeCount=${regimeChangeCount}, willOpenCount(dryRun)=${willOpenCount}, tickErrorCount=${tickErrorCount}, oodGuardEnabled=${OOD_GUARD_ENABLED}, oodGuardShortEvalCount=${oodGuardShortEvalCount}, oodGuardFlaggedCount=${oodGuardFlaggedCount}, oodGuardFlaggedPassedCount=${oodGuardFlaggedPassedCount}`);
@@ -815,6 +938,12 @@ async function main(): Promise<void> {
     },
     onClean: () => {
       console.log(`[RECONCILE] OK — nội bộ khớp với sàn.`);
+      if (entriesBlockedDueToBalanceDivergence) {
+        entriesBlockedDueToBalanceDivergence = false;
+        balanceDivergenceWarningSent = false;
+        console.log('[BALANCE_DIVERGENCE_RESOLVED] đối soát định kỳ xác nhận số dư đã khớp — bỏ chặn lệnh mới.');
+        telegramQueue.enqueue('✅ [ĐỐI SOÁT SỐ DƯ OK] Số dư nội bộ đã khớp lại với sàn — đã bỏ chặn lệnh mới.');
+      }
       console.log(`[SUMMARY] regimeChangeCount=${regimeChangeCount}, willOpenCount(dryRun)=${willOpenCount}, tickErrorCount=${tickErrorCount}, oodGuardEnabled=${OOD_GUARD_ENABLED}, oodGuardShortEvalCount=${oodGuardShortEvalCount}, oodGuardFlaggedCount=${oodGuardFlaggedCount}, oodGuardFlaggedPassedCount=${oodGuardFlaggedPassedCount}`);
     },
     onError: (err) => console.error(`[RECONCILE_ERROR] (đã bắt, KHÔNG crash): ${err.message}`),
@@ -833,6 +962,8 @@ async function main(): Promise<void> {
     reconciler.stop();
     feed.stop();
     await telegramQueue.flush();
+    emitTelemetry({ traceId: stableTelemetryId('health', telemetry.getSessionId(), 'shutdown'), symbol: 'SYSTEM', side: 'NONE', setupType: 'NOT_APPLICABLE', eventType: 'TELEMETRY_HEALTH', source: 'LIVE_RUNNER', quality: { counters: 'OBSERVED' }, data: { ...telemetry.health } });
+    await telemetry.close();
     console.log(`Tổng kết phiên: regimeChangeCount=${regimeChangeCount}, willOpenCount(dryRun)=${willOpenCount}, tickErrorCount=${tickErrorCount}, oodGuardEnabled=${OOD_GUARD_ENABLED}, oodGuardShortEvalCount=${oodGuardShortEvalCount}, oodGuardFlaggedCount=${oodGuardFlaggedCount}, oodGuardFlaggedPassedCount=${oodGuardFlaggedPassedCount}`);
     process.exit(0);
   };
