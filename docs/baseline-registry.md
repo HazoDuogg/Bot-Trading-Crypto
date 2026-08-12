@@ -1,5 +1,20 @@
 # Vicion Bot V3 — Baseline Registry (TICKET-160A)
 
+> **MANIFEST NOTE (added TICKET-G1R-A "Freshness Bootstrap Hotfix", 2026-08-11)** — this file
+> (`docs/baseline-registry.md`) is the SOLE authoritative in-repo baseline registry. A separate note,
+> `memory/project_official_backtest_config.md` (outside this repo, at
+> `C:\Users\vinhhao\.claude\projects\D--testBotTrading\memory\project_official_backtest_config.md`),
+> also independently records the confirmed 8-flag production command/result for quick reference across
+> sessions — it is NOT a competing "official" source; it should always be read as a pointer BACK to
+> `PROD_8FLAG_POST_T152` below, whose numbers here (re-verified against real artifacts, with exact
+> command/evidence/hash) are the source of truth. As of 2026-08-10 (TICKET-160) the memory file already
+> self-corrected to match this registry (261 trades / $1505.44, T152-inclusive) and explicitly marks its
+> own older `494 trades / $2107.83` figure as superseded/stale — re-confirmed identical again this
+> session (2026-08-11, exact 8-flag command re-run, zero drift, see
+> `data/g1r-a-freshness-bootstrap-hotfix-report.md`). If the two documents ever disagree again in the
+> future, this registry wins by convention until reconciled, since it carries the full
+> re-verification evidence trail.
+
 Three distinctly-named baselines exist in this repository. They measure **different things** and must
 never be conflated as a single "active baseline." Each is locked in here with its exact numbers, exact
 semantics, and exact evidence path, re-verified from real artifacts at input commit `d1a124c`

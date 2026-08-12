@@ -31,6 +31,25 @@ export interface OpenTradeMeta {
   actualRiskDollar: number;
   marginRequired: number;
   riskMultiplier: number;
+  /**
+   * TICKET-G1R-A item 3 (Cách B lifetime ledger) — sum of computeTierNetPnl() for every TP tier
+   * already filled on THIS position (TP1/TP2), accumulated at each PARTIAL_CLOSE event. Audit-only
+   * by itself: accountBalance is still credited exactly once, at full CLOSE, via
+   * computeRealizedPnl() (unchanged) — this field never feeds into that crediting. It IS summed
+   * across the portfolio by the caller (backtest.ts/liveRunner.ts) into
+   * ProcessCandleInput.bookedRealizedPnlPortfolio so admission's risk-pool/margin checks see
+   * partial realized PnL before the position fully closes, without changing accountBalance's own
+   * crediting timing (see processCandle()'s use of accountBalanceForAdmission).
+   */
+  bookedRealizedPnl: number;
+  /**
+   * TICKET-G1R-A "Final Safety Hotfix" item 1 — distinguishes "managed, has a real protective SL"
+   * from "managed, but the SL fail-safe exhausted its retry budget without a confirmed-safe outcome
+   * (OPERATOR_REQUIRED or a failed emergency close) — still open on the exchange, still in
+   * openPositions/the risk ledger, but with NO verified protective SL". Never removed from
+   * openPositions just because it degrades — see liveRunner.ts's runAccountSyncCycleTick().
+   */
+  protectionStatus: 'PROTECTED' | 'PROTECTION_DEGRADED';
 }
 
 /**

@@ -1,31 +1,3 @@
-/**
- * TICKET-086 — the live-bot loop: wires liveCandleFeed.ts + orchestrator.ts + binanceOrderExecutor.ts
- * + stateReconciler.ts + the telegram/ module (TICKET-078) into ONE continuous process. Does NOT
- * touch any core Regime/Entry/XGBoost/Risk logic — processCandle() is called exactly the same way
- * backtest.ts already calls it, just fed live-polled candles instead of CSV rows.
- *
- * DESIGN: a REAL ManagedPositionState is tracked per open position (via SymbolState.openPositions,
- * same shape backtest.ts uses) and advanced by processCandle() itself on every live-closed 5m candle
- * — the SAME simulation backtest.ts trusts for 6 months of history. Whenever that simulation reports
- * a state change (new position, partial fill, full close, SL moved by trailing), this file issues the
- * matching REAL Binance order action (dryRun-gated) so the exchange's actual SL/TP orders track the
- * simulated position exactly. StateReconciler runs alongside as a SAFETY NET (log-only, never
- * auto-corrects, per its own TICKET-076 Phần D design) — not the primary signal source.
- *
- * KNOWN LIMITATIONS (honest, not hidden — see README before flipping dryRun=false):
- *   - TICKET-099 Phần A FIXED the old "rounded to a fixed decimal count" gap: BinanceOrderExecutor now
- *     loads real LOT_SIZE/PRICE_FILTER/MIN_NOTIONAL per symbol via loadExchangeInfo() at startup and
- *     rounds every real order's quantity/price to the correct stepSize/tickSize before sending — the
- *     roundQty()/roundPrice() helpers below are only a rough PRE-rounding for internal sizing math
- *     (e.g. tpQty = roundQty(quantity * tp.closePercent)); the executor's own rounding is authoritative.
- *   - No slippage simulated between a candle's close (what sizing/SL/TP prices are computed from) and
- *     the real MARKET fill price — same simplification backtest.ts's own report already documents.
- *   - LOW_LIQUIDITY regime is permanently unreachable here (candles5mSessionVolume omitted) — same
- *     "optional, omit = unreachable, no error" contract regime/types.ts already documents.
- *
- * Run: npm run build:scripts && node apps/bot/scripts-dist/liveRunner.js
- * ENV=testnet|mainnet in .env selects the Binance environment (default testnet, per envConfig.ts).
- */
 import 'dotenv/config';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -38,9 +10,35 @@ import {
   cancelAlgoOrderIdempotent,
   reconcileExternalPositionClose,
   ReconcileGuard,
+  reconcileExecutedOpenState,
+  performStartupRestartRecovery,
+  readLiveStateFileSafe,
+  writeLiveStateFileAtomic,
+  LIVE_STATE_SCHEMA_VERSION,
+  verifyProtectiveSlOrder,
+  verifyProtectiveTpOrder,
+  DEFAULT_POSITION_MODE,
+  PROTECTIVE_SL_ORDER_TYPES,
+  retryReconcileUnreconciledFillFromPositionRisk,
+  recoverMissingProtectiveSl,
+  DEFAULT_MISSING_PROTECTIVE_SL_FAILSAFE_POLICY,
+  checkMergedPositionAllocation,
+  createSingleFlightRunner,
+  isFreshnessEvidenceStale,
+  captureCoherentReconciliationSnapshotWithRetry,
+  runProtectiveOrderMonitorSweep,
+  decideSideRecovery,
+  type QtySource,
+  type LiveStateFile,
+  type AccountSyncState,
+  type MissingProtectiveSlFailsafePolicy,
+  type ProtectiveMonitorPositionInput,
+  type FreshnessEvidence,
+  type CoherentReconciliationSnapshotResult,
 } from '../dist/live/liveStateSync.js';
 import {
   syncBalanceForTelegramEvent,
+  parseExchangeBalanceSnapshot,
   formatBalanceDivergenceIncidentLog,
   formatBalanceDivergenceTelegramWarning,
   type ExchangeBalanceSnapshot,
@@ -81,34 +79,31 @@ import {
   formatSafetyState5mStabilizedChangeMessage,
   formatMomentumContextDecisionMessage,
 } from '../dist/telegram/messageFormatters.js';
+import { computeCurrentPositionRisk, rebuildPortfolioRisk, type KnownPositionForRisk, type UnknownExposureForRisk } from '../dist/risk/currentRisk.js';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
 const EXECUTION_TELEMETRY_ENABLED = process.env.EXECUTION_TELEMETRY_ENABLED === 'true';
 const TICK_INTERVAL_MS = 5_000; // how often we check "has a new 5m candle closed" — cheap, reads already-polled in-memory buffers only
+// TICKET-G1R-B (Runtime Wiring Pass) item 1 — in-run protective-order (SL/TP) monitor interval. NOT
+// the 5s tick loop (polling protective orders that often would burn rate-limit budget for no benefit)
+// — same order of magnitude as stateReconciler.ts's own DEFAULT_INTERVAL_MS (7 min), chosen at the
+// tighter end of the ticket's suggested 2-5 minute band since a naked position is the highest-severity
+// failure mode this ticket addresses.
+const ACCOUNT_SYNC_CYCLE_INTERVAL_MS = 5 * 60_000;
 
-// TICKET-124 — feature flag for TICKET-123's chosen production improvement (Variant B: V1 model +
-// OOD Risk Reduction guard on the SHORT MOMENTUM_DIRECT model, P97.5 emaRatioSlow threshold). Default
-// OFF (env var unset or anything other than 'true') so this file's behavior is byte-identical to every
-// ticket before this one unless explicitly opted in. PM-confirmed values below are copied verbatim
-// from `data/ticket123-final-decision-report.md` §6 (Variant B) — do NOT retune here without a fresh
-// backtest re-verification, same rule as the rest of CONFIG.
+// TICKET-124 — feature flag for TICKET-123's chosen production improvement
 const OOD_GUARD_ENABLED = process.env.OOD_GUARD_ENABLED === 'true';
-// TICKET-139 — opt-in, default-inert HTFContext/SafetyState5m split diagnostic. Default OFF (env
-// var unset or anything other than 'true'). Diagnostic Telegram messages only — never gates or
-// sizes any trade. See OrchestratorConfig.htfSafetySplitDiagnosticEnabled's doc comment.
+// TICKET-G1R-A item 1 — default OPERATOR_REQUIRED per the ticket's own explicit guidance (safer:
+// never auto-closes a real position without a human). Set MISSING_PROTECTIVE_SL_FAILSAFE_POLICY=
+// EMERGENCY_CLOSE in the environment to opt into automatic market-close on exhausted SL recovery.
+const MISSING_PROTECTIVE_SL_FAILSAFE_POLICY: MissingProtectiveSlFailsafePolicy =
+  process.env.MISSING_PROTECTIVE_SL_FAILSAFE_POLICY === 'EMERGENCY_CLOSE' ? 'EMERGENCY_CLOSE' : DEFAULT_MISSING_PROTECTIVE_SL_FAILSAFE_POLICY;
 const HTF_SAFETY_SPLIT_DIAGNOSTIC_ENABLED = process.env.HTF_SAFETY_SPLIT_DIAGNOSTIC_ENABLED === 'true';
-// TICKET-140 — opt-in, default-inert SafetyState5m transition stabilization diagnostic. Default OFF
-// (env var unset or anything other than 'true'). Diagnostic Telegram messages only — never gates or
-// sizes any trade. See OrchestratorConfig.safetyState5mStabilizationEnabled's doc comment.
 const SAFETY_STATE_5M_STABILIZATION_ENABLED = process.env.SAFETY_STATE_5M_STABILIZATION_ENABLED === 'true';
 const OOD_GUARD_EMA_RATIO_SLOW_THRESHOLD = 1.037776; // Bearish TRAIN-split P97.5, TICKET-122/123
 const OOD_GUARD_RISK_REDUCTION_MULTIPLIER = 0.3; // TICKET-122/123 Risk Reduction P97.5 variant
 
 // Official confirmed live config — TICKET-084/085's 8-flag baseline + risk-dollar-or-percent=15/
-// max-margin-cap=37.5 (real $100 capital scale, PM-confirmed risk$15/lệnh) + obSlBufferAtrMultiplier=0.87
-// (TICKET-091) + momentumDirectMinSlPercent=1.27 (TICKET-093). Do NOT change any value here without a
-// PM-confirmed backtest re-verification (see memory/project_official_backtest_config.md) — this file
-// only WIRES the already-decided config into a live loop, it doesn't decide the config.
 const CONFIG: OrchestratorConfig = {
   entryRouterConfig: { ...DEFAULT_ENTRY_ROUTER_CONFIG, obSlBufferAtrMultiplier: 0.87, macroTrendFilterEnabled: true },
   tpPlan: 'PLAN_A',
@@ -135,18 +130,16 @@ const CONFIG: OrchestratorConfig = {
   // TICKET-124: undefined (guard fully inert) unless OOD_GUARD_ENABLED=true is set in the environment.
   ...(OOD_GUARD_ENABLED
     ? {
-        oodGuardConfig: {
-          mode: 'RISK_REDUCTION' as const,
-          emaRatioSlowThreshold: OOD_GUARD_EMA_RATIO_SLOW_THRESHOLD,
-          scoreCapValue: 0, // unused in RISK_REDUCTION mode
-          riskReductionMultiplier: OOD_GUARD_RISK_REDUCTION_MULTIPLIER,
-        },
-      }
+      oodGuardConfig: {
+        mode: 'RISK_REDUCTION' as const,
+        emaRatioSlowThreshold: OOD_GUARD_EMA_RATIO_SLOW_THRESHOLD,
+        scoreCapValue: 0, // unused in RISK_REDUCTION mode
+        riskReductionMultiplier: OOD_GUARD_RISK_REDUCTION_MULTIPLIER,
+      },
+    }
     : {}),
   htfSafetySplitDiagnosticEnabled: HTF_SAFETY_SPLIT_DIAGNOSTIC_ENABLED,
   safetyState5mStabilizationEnabled: SAFETY_STATE_5M_STABILIZATION_ENABLED,
-  // TICKET-143A/144: explicitly activated live per user confirmation 2026-08-06. Real-money-affecting
-  // switch — BTCUSDT/ETHUSDT+macroConflict now BLOCK, SOLUSDT/XRPUSDT+macroConflict now ALLOW_REDUCED_RISK@0.30.
   momentumContextDecisionMatrixV2Enabled: true,
 };
 
@@ -155,13 +148,18 @@ const WINDOW_15M = 325;
 const WINDOW_1H = 40;
 const WINDOW_1M = 200;
 const WINDOW_1D = 40;
-// TICKET-106 (TODO_CONFIRM): was 250 — TICKET-104 proved emaSeries()'s SMA-seeded EMA(200) is still
-// ~61% seed-weighted at 250 candles, making emaRatioSlow/momentumScore sensitive to exactly which
-// candles land in the window (this is what caused the live-vs-offline momentumScore mismatch).
-// Empirically converges by ~400; bumped to 500 for margin. MUST stay identical to backtest.ts's
-// WINDOW_1H_MOMENTUM — a mismatch here is exactly the root cause TICKET-104 found.
-// LiveCandleFeed's own 1h buffer is configured to this size below; we slice the last 40 of it for candles1h.
 const WINDOW_1H_MOMENTUM = 500;
+
+/**
+ * TICKET-G1R Checkpoint B (G1-F05) — everything handleOpenEvent learned about the REAL fill, needed
+ * by the caller to reconcile the just-opened ManagedPositionState against actual execution instead of
+ * planned values. `null` in dryRun (nothing was actually executed, nothing to reconcile).
+ */
+interface OpenFillInfo {
+  canonicalQty: number;
+  qtySource: QtySource;
+  rawAvgPrice: unknown;
+}
 
 /** Per-open-position bookkeeping needed to keep the exchange's real algo orders in sync with the simulated ManagedPositionState. */
 interface LiveOrderIds {
@@ -214,35 +212,364 @@ async function main(): Promise<void> {
     },
   });
   await executor.syncClock();
-  // TICKET-099 Phần A: MUST load before any real order — every mutating BinanceOrderExecutor method
-  // now throws if a symbol's filters aren't cached yet, rather than falling back to a guessed rounding.
   await executor.loadExchangeInfo(SYMBOLS);
   console.log('exchangeInfo (LOT_SIZE/PRICE_FILTER/MIN_NOTIONAL) đã tải cho 4 coin.');
-
-  // TICKET-151 P0-B — stateReconciler.ts's own DEFAULT_QUANTITY_TOLERANCE (1e-8) is far tighter
-  // than any real lot-size rounding gap. compareStates() only takes a single scalar tolerance
-  // (kept unchanged/untouched — see stateReconciler.ts's own doc comments, still pure/log-only by
-  // design), so this uses the COARSEST stepSize across all 4 traded symbols as a conservative
-  // global bound — real per-symbol precision is applied where it matters (the active
-  // reconcile/sync decision below, via liveStateSync.ts's checkQuantityMismatch()/
-  // computeQuantityTolerance()), this value only controls whether stateReconciler.ts's periodic
-  // LOG-ONLY sweep flags POSITION_SIZE_MISMATCH at all.
   const reconcilerQuantityTolerance = computeQuantityTolerance(Math.max(...SYMBOLS.map((s) => executor.getSymbolFilters(s).stepSize)));
+  // TICKET-G1R Checkpoint C — real per-symbol tolerance for the ownership-proof check in
+  // performStartupRestartRecovery() below (unlike reconcilerQuantityTolerance above, which is
+  // deliberately the coarsest bound across all 4 symbols for stateReconciler.ts's single-scalar API).
+  const quantityToleranceBySymbol: Record<string, number> = Object.fromEntries(SYMBOLS.map((s) => [s, computeQuantityTolerance(executor.getSymbolFilters(s).stepSize)]));
 
   // TICKET-100: CHỦ ĐỘNG đặt đúng CONFIG.leverage cho cả 4 symbol — không tin tưởng cấu hình có sẵn
   // trên sàn (có thể lệch, gây sai risk$ thật ở mọi phép tính size sau này). "Đang có vị thế mở" ->
   // cảnh báo + tiếp tục (không crash); lỗi khác -> dừng khởi động (initializeLeverageForSymbols ném lại).
   await initializeLeverageForSymbols(executor, SYMBOLS, CONFIG.leverage);
 
-  const accountInfo = (await executor.getAccountInfo()) as { totalWalletBalance?: string };
-  let accountBalance = Number(accountInfo.totalWalletBalance);
-  if (!Number.isFinite(accountBalance) || accountBalance <= 0) {
-    throw new Error(`liveRunner: không đọc được totalWalletBalance hợp lệ từ getAccountInfo(): ${JSON.stringify(accountInfo)}`);
+  // TICKET-G1R-A "Final Internal Closure" item 1 — exchange-authoritative balance lifecycle.
+  //
+  // INVARIANT: `accountBalance` is a CACHE of the latest exchange-authoritative wallet balance, and
+  // `accountBalanceKnown` is false until a real exchange read has been PARSED and APPLIED. No
+  // admission may run while it is false. There is no simulated/default/$100 starting value anywhere
+  // in this path — the startup read below throws rather than inventing one.
+  //
+  // ANTI-TIME-TRAVEL: every observation carries capturedAt/source/requestId (same shape as
+  // liveStateSync.ts's DataSourceRead). An observation OLDER than the one currently held is
+  // rejected — otherwise a slow event-time read could clobber a newer periodic-snapshot value.
+  interface BalanceObservation {
+    walletBalance: number;
+    capturedAt: number;
+    source: string;
+    requestId: string;
   }
-  console.log(`Vốn hiện tại (từ sàn): $${accountBalance.toFixed(2)}`);
+  let accountBalance = 0;
+  let accountBalanceKnown = false;
+  let lastSuccessfulBalanceReadMs: number | null = null;
+  let currentBalanceObservation: BalanceObservation | null = null;
+  let balanceObservationCounter = 0;
+
+  /**
+   * The ONLY place `accountBalance` is set from an exchange read. Applies value + provenance +
+   * freshness timestamp ATOMICALLY (the pre-fix bug set the freshness timestamp on a validated
+   * snapshot while never applying the snapshot's balance VALUE, so "fresh" could describe a stale
+   * number). Returns false when the observation was rejected as out-of-order — in which case
+   * NOTHING is mutated, including `lastSuccessfulBalanceReadMs`.
+   */
+  function applyBalanceObservation(obs: BalanceObservation): boolean {
+    if (currentBalanceObservation !== null && obs.capturedAt < currentBalanceObservation.capturedAt) {
+      console.warn(
+        `[BALANCE_OBSERVATION_STALE_IGNORED] bỏ qua quan sát balance CŨ HƠN giá trị đang giữ: ` +
+        `source=${obs.source} capturedAt=${obs.capturedAt} < đang giữ source=${currentBalanceObservation.source} capturedAt=${currentBalanceObservation.capturedAt}`,
+      );
+      return false;
+    }
+    currentBalanceObservation = obs;
+    accountBalance = obs.walletBalance;
+    accountBalanceKnown = true;
+    lastSuccessfulBalanceReadMs = obs.capturedAt;
+    return true;
+  }
+
+  /** Parses a raw getAccountInfo() payload with the single canonical parser and applies it. Returns null (and touches nothing) on a parse failure — a failed parse must NEVER be marked fresh. */
+  function parseAndApplyBalance(raw: unknown, source: string, capturedAt: number): BalanceObservation | null {
+    try {
+      const snapshot = parseExchangeBalanceSnapshot(raw, capturedAt);
+      balanceObservationCounter += 1;
+      const obs: BalanceObservation = { walletBalance: snapshot.walletBalance, capturedAt, source, requestId: `bal-${capturedAt}-${balanceObservationCounter}` };
+      return applyBalanceObservation(obs) ? obs : null;
+    } catch (err) {
+      console.error(`[BALANCE_PARSE_FAILED] source=${source}: ${(err as Error).message} — KHÔNG cập nhật accountBalance, KHÔNG đánh dấu fresh.`);
+      return null;
+    }
+  }
+
+  const startupBalanceRaw = await executor.getAccountInfo();
+  const startupBalanceObs = parseAndApplyBalance(startupBalanceRaw, 'startup:getAccountInfo', Date.now());
+  if (startupBalanceObs === null) {
+    throw new Error('liveRunner: không parse được balance hợp lệ từ getAccountInfo() lúc khởi động — dừng, KHÔNG dùng giá trị mặc định nào.');
+  }
+  if (startupBalanceObs.walletBalance <= 0) {
+    throw new Error(`liveRunner: totalWalletBalance từ sàn = ${startupBalanceObs.walletBalance} (<= 0) — dừng khởi động.`);
+  }
+  console.log(`Vốn hiện tại (từ sàn): $${startupBalanceObs.walletBalance.toFixed(2)} (source=${startupBalanceObs.source})`);
 
   const telegramConfig = loadTelegramConfig();
   const telegramQueue = new TelegramMessageQueue(telegramConfig);
+
+  // TICKET-G1R Checkpoint C (G1-F14) — restart persistence + startup reconciliation. Runs BEFORE
+  // the candle feed / tick loop start below so no candle is ever processed against an unreconciled
+  // guess of what's open. Never assumes "clean start": always reads real exchange positions and
+  // combines them with whatever was persisted from the LAST run (schemaVersioned JSON file, written
+  // atomically — see liveStateSync.ts's writeLiveStateFileAtomic/readLiveStateFileSafe). A persisted
+  // position is only recovered when the exchange's own qty for that symbol+side proves ownership
+  // (matches within a stepSize-based tolerance); anything else is quarantined, never auto-adopted.
+  const LIVE_STATE_FILE_PATH = path.resolve(process.cwd(), process.env.LIVE_STATE_FILE ?? 'data/live-state/positions-state.json');
+  const persistedLiveState = readLiveStateFileSafe(LIVE_STATE_FILE_PATH);
+  if (persistedLiveState.status === 'CORRUPT') {
+    console.error(
+      `[LIVE_STATE_CORRUPT] file trạng thái persisted lỗi/hỏng (${LIVE_STATE_FILE_PATH}): ${persistedLiveState.error} — coi như KHÔNG có persisted state; mọi vị thế trên sàn không chứng minh được ownership sẽ bị quarantine.`,
+    );
+  }
+  console.log(`[LIVE_STATE] persisted=${persistedLiveState.status}${persistedLiveState.status === 'OK' ? ` (savedAtMs=${new Date(persistedLiveState.file.savedAtMs).toISOString()})` : ''}`);
+
+  const restartRecovery = await performStartupRestartRecovery({
+    executor,
+    symbols: SYMBOLS,
+    persisted: persistedLiveState,
+    quantityToleranceBySymbol,
+    initialSymbolState: INITIAL_SYMBOL_STATE,
+  });
+  if (!restartRecovery.ok) {
+    // Fail-safe per the ticket's explicit rule: never proceed to trade with an unknown state. This
+    // aborts startup entirely (main().catch() below logs + process.exit(1)) rather than starting a
+    // "silently inert" process that looks alive but can never trade — simpler to operate/monitor and
+    // impossible to mistake for a working bot.
+    throw new Error(`liveRunner: đối soát khởi động (restart recovery) thất bại — dừng khởi động, KHÔNG giao dịch với trạng thái chưa xác định. ${restartRecovery.reason}`);
+  }
+
+  const runnerState: Record<string, RunnerSymbolState> = {};
+  // TICKET-G1R Checkpoint C — symbols quarantined at startup (PENDING_RECONCILIATION): checked in the
+  // tick loop below (same "freeze this symbol, never auto-resolve" pattern as reconcileGuard/
+  // entriesBlockedDueToUnreconciledFillBySymbol) and ALSO grown at runtime whenever the periodic
+  // stateReconciler later observes POSITION_MISSING_INTERNALLY (see reconciler.onMismatch below) —
+  // permanent for the life of this process either way, same rationale as the other permanent blocks.
+  const entriesBlockedDueToRestartQuarantineBySymbol = new Set<string>();
+  // TICKET-G1R Checkpoint D (G1-F04) — conservative risk-ledger entries for every QUARANTINED side
+  // found at startup: NEVER risk=0 just because local state doesn't cover it. When the persisted file
+  // (loaded above, before decideSideRecovery/recoverSymbolState ran) still has a last-known-good
+  // position for that symbol+side, its entry/SL/qty is used as a conservative basis (last-known state,
+  // per the ticket's own suggested fallback). When there's no persisted record at all (a pure
+  // exchange-only ghost position), `basis: null` — genuinely unquantifiable, never guessed at.
+  const quarantinedUnknownExposures: UnknownExposureForRisk[] = [];
+  const restartRecoverySummaryLines: string[] = [];
+  for (const outcome of restartRecovery.symbols) {
+    runnerState[outcome.symbol] = { symbolState: outcome.symbolState, lastProcessedCandleTimestamp: null, orderIds: new Map(outcome.orderIds) };
+    for (const side of outcome.sideOutcomes) {
+      if (side.status === 'CLEAN') continue; // not worth a startup log line per symbol×side×4
+      console.log(`[RESTART_RECOVERY] ${outcome.symbol} ${side.side}: ${side.status} — ${side.detail}`);
+      restartRecoverySummaryLines.push(`${outcome.symbol} ${side.side}: ${side.status}`);
+    }
+    if (outcome.blockEntries) {
+      entriesBlockedDueToRestartQuarantineBySymbol.add(outcome.symbol);
+      const quarantinedSides = outcome.sideOutcomes.filter((s) => s.status === 'QUARANTINED');
+      const quarantineDetail = quarantinedSides.map((s) => `${s.side}: ${s.detail}`).join(' | ');
+      console.error(`[RESTART_RECOVERY_QUARANTINE] ${outcome.symbol}: PENDING_RECONCILIATION — chặn mở lệnh mới trên ${outcome.symbol} cho tới khi kiểm tra thủ công. ${quarantineDetail}`);
+      telegramQueue.enqueue(`⚠️ [PENDING_RECONCILIATION] ${outcome.symbol} lúc khởi động: ${quarantineDetail}\nĐÃ CHẶN mở lệnh mới trên ${outcome.symbol} — cần kiểm tra thủ công.`);
+
+      const persistedFileForExposure = persistedLiveState.status === 'OK' ? persistedLiveState.file : null;
+      for (const s of quarantinedSides) {
+        const lastKnown = (persistedFileForExposure?.symbols[outcome.symbol]?.symbolState.openPositions ?? []).filter((e) => e.position.side === s.side);
+        if (lastKnown.length === 0) {
+          quarantinedUnknownExposures.push({ id: `${outcome.symbol}:${s.side}:QUARANTINED`, basis: null });
+        } else {
+          for (const [idx, e] of lastKnown.entries()) {
+            quarantinedUnknownExposures.push({
+              id: `${outcome.symbol}:${s.side}:QUARANTINED:${idx}`,
+              basis: { side: e.position.side, entryPrice: e.position.entryPrice, currentSlPrice: e.position.currentSlPrice, remainingPositionSize: e.position.remainingPositionSize },
+            });
+          }
+        }
+      }
+    }
+  }
+  if (quarantinedUnknownExposures.length > 0) {
+    // TICKET-G1R Checkpoint D (G1-F04) — visibility only: the REAL current risk ledger (known
+    // positions across all 4 symbols, rebuilt fresh, plus every quarantined UNKNOWN_EXPOSURE found
+    // above) so an operator can see the honest total the admission block below is protecting against,
+    // not just "some symbol is quarantined".
+    const knownAtStartup: KnownPositionForRisk[] = SYMBOLS.flatMap((s) => runnerState[s].symbolState.openPositions.map((e) => ({ id: s, basis: e.position })));
+    const startupLedger = rebuildPortfolioRisk({ knownPositions: knownAtStartup, unknownExposures: quarantinedUnknownExposures });
+    console.error(
+      `[RISK_LEDGER_UNKNOWN_EXPOSURE] totalRiskDollar(known+quarantined)=${startupLedger.totalRiskDollar.toFixed(4)} hasUnquantifiableExposure=${startupLedger.hasUnquantifiableExposure} entries=${JSON.stringify(startupLedger.entries)}`,
+    );
+  }
+
+  /** TICKET-G1R Checkpoint C — persists ALL 4 symbols' current SymbolState + orderIds in one atomic write. Never throws — a persist failure is logged loudly but must not crash the live loop (same "đã bắt, KHÔNG crash" convention as every other catch in this file). */
+  function persistLiveState(): void {
+    try {
+      const file: LiveStateFile = {
+        schemaVersion: LIVE_STATE_SCHEMA_VERSION,
+        savedAtMs: Date.now(),
+        symbols: Object.fromEntries(SYMBOLS.map((s) => [s, { symbolState: runnerState[s].symbolState, orderIds: Array.from(runnerState[s].orderIds.entries()) }])),
+      };
+      writeLiveStateFileAtomic(LIVE_STATE_FILE_PATH, file);
+    } catch (err) {
+      console.error(`[LIVE_STATE_PERSIST_ERROR] ghi trạng thái thất bại (đã bắt, KHÔNG crash tiến trình): ${(err as Error).message}`);
+    }
+  }
+  persistLiveState(); // immediately overwrite a missing/corrupt file with the just-recovered, trusted state
+
+  // TICKET-G1R Final Closure item 3 — explicit exchange-sync admission state. Starts SYNCED: startup
+  // only reaches this point after performStartupRestartRecovery()'s getPositionRisk() read already
+  // succeeded above, which IS a successful full read. Flipped to ACCOUNT_STATE_UNKNOWN by any
+  // balance-read failure (refreshBalanceForTelegram) or protective-order-read failure (immediately
+  // below, and see the tick-loop wiring further down) — never by a timer. Flipped back to SYNCED only
+  // after ONE subsequent evidence-based full resync succeeds (see refreshBalanceForTelegram below).
+  let accountSyncState: AccountSyncState = 'SYNCED';
+
+  // TICKET-G1R-A "Final Safety Hotfix" item 5 — hybrid multi-frequency freshness policy. Balance stays
+  // on its existing FAST per-event cadence (refreshBalanceForTelegram(), unchanged) — this only tracks
+  // WHEN each source last succeeded so admission can fail closed if either goes stale, without slowing
+  // down the fast path itself. Both start null (never captured yet) -> isFreshnessEvidenceStale()
+  // treats null as stale, so admission is blocked until the first successful read/cycle of EACH,
+  // exactly like accountSyncState's own "SYNCED only after real evidence" convention.
+  const BALANCE_FRESHNESS_MAX_AGE_MS = 5 * 60_000; // generous vs. the sub-second per-event cadence — only trips if reads stop happening entirely
+  const PROTECTIVE_CYCLE_FRESHNESS_MAX_AGE_MS = ACCOUNT_SYNC_CYCLE_INTERVAL_MS * 2; // tolerate exactly one missed/slow cycle before failing closed
+  // NOTE: `lastSuccessfulBalanceReadMs` is declared ABOVE (with the item-1 balance lifecycle block)
+  // because applyBalanceObservation() writes it — it must not be in the TDZ when the startup read runs.
+  let lastSuccessfulAccountSyncCycleMs: number | null = null;
+  function balanceFreshnessEvidence(): FreshnessEvidence | null {
+    return lastSuccessfulBalanceReadMs === null ? null : { capturedAtMs: lastSuccessfulBalanceReadMs, maxAgeMs: BALANCE_FRESHNESS_MAX_AGE_MS, source: currentBalanceObservation?.source ?? 'unknown' };
+  }
+  function protectiveCycleFreshnessEvidence(): FreshnessEvidence | null {
+    return lastSuccessfulAccountSyncCycleMs === null ? null : { capturedAtMs: lastSuccessfulAccountSyncCycleMs, maxAgeMs: PROTECTIVE_CYCLE_FRESHNESS_MAX_AGE_MS, source: 'runAccountSyncCycleTick' };
+  }
+
+  // TICKET-G1R-A "Final Safety Hotfix" item 1 — positions whose protective SL fail-safe exhausted its
+  // retry budget WITHOUT a confirmed-safe outcome (OPERATOR_REQUIRED, or a market close that could not
+  // be verified). Still fully managed (still in openPositions/orderIds/the risk ledger, see
+  // runAccountSyncCycleTick below) — this Set exists ONLY to (a) block admission portfolio-wide while
+  // any entry is degraded and (b) throttle the repeated CRITICAL Telegram alert per position (keyed by
+  // `${symbol}:${entryTimestamp}`) so every 5-minute retry cycle doesn't spam a fresh message.
+  const protectionDegradedAlertLastSentMsByKey = new Map<string, number>();
+  const PROTECTION_DEGRADED_ALERT_RESEND_MS = 30 * 60_000; // re-nag every 30 min while still degraded, not every 5-min cycle
+  function hasAnyProtectionDegradedPosition(): boolean {
+    return SYMBOLS.some((s) => runnerState[s].symbolState.openPositions.some((e) => e.meta.protectionStatus === 'PROTECTION_DEGRADED'));
+  }
+
+  // TICKET-G1R Final Closure item 2 — protective-order (SL) ownership verification for every
+  // RECOVERED position from restart recovery above. Checkpoint C's known limitation #2 (persisted
+  // algoIds trusted, never re-verified against a live open-orders query) is closed here: for each
+  // symbol with at least one RECOVERED side carrying a persisted slAlgoId, read the REAL open algo
+  // orders for that symbol and verify the SL algoId is still open, correct side, correct qty. A
+  // non-VERIFIED result NEVER auto-replaces/cancels anything — it quarantines the position (reuses
+  // Checkpoint C's exact PENDING_RECONCILIATION mechanism: entriesBlockedDueToRestartQuarantineBySymbol
+  // + removal from openPositions + a conservative UNKNOWN_EXPOSURE risk-ledger entry), same as a
+  // failed qty ownership-proof. A read failure (network/endpoint error — see getOpenAlgoOrders()'s own
+  // HONEST VERIFICATION GAP doc comment: the exact endpoint path is unconfirmed against real Binance
+  // docs this session) flips accountSyncState to ACCOUNT_STATE_UNKNOWN (item 3) rather than silently
+  // treating the position as protected.
+  // TICKET-G1R-B (Runtime Wiring Pass) item 3 — TP verification wired at startup (same call site as
+  // SL, per the ticket's explicit requirement). WARNING-only (log + Telegram), NEVER escalates through
+  // recoverMissingProtectiveSl()/quarantine — a missing/wrong TP still leaves the position SL-protected.
+  // expectedQty per tier uses the RECONCILED (post-G1-F05) `positionSize` basis, not the position's
+  // current (possibly TP1-shrunk) remainingPositionSize — each TP tier's own order was sized as a fixed
+  // fraction of the ORIGINAL reconciled notional at open time and never re-placed afterward.
+  function verifyTpTiersAndWarn(symbol: string, entry: OpenPositionEntry, ids: LiveOrderIds, openAlgoOrders: Awaited<ReturnType<typeof executor.getOpenAlgoOrders>>): void {
+    const nonRunnerTiers = entry.position.tpLevels.filter((t) => t.price !== null);
+    const originalBaseQty = entry.position.positionSize / entry.position.entryPrice;
+    for (let i = 0; i < ids.tpAlgoIds.length; i++) {
+      const tpAlgoId = ids.tpAlgoIds[i];
+      const tier = nonRunnerTiers[i];
+      if (!tier) continue;
+      const alreadyFilled = entry.position.filledTiers.includes(tier.label);
+      const found = openAlgoOrders.find((o) => o.algoId === tpAlgoId);
+      if (alreadyFilled) {
+        if (found) {
+          console.warn(`[PROTECTIVE_TP_STALE] ${symbol} ${entry.position.side} tier=${tier.label}: algoId=${tpAlgoId} đã fill nhưng vẫn còn resting trên sàn — cần dọn, KHÔNG nghiêm trọng bằng SL.`);
+          telegramQueue.enqueue(`⚠️ [TP DƯ THỪA] ${symbol} ${entry.position.side} ${tier.label}: lệnh TP đã fill vẫn còn resting trên sàn — cần kiểm tra/dọn.`);
+        }
+        continue;
+      }
+      const expectedTierQty = tier.closePercent * originalBaseQty;
+      // item 4 — full semantic verification (symbol/positionSide/orderType/triggerPrice/reduceOnly),
+      // same depth as the periodic sweep in liveStateSync.ts.
+      const verification = verifyProtectiveTpOrder({
+        tpAlgoId,
+        expectedSide: entry.position.side,
+        expectedQty: expectedTierQty,
+        quantityTolerance: quantityToleranceBySymbol[symbol],
+        openAlgoOrders,
+        expectedSymbol: symbol,
+        expectedTriggerPrice: tier.price ?? undefined,
+        positionMode: DEFAULT_POSITION_MODE,
+      });
+      if (verification.status !== 'VERIFIED') {
+        console.warn(`[PROTECTIVE_TP_VERIFY_WARNING] ${symbol} ${entry.position.side} tier=${tier.label}: status=${verification.status} — ${verification.detail}`);
+        telegramQueue.enqueue(`⚠️ [TP CẢNH BÁO] ${symbol} ${entry.position.side} ${tier.label}: ${verification.status} — ${verification.detail}`);
+      }
+    }
+  }
+
+  for (const outcome of restartRecovery.symbols) {
+    const rsForVerify = runnerState[outcome.symbol];
+    const positionsToVerify = rsForVerify.symbolState.openPositions.filter((e) => rsForVerify.orderIds.get(e.meta.entryTimestamp)?.slAlgoId != null);
+    if (positionsToVerify.length === 0) continue;
+    let openAlgoOrders: Awaited<ReturnType<typeof executor.getOpenAlgoOrders>>;
+    try {
+      openAlgoOrders = await executor.getOpenAlgoOrders(outcome.symbol);
+    } catch (err) {
+      accountSyncState = 'ACCOUNT_STATE_UNKNOWN';
+      console.error(
+        `[PROTECTIVE_ORDER_VERIFY_READ_ERROR] ${outcome.symbol}: getOpenAlgoOrders() lỗi khi xác minh SL/TP thật sau restart — accountSyncState=ACCOUNT_STATE_UNKNOWN, chặn admission TOÀN PORTFOLIO cho tới khi đồng bộ lại thành công. Chi tiết: ${(err as Error).message}`,
+      );
+      telegramQueue.enqueue(`⚠️ [ACCOUNT_STATE_UNKNOWN] Không đọc được open algo orders thật cho ${outcome.symbol} lúc khởi động — ĐÃ CHẶN mở lệnh mới TOÀN BỘ 4 coin cho tới khi đồng bộ lại thành công.`);
+      continue;
+    }
+    for (const entry of positionsToVerify) {
+      const ids = rsForVerify.orderIds.get(entry.meta.entryTimestamp)!;
+      const expectedQty = entry.position.remainingPositionSize / entry.position.entryPrice;
+      const verification = verifyProtectiveSlOrder({
+        persistedSlAlgoId: ids.slAlgoId,
+        expectedSide: entry.position.side,
+        expectedQty,
+        quantityTolerance: quantityToleranceBySymbol[outcome.symbol],
+        openAlgoOrders,
+        // item 4 — full semantic verification on the restart-recovery path too.
+        expectedSymbol: outcome.symbol,
+        expectedTriggerPrice: entry.position.currentSlPrice,
+        positionMode: DEFAULT_POSITION_MODE,
+        expectedOrderTypes: PROTECTIVE_SL_ORDER_TYPES,
+      });
+      if (verification.status === 'VERIFIED') {
+        verifyTpTiersAndWarn(outcome.symbol, entry, ids, openAlgoOrders);
+        continue;
+      }
+      // TICKET-G1R-A item 1 — this position already proved ownership (RECOVERED, Checkpoint C) BEFORE
+      // reaching this loop (only recovered sides ever land in symbolState.openPositions — see
+      // recoverSymbolState()), so it qualifies for the fail-safe RECOVERY attempt instead of an
+      // immediate quarantine-and-give-up. Never called for a QUARANTINED/unverified position (those
+      // never reach this loop at all — filtered out of openPositions before this file even starts).
+      // The whole portfolio is trivially blocked for the duration of this attempt: this runs at
+      // startup, synchronously awaited, BEFORE the tick loop (and therefore before any admission
+      // check) ever runs.
+      console.error(`[PROTECTIVE_ORDER_VERIFY_FAILED] ${outcome.symbol} ${entry.position.side} entryTimestamp=${entry.meta.entryTimestamp}: status=${verification.status} — ${verification.detail}. Thử phục hồi SL trước khi quarantine.`);
+      const recovery = await recoverMissingProtectiveSl({
+        executor,
+        symbol: outcome.symbol,
+        expectedSide: entry.position.side,
+        expectedQty,
+        quantityTolerance: quantityToleranceBySymbol[outcome.symbol],
+        slTriggerPrice: entry.position.currentSlPrice,
+        policy: MISSING_PROTECTIVE_SL_FAILSAFE_POLICY,
+      });
+      if (recovery.status === 'RECOVERED' || recovery.status === 'ALREADY_RECOVERED_ON_RESTART') {
+        console.log(`[PROTECTIVE_SL_RECOVERED] ${outcome.symbol} ${entry.position.side}: ${recovery.detail}`);
+        telegramQueue.enqueue(`✅ [SL PHỤC HỒI] ${outcome.symbol} ${entry.position.side}: ${recovery.detail}`);
+        ids.slAlgoId = recovery.slAlgoId;
+        verifyTpTiersAndWarn(outcome.symbol, entry, ids, openAlgoOrders);
+        continue; // still managed — no quarantine, no removal from openPositions
+      }
+      if (recovery.status === 'EXHAUSTED_EMERGENCY_CLOSED') {
+        console.error(`[PROTECTIVE_SL_EMERGENCY_CLOSE] ${outcome.symbol} ${entry.position.side}: ${recovery.detail}`);
+        telegramQueue.enqueue(`🚨 [EMERGENCY_CLOSE] ${outcome.symbol} ${entry.position.side}: ${recovery.detail}`);
+      } else {
+        console.error(`[PROTECTIVE_SL_OPERATOR_REQUIRED] ${outcome.symbol} ${entry.position.side}: ${recovery.detail}`);
+        telegramQueue.enqueue(`🚨🚨 [CRITICAL — CẦN CAN THIỆP THỦ CÔNG] ${outcome.symbol} ${entry.position.side}: ${recovery.detail}`);
+      }
+      // Either way (emergency-closed for real, or left naked pending an operator): the position is no
+      // longer safely bot-managed — quarantine using the EXACT same mechanism as before this ticket.
+      entriesBlockedDueToRestartQuarantineBySymbol.add(outcome.symbol);
+      rsForVerify.symbolState.openPositions = rsForVerify.symbolState.openPositions.filter((e) => e.meta.entryTimestamp !== entry.meta.entryTimestamp);
+      quarantinedUnknownExposures.push({
+        id: `${outcome.symbol}:${entry.position.side}:PROTECTIVE_ORDER_${verification.status}_${recovery.status}`,
+        basis: { side: entry.position.side, entryPrice: entry.position.entryPrice, currentSlPrice: entry.position.currentSlPrice, remainingPositionSize: entry.position.remainingPositionSize },
+      });
+    }
+  }
+  if (accountSyncState === 'ACCOUNT_STATE_UNKNOWN') {
+    console.error('[ACCOUNT_STATE_UNKNOWN] khởi động tiếp tục nhưng CHẶN mở lệnh mới TOÀN PORTFOLIO cho tới khi một lần đồng bộ đầy đủ (balance+position+order) thành công.');
+  }
+  persistLiveState(); // re-persist: protective-order verification above may have removed quarantined positions from openPositions
 
   // TICKET-152 — dedupes the "SAME_SIDE_POSITION_BLOCKED" Telegram alert (log line is NOT deduped,
   // fires every tick the block condition re-fires — only Telegram is throttled). Keyed per
@@ -279,14 +606,10 @@ async function main(): Promise<void> {
       maxConcurrentPositionsPerSymbol: CONFIG.maxConcurrentPositionsPerSymbol,
       timestamp: Date.now(),
     }) +
-      `\n[OOD Guard (TICKET-124): ${OOD_GUARD_ENABLED ? 'BẬT — RISK_REDUCTION P97.5' : 'TẮT — chỉ theo dõi shadow'}]` +
-      (dryRun ? '\n\n[DRY-RUN MODE — chưa đặt lệnh thật]' : ''),
+    `\n[OOD Guard (TICKET-124): ${OOD_GUARD_ENABLED ? 'BẬT — RISK_REDUCTION P97.5' : 'TẮT — chỉ theo dõi shadow'}]` +
+    (restartRecoverySummaryLines.length > 0 ? `\n[RESTART RECOVERY]\n${restartRecoverySummaryLines.join('\n')}` : '\n[RESTART RECOVERY] không có vị thế/persisted state nào — khởi động sạch.') +
+    (dryRun ? '\n\n[DRY-RUN MODE — chưa đặt lệnh thật]' : ''),
   );
-
-  const runnerState: Record<string, RunnerSymbolState> = {};
-  for (const symbol of SYMBOLS) {
-    runnerState[symbol] = { symbolState: INITIAL_SYMBOL_STATE, lastProcessedCandleTimestamp: null, orderIds: new Map() };
-  }
 
   // TICKET-151 §11 — per-symbol in-flight reconcile marker. Checked before starting a new
   // external-close reconcile for a symbol (no double-close/double-release) AND at the top of this
@@ -300,6 +623,25 @@ async function main(): Promise<void> {
   // Global (not per-symbol) — balance is account-wide, not a single symbol's concern.
   let entriesBlockedDueToBalanceDivergence = false;
   let balanceDivergenceWarningSent = false;
+  // G1-F01: set by refreshBalanceForTelegram() whenever a fresh exchange read lands THIS symbol's
+  // tick; reset per-symbol below. Guards the end-of-symbol accountBalance assignment so a stale
+  // simulated result.accountBalance never clobbers an authoritative read obtained moments earlier
+  // in the same tick (was: unconditional `accountBalance = result.accountBalance`).
+  let exchangeBalanceRefreshedThisTick = false;
+
+  // TICKET-G1R Checkpoint B (G1-F05) — a symbol lands here when a just-opened position's real fill
+  // could not be reconciled with confidence (unconfirmed canonicalQty, or fill price implying a
+  // <=0 stop distance). Per-symbol (not account-wide, unlike balance divergence) and permanent for
+  // the life of this process — an unreconciled LIVE position's true risk/margin is unknown, so this
+  // requires a human to check the real exchange state before this symbol trades again; there is no
+  // safe automatic recovery condition to clear it on (contrast with balance divergence, which clears
+  // itself once a fresh read comes back within tolerance).
+  const entriesBlockedDueToUnreconciledFillBySymbol = new Set<string>();
+  // TICKET-G1R Final Closure item 4 — minimal context needed to retry a blocked symbol's
+  // reconciliation (which specific position, which side) without a restart. Populated alongside
+  // entriesBlockedDueToUnreconciledFillBySymbol.add() below, removed once retried successfully or
+  // once the position itself is confirmed gone.
+  const unreconciledFillContextBySymbol = new Map<string, { entryTimestamp: number; side: PositionSide }>();
 
   let regimeChangeCount = 0;
   let willOpenCount = 0;
@@ -325,9 +667,47 @@ async function main(): Promise<void> {
    * every event, not just the 7-minute sweep).
    */
   async function refreshBalanceForTelegram(): Promise<ExchangeBalanceSnapshot | null> {
+    const internalBalanceBeforeSync = accountBalance; // G1-F02: snapshot BEFORE any correction below
     const outcome = await syncBalanceForTelegramEvent(executor, accountBalance);
-    if (outcome.snapshot === null) return null;
-    accountBalance = outcome.correctedInternalBalance;
+    if (outcome.snapshot === null) {
+      // TICKET-G1R Final Closure item 3 — a failed balance read is one of the 3 required admission
+      // gates (balance/position/order): flip the explicit state, never silently keep trading on the
+      // stale internal number as if nothing happened.
+      if (accountSyncState === 'SYNCED') {
+        accountSyncState = 'ACCOUNT_STATE_UNKNOWN';
+        console.error('[ACCOUNT_STATE_UNKNOWN] refreshBalanceForTelegram(): đọc balance thật thất bại/timeout — CHẶN mở lệnh mới TOÀN PORTFOLIO cho tới khi đồng bộ lại thành công.');
+        telegramQueue.enqueue('⚠️ [ACCOUNT_STATE_UNKNOWN] Không đọc được số dư thật từ sàn — ĐÃ CHẶN mở lệnh mới TOÀN BỘ 4 coin cho tới khi đồng bộ lại thành công.');
+      }
+      return null;
+    }
+    // item 1 — SAME apply path/anti-time-travel rule as bootstrap/periodic. `outcome.snapshot` was
+    // produced by the same canonical parseExchangeBalanceSnapshot(), so no second parse is needed;
+    // value + provenance + freshness are still adopted atomically, and an out-of-order read is
+    // rejected without touching the freshness timestamp.
+    balanceObservationCounter += 1;
+    applyBalanceObservation({
+      walletBalance: outcome.snapshot.walletBalance,
+      capturedAt: outcome.snapshot.fetchedAt,
+      source: 'event:refreshBalanceForTelegram',
+      requestId: `bal-${outcome.snapshot.fetchedAt}-${balanceObservationCounter}`,
+    });
+    exchangeBalanceRefreshedThisTick = true; // G1-F01: authoritative read this tick — must survive to line ~780
+    if (accountSyncState === 'ACCOUNT_STATE_UNKNOWN') {
+      // TICKET-G1R Final Closure item 3 — "chỉ mở lại sau MỘT LẦN đồng bộ thành công có chứng cứ":
+      // a successful balance read alone is one of the 3 gates; also require a fresh getPositionRisk()
+      // confirmation before declaring the account state known again (never on the balance read alone,
+      // never on a timer).
+      try {
+        const posRisk = await executor.getPositionRisk();
+        if (Array.isArray(posRisk)) {
+          accountSyncState = 'SYNCED';
+          console.log('[ACCOUNT_STATE_SYNCED] balance + getPositionRisk() đều đọc thành công — bỏ chặn admission toàn portfolio.');
+          telegramQueue.enqueue('✅ [ĐÃ ĐỒNG BỘ LẠI] Balance + vị thế đã đọc thành công từ sàn — đã bỏ chặn mở lệnh mới toàn portfolio.');
+        }
+      } catch {
+        // stays ACCOUNT_STATE_UNKNOWN — no partial credit, per the ticket's "cùng lúc" requirement.
+      }
+    }
 
     if (outcome.diverged && outcome.divergence) {
       if (!entriesBlockedDueToBalanceDivergence) {
@@ -335,7 +715,7 @@ async function main(): Promise<void> {
         const incident = {
           timestampMs: Date.now(),
           exchangeWalletBalance: outcome.snapshot.walletBalance,
-          internalBalanceBefore: accountBalance,
+          internalBalanceBefore: internalBalanceBeforeSync,
           diffUsd: outcome.divergence.diffUsd,
           diffPct: outcome.divergence.diffPct,
           tolerancePct: 0.01,
@@ -353,6 +733,61 @@ async function main(): Promise<void> {
       telegramQueue.enqueue('✅ [ĐỐI SOÁT SỐ DƯ OK] Số dư nội bộ đã khớp lại với sàn — đã bỏ chặn lệnh mới.');
     }
     return outcome.snapshot;
+  }
+
+  /**
+   * TICKET-G1R Final Closure item 4 — attempts to clear `entriesBlockedDueToUnreconciledFillBySymbol`
+   * for `symbol` via ONE fresh `getPositionRisk()` read (never a timer). Returns true only when
+   * quantity, entryPrice, r, actualRiskDollar AND marginRequired were ALL successfully re-derived
+   * from that read (see retryReconcileUnreconciledFillFromPositionRisk's doc comment) — a partial
+   * success (e.g. position found but side ambiguous) leaves the block in place. Safe to call every
+   * tick this symbol is blocked: read-only, no mutating call, idempotent on failure.
+   */
+  async function retryUnreconciledFillBlock(symbol: string): Promise<boolean> {
+    const ctx = unreconciledFillContextBySymbol.get(symbol);
+    if (!ctx) return false; // no context recorded — cannot safely retry, stays blocked
+    let posRisk: unknown;
+    try {
+      posRisk = await executor.getPositionRisk(symbol);
+    } catch (err) {
+      console.warn(`[UNRECONCILED_FILL_RETRY_READ_ERROR] ${symbol}: getPositionRisk() lỗi khi thử đối soát lại — vẫn CHẶN: ${(err as Error).message}`);
+      return false;
+    }
+    const arr = Array.isArray(posRisk) ? (posRisk as Array<{ symbol?: string; positionAmt?: string; entryPrice?: string }>) : null;
+    const found = arr?.find((p) => p.symbol === symbol);
+    if (!found) {
+      console.warn(`[UNRECONCILED_FILL_RETRY] ${symbol}: getPositionRisk() không có entry cho symbol này — vẫn CHẶN.`);
+      return false;
+    }
+    const entry = runnerState[symbol].symbolState.openPositions.find((e) => e.meta.entryTimestamp === ctx.entryTimestamp);
+    if (!entry) {
+      console.warn(`[UNRECONCILED_FILL_RETRY] ${symbol}: không tìm thấy vị thế entryTimestamp=${ctx.entryTimestamp} nội bộ để áp giá trị đối soát lại — vẫn CHẶN (an toàn hơn là bỏ chặn không có đích áp dụng).`);
+      return false;
+    }
+    const result = retryReconcileUnreconciledFillFromPositionRisk({
+      expectedSide: ctx.side,
+      initialSlPrice: entry.position.initialSlPrice,
+      leverage: CONFIG.leverage,
+      freshPositionAmt: Number(found.positionAmt),
+      freshEntryPrice: found.entryPrice,
+    });
+    if (!result.ok) {
+      console.warn(`[UNRECONCILED_FILL_RETRY_FAILED] ${symbol}: reason=${result.reason} — vẫn CHẶN, sẽ thử lại tick sau.`);
+      return false;
+    }
+    entry.position.positionSize = result.positionSize;
+    entry.position.remainingPositionSize = result.positionSize;
+    entry.position.entryPrice = result.entryPrice;
+    entry.position.r = result.r;
+    entry.meta.actualRiskDollar = result.actualRiskDollar;
+    entry.meta.marginRequired = result.marginRequired;
+    entriesBlockedDueToUnreconciledFillBySymbol.delete(symbol);
+    unreconciledFillContextBySymbol.delete(symbol);
+    console.log(
+      `[UNRECONCILED_FILL_RETRY_SUCCESS] ${symbol}: đối soát lại thành công qua fresh getPositionRisk() — đã bỏ CHẶN. qty=${result.qty} entryPrice=${result.entryPrice} risk=${result.actualRiskDollar.toFixed(4)} margin=${result.marginRequired.toFixed(4)}`,
+    );
+    telegramQueue.enqueue(`✅ [ĐỐI SOÁT LẠI THÀNH CÔNG] ${symbol}: đã khớp lại quantity/entry/margin/risk qua fresh exchange read — đã bỏ chặn mở lệnh mới trên ${symbol}.`);
+    return true;
   }
 
   /** Places the SL + fixed-price TP algo orders for a freshly-opened position, mirroring scripts/testOrderLifecycleTestnet.ts's exact pattern. Real calls only when !dryRun. */
@@ -379,7 +814,7 @@ async function main(): Promise<void> {
    * real stepSize-rounded amount. The caller (tick()) uses the returned qty to correct the just-
    * opened ManagedPositionState's positionSize/remainingPositionSize to match reality.
    */
-  async function handleOpenEvent(symbol: string, event: OpenTradeEvent, balanceAtOpen: number): Promise<number | null> {
+  async function handleOpenEvent(symbol: string, event: OpenTradeEvent, balanceAtOpen: number): Promise<OpenFillInfo | null> {
     const quantity = roundQty(event.marginRequired * CONFIG.leverage / event.entryPrice);
     const traceId = stableTelemetryId('trace', symbol, event.entryTimestamp, event.side, event.setupType);
     const candidateId = stableTelemetryId('candidate', traceId);
@@ -391,6 +826,7 @@ async function main(): Promise<void> {
     emitTelemetry({ ...common, eventType: 'RISK_ADMISSION', quality: { balance: 'OBSERVED', requestedRisk: 'DERIVED', quantity: 'DERIVED' }, data: { admission: 'ALLOW', balance: balanceAtOpen, requestedRiskDollar: event.actualRiskDollar, requestedNotional: event.marginRequired * CONFIG.leverage, proposedQuantity: quantity, marginRequired: event.marginRequired, leverage: CONFIG.leverage, riskPoolPctBefore: event.riskPoolPctBefore, riskPoolPctAfter: event.riskPoolPctAfter, riskMultiplier: event.riskMultiplier } });
     emitTelemetry({ ...common, eventType: 'MARKET_SNAPSHOT', quality: { bestBid: 'MISSING', bestAsk: 'MISSING', mid: 'MISSING', markPrice: 'MISSING', indexPrice: 'MISSING' }, data: { captureStatus: 'MISSING', reasonCode: 'NO_NON_BLOCKING_BOOK_TICKER_FEED', candleReferencePrice: event.entryPrice } });
     let canonicalQty: number | null = null;
+    let openFillInfo: OpenFillInfo | null = null; // TICKET-G1R Checkpoint B: real fill provenance for the caller's post-fill reconcile
     if (dryRun) {
       console.log(`[SẼ MỞ LỆNH] ${symbol} ${event.side} entry=${event.entryPrice} sl=${event.slPrice} qty=${quantity} setupType=${event.setupType}`);
       willOpenCount++;
@@ -440,6 +876,7 @@ async function main(): Promise<void> {
       if (canonical.source === 'SUBMITTED_QTY_FALLBACK') {
         console.warn(`[CANONICAL_QTY_WARNING] ${symbol}: không xác nhận được executedQty/positionAmt thật từ sàn — dùng submittedQty làm phương án cuối, CẦN kiểm tra thủ công.`);
       }
+      openFillInfo = { canonicalQty: canonical.qty, qtySource: canonical.source, rawAvgPrice: (openResult.raw as { avgPrice?: unknown } | undefined)?.avgPrice };
 
       const orderIds = await placeInitialOrders(symbol, event.side, event, canonicalQty);
       runnerState[symbol].orderIds.set(event.entryTimestamp, orderIds);
@@ -453,10 +890,10 @@ async function main(): Promise<void> {
     const exchangeBalance = await refreshBalanceForTelegram();
     telegramQueue.enqueue(
       formatPositionOpenedMessage(event, { env: envLabel, accountBalanceAtOpen: balanceAtOpen, exchangeBalance }) +
-        (dryRun ? '\n\n[DRY-RUN]' : '') +
-        (oodGuardApplied ? '\n[OOD Guard: size đã giảm theo Risk Reduction P97.5]' : ''),
+      (dryRun ? '\n\n[DRY-RUN]' : '') +
+      (oodGuardApplied ? '\n[OOD Guard: size đã giảm theo Risk Reduction P97.5]' : ''),
     );
-    return canonicalQty;
+    return openFillInfo;
   }
 
   async function handlePartialCloseEvent(symbol: string, event: PartialCloseEvent, entryTimestampOfPosition: number, remainingQuantity: number): Promise<void> {
@@ -543,14 +980,47 @@ async function main(): Promise<void> {
       // loss-if-SL-hits figure the Risk Pool bounds.
       const openMarginBySymbol: Record<string, number> = {};
       for (const s of SYMBOLS) {
-        const total = runnerState[s].symbolState.openPositions.reduce((sum, e) => sum + e.meta.actualRiskDollar, 0);
+        // TICKET-G1R Checkpoint D (G1-F04): rebuilt from CURRENT remainingPositionSize/currentSlPrice
+        // every tick (rebuild-from-scratch), not the stale meta.actualRiskDollar frozen at open — see
+        // currentRisk.ts's doc comment. Covers partial fill, TP1/TP2, SL ratchet/breakeven/trailing,
+        // Checkpoint B's quantity reconciliation, and Checkpoint C's restart recovery for free, since
+        // all of those mutate `position` in place and this always reads it fresh.
+        const total = runnerState[s].symbolState.openPositions.reduce((sum, e) => sum + computeCurrentPositionRisk(e.position).openRiskDollar, 0);
         if (total > 0) openRiskBySymbol[s] = total;
         const totalMargin = runnerState[s].symbolState.openPositions.reduce((sum, e) => sum + e.meta.marginRequired, 0);
         if (totalMargin > 0) openMarginBySymbol[s] = totalMargin;
       }
+      // TICKET-G1R Checkpoint D (G1-F04) — Quarantine: an exchange-only/unreconciled position is
+      // UNKNOWN_EXPOSURE, never risk=0, and while ANY such exposure exists the whole portfolio's risk
+      // total (one shared pool, 15% cap on the WHOLE balance) is untrustworthy — not just the affected
+      // symbol. Recomputed fresh every tick (rebuild-from-scratch, no incremental flag toggling) from
+      // the two Sets Checkpoint B/C already maintain (never mutated here). Only reopens automatically
+      // once those Sets are empty again — i.e. reconciled with evidence, never a timer.
+      // TICKET-G1R Final Closure item 3 — 3rd trigger condition added: accountSyncState ===
+      // 'ACCOUNT_STATE_UNKNOWN' (a failed balance/position/protective-order read since the last
+      // successful full resync) blocks the WHOLE portfolio via the SAME sentinel-over-cap mechanism,
+      // never a separate parallel gate.
+      // TICKET-G1R-A "Final Safety Hotfix" item 1 — a PROTECTION_DEGRADED position (naked exposure
+      // still open on the exchange, SL fail-safe exhausted) is at least as serious as the existing
+      // triggers — blocks the WHOLE portfolio via the SAME sentinel, never a per-symbol-only block.
+      // Item 5 — stale balance OR stale protective-cycle evidence is a further, INDEPENDENT trigger:
+      // either one alone is sufficient to fail closed (both isFreshnessEvidenceStale calls are
+      // evaluated, not short-circuited away — see the dedicated freshness tests).
+      const hasUnquantifiableExposureBlockingAdmission =
+        entriesBlockedDueToUnreconciledFillBySymbol.size > 0 ||
+        entriesBlockedDueToRestartQuarantineBySymbol.size > 0 ||
+        accountSyncState === 'ACCOUNT_STATE_UNKNOWN' ||
+        hasAnyProtectionDegradedPosition() ||
+        // item 1 — the THREE balance conditions, not just freshness: parsed+applied
+        // (`accountBalanceKnown`), and still fresh. `accountBalanceKnown` is the explicit
+        // "UNKNOWN until a real exchange read" sentinel; it can never be satisfied by a default.
+        !accountBalanceKnown ||
+        isFreshnessEvidenceStale(balanceFreshnessEvidence(), now) ||
+        isFreshnessEvidenceStale(protectiveCycleFreshnessEvidence(), now);
 
       for (const symbol of SYMBOLS) {
         const rs = runnerState[symbol];
+        exchangeBalanceRefreshedThisTick = false; // G1-F01: fresh per symbol, see declaration above
         // TICKET — Exchange-Authoritative Live Balance §7: freeze the WHOLE tick for EVERY symbol
         // (not per-symbol — balance divergence is account-wide) while accountBalance is confirmed
         // diverged from Binance beyond tolerance. Blunt but safe: orchestrator.ts/processCandle()
@@ -570,6 +1040,27 @@ async function main(): Promise<void> {
           console.warn(`[RECONCILE_FREEZE] ${symbol}: đang đối soát vị thế đóng ngoài — bỏ qua tick này cho symbol này.`);
           continue;
         }
+        // TICKET-G1R Checkpoint B (G1-F05) — same blunt-but-safe per-symbol freeze pattern as the two
+        // guards above: an unreconciled fill means this symbol's open position's true risk/margin
+        // basis is unknown, so no further mutation (new entries, trailing, partial/close handling) is
+        // safe here either until a human confirms real exchange state — see the Set's declaration.
+        if (entriesBlockedDueToUnreconciledFillBySymbol.has(symbol)) {
+          // TICKET-G1R Final Closure item 4 — try to clear this WITHOUT a restart via one fresh
+          // evidence-based read before giving up on this tick; still blocks and skips the tick on
+          // failure, same as before this item was added.
+          const cleared = await retryUnreconciledFillBlock(symbol);
+          if (!cleared) {
+            console.warn(`[ENTRY_BLOCKED_UNRECONCILED_FILL] ${symbol}: bỏ qua tick — fill trước đó chưa đối soát được, cần kiểm tra thủ công trước khi giao dịch lại trên symbol này.`);
+            continue;
+          }
+        }
+        // TICKET-G1R Checkpoint C — same permanent per-symbol freeze pattern as the guard above, for
+        // a position/qty on the exchange that never proved ownership (at startup or discovered later
+        // via POSITION_MISSING_INTERNALLY, see reconciler.onMismatch below) — see the Set's declaration.
+        if (entriesBlockedDueToRestartQuarantineBySymbol.has(symbol)) {
+          console.warn(`[ENTRY_BLOCKED_RESTART_QUARANTINE] ${symbol}: bỏ qua tick — PENDING_RECONCILIATION, cần kiểm tra thủ công trước khi giao dịch lại trên symbol này.`);
+          continue;
+        }
         const closed5m = feed.getClosedCandles(symbol, '5m', now);
         if (closed5m.length === 0) continue;
         const latestClosed = closed5m[closed5m.length - 1];
@@ -587,10 +1078,18 @@ async function main(): Promise<void> {
         // THIS symbol's own processCandle() call — includes any new position(s) opened by an earlier
         // symbol in this same tick.
         const allOpenPositionsRisk = SYMBOLS.filter((s) => openRiskBySymbol[s] !== undefined).map((s) => ({ id: s, actualRiskDollar: openRiskBySymbol[s] }));
+        // TICKET-G1R Checkpoint D (G1-F04) — Quarantine rule: while unknown exposure exists anywhere,
+        // admission is blocked for the WHOLE portfolio (every symbol), not just the affected one. A
+        // sentinel entry over the cap achieves this via the EXISTING wouldExceedRiskPool()/checkRiskPool()
+        // arithmetic (no change to orchestrator.ts's decision logic or the 15% cap value itself) —
+        // tryOpenNewPosition() sees a portfolio risk total that's honestly over-cap, exactly reflecting
+        // that the real total can't currently be trusted.
+        if (hasUnquantifiableExposureBlockingAdmission) {
+          allOpenPositionsRisk.push({ id: 'UNKNOWN_EXPOSURE_BLOCK', actualRiskDollar: accountBalance * CONFIG.riskPoolMaxPct + 1 });
+        }
         // TICKET-101 Việc 2: single aggregate across ALL 4 symbols (not a per-symbol breakdown) —
         // wouldExceedMaxTotalMargin() only ever needs the total.
         const totalOpenMarginDollar = Object.values(openMarginBySymbol).reduce((sum, m) => sum + m, 0);
-
         const input: ProcessCandleInput = {
           symbol,
           candles5m: window5m,
@@ -704,16 +1203,6 @@ async function main(): Promise<void> {
           },
         );
 
-        // TICKET-101 Việc 1: refresh immediately so the NEXT symbol in this tick's loop sees this
-        // symbol's up-to-date total (see openRiskBySymbol declaration above).
-        const newTotalRisk = result.symbolState.openPositions.reduce((sum, e) => sum + e.meta.actualRiskDollar, 0);
-        if (newTotalRisk > 0) openRiskBySymbol[symbol] = newTotalRisk;
-        else delete openRiskBySymbol[symbol];
-        // TICKET-101 Việc 2: same live refresh for margin (see openMarginBySymbol declaration above).
-        const newTotalMargin = result.symbolState.openPositions.reduce((sum, e) => sum + e.meta.marginRequired, 0);
-        if (newTotalMargin > 0) openMarginBySymbol[symbol] = newTotalMargin;
-        else delete openMarginBySymbol[symbol];
-
         const newRegime = result.symbolState.regimeState.previousRegime;
         if (previousRegime !== null && newRegime !== null && previousRegime !== newRegime) {
           regimeChangeCount++;
@@ -732,29 +1221,59 @@ async function main(): Promise<void> {
 
         for (const event of result.events) {
           if (event.type === 'OPEN') {
-            const canonicalQty = await handleOpenEvent(symbol, event, accountBalance).catch((e) => {
+            const openFillInfo = await handleOpenEvent(symbol, event, accountBalance).catch((e) => {
               console.error(`[OPEN_HANDLER_ERROR] ${symbol}: ${(e as Error).message}`);
               return null;
             });
-            // TICKET-151 P0-A — inject the exchange-confirmed real quantity into the JUST-created
-            // ManagedPositionState for this open (matched by entryTimestamp, unique per position
-            // within a symbol — same key convention as runnerState[symbol].orderIds). This is a
-            // targeted data correction, NOT a change to slTpManager.ts's sizing FORMULA: only this
-            // one freshly-opened position's positionSize/remainingPositionSize (currently equal,
-            // always true right at open before any tier has filled) are overwritten to
-            // canonicalQty × entryPrice, exactly analogous to how resolveAccountBalanceAfterReconcile()
-            // already overrides accountBalance from a confirmed exchange value elsewhere in this file.
-            if (canonicalQty !== null) {
+            // TICKET-151 P0-A / TICKET-G1R Checkpoint B (G1-F05) — reconcile the JUST-created
+            // ManagedPositionState against the REAL fill (matched by entryTimestamp, unique per
+            // position within a symbol — same key convention as runnerState[symbol].orderIds). NOT a
+            // change to slTpManager.ts's sizing FORMULA or to TP/SL absolute prices (already resting
+            // real orders by now) — only this one position's positionSize/remainingPositionSize/
+            // entryPrice/r and its paired meta.actualRiskDollar/marginRequired are corrected from the
+            // executed fill, exactly analogous to how resolveAccountBalanceAfterReconcile() already
+            // overrides accountBalance from a confirmed exchange value elsewhere in this file.
+            if (openFillInfo !== null) {
               const openedEntry = result.symbolState.openPositions.find((e) => e.meta.entryTimestamp === event.entryTimestamp);
               if (openedEntry) {
-                const correctedNotional = canonicalQty * openedEntry.position.entryPrice;
-                if (Math.abs(correctedNotional - openedEntry.position.positionSize) > 1e-9) {
+                const reconciled = reconcileExecutedOpenState({
+                  plannedEntryPrice: openedEntry.position.entryPrice,
+                  initialSlPrice: openedEntry.position.initialSlPrice,
+                  canonicalQty: openFillInfo.canonicalQty,
+                  canonicalQtySource: openFillInfo.qtySource,
+                  rawAvgPrice: openFillInfo.rawAvgPrice,
+                  leverage: CONFIG.leverage,
+                });
+                if (reconciled.ok) {
+                  if (Math.abs(reconciled.positionSize - openedEntry.position.positionSize) > 1e-9) {
+                    console.log(
+                      `[POSITION_SIZE_CORRECTED] ${symbol} entryTimestamp=${event.entryTimestamp}: positionSize ${openedEntry.position.positionSize.toFixed(6)} → ${reconciled.positionSize.toFixed(6)} (canonicalQty=${openFillInfo.canonicalQty})`,
+                    );
+                  }
                   console.log(
-                    `[POSITION_SIZE_CORRECTED] ${symbol} entryTimestamp=${event.entryTimestamp}: positionSize ${openedEntry.position.positionSize.toFixed(6)} → ${correctedNotional.toFixed(6)} (canonicalQty=${canonicalQty})`,
+                    `[ENTRY_STATE_RECONCILED] ${symbol} entryTimestamp=${event.entryTimestamp}: entryPriceBasis=${reconciled.entryPriceBasis} entryPrice=${openedEntry.position.entryPrice.toFixed(6)}→${reconciled.entryPrice.toFixed(6)} actualRiskDollar=${openedEntry.meta.actualRiskDollar.toFixed(4)}→${reconciled.actualRiskDollar.toFixed(4)} marginRequired=${openedEntry.meta.marginRequired.toFixed(4)}→${reconciled.marginRequired.toFixed(4)}`,
+                  );
+                  openedEntry.position.positionSize = reconciled.positionSize;
+                  openedEntry.position.remainingPositionSize = reconciled.positionSize;
+                  openedEntry.position.entryPrice = reconciled.entryPrice;
+                  openedEntry.position.r = reconciled.r;
+                  openedEntry.meta.actualRiskDollar = reconciled.actualRiskDollar;
+                  openedEntry.meta.marginRequired = reconciled.marginRequired;
+                } else {
+                  // G1-F05 fix: fill provenance not trustworthy enough to reconcile (unconfirmed qty or
+                  // a fill price that would make the stop distance <= 0) — never fabricate a corrected
+                  // value. Leave positionSize/entryPrice/risk/margin at their PLANNED basis (internally
+                  // consistent with each other, just not reconciled with reality) and block new entries
+                  // on this symbol until a human checks the real exchange state.
+                  entriesBlockedDueToUnreconciledFillBySymbol.add(symbol);
+                  unreconciledFillContextBySymbol.set(symbol, { entryTimestamp: event.entryTimestamp, side: event.side });
+                  console.error(
+                    `[EXECUTED_STATE_RECONCILE_BLOCKED] ${symbol} entryTimestamp=${event.entryTimestamp}: reason=${reconciled.reason} — không đối soát được positionSize/entryPrice/risk/margin từ fill thật, giữ nguyên giá trị planned và CHẶN mở lệnh mới trên ${symbol} — CẦN kiểm tra thủ công.`,
+                  );
+                  telegramQueue.enqueue(
+                    `⛔ [ĐỐI SOÁT LỆNH THẤT BẠI] ${symbol} entryTimestamp=${event.entryTimestamp}\nLý do: ${reconciled.reason}\nĐã CHẶN mở lệnh mới trên ${symbol} — cần kiểm tra thủ công vị thế vừa mở.`,
                   );
                 }
-                openedEntry.position.positionSize = correctedNotional;
-                openedEntry.position.remainingPositionSize = correctedNotional;
               } else {
                 console.error(`[POSITION_SIZE_CORRECTION_ERROR] ${symbol}: không tìm thấy openPositions entry vừa mở (entryTimestamp=${event.entryTimestamp}) để áp canonicalQty — CẦN kiểm tra thủ công.`);
               }
@@ -776,10 +1295,35 @@ async function main(): Promise<void> {
           // SKIPPED events are diagnostic-only (risk pool full / neutral gate rejected) — logged, no Telegram spam per candle.
         }
 
+        // TICKET-101 Việc 1 / TICKET-G1R Checkpoint D (G1-F04) — refresh AFTER the events loop above
+        // (not before it, as this used to run) so the NEXT symbol in this tick's loop sees THIS
+        // symbol's truly up-to-date total: Checkpoint B's OPEN-event reconciliation mutates
+        // `openedEntry.position` in place inside that loop (corrected entryPrice/remainingPositionSize),
+        // and recomputing from `position` (not the frozen meta.actualRiskDollar) here picks that
+        // correction up immediately, same tick — never stale until the next tick.
+        const newTotalRisk = result.symbolState.openPositions.reduce((sum, e) => sum + computeCurrentPositionRisk(e.position).openRiskDollar, 0);
+        if (newTotalRisk > 0) openRiskBySymbol[symbol] = newTotalRisk;
+        else delete openRiskBySymbol[symbol];
+        // TICKET-101 Việc 2: same live refresh for margin (see openMarginBySymbol declaration above).
+        const newTotalMargin = result.symbolState.openPositions.reduce((sum, e) => sum + e.meta.marginRequired, 0);
+        if (newTotalMargin > 0) openMarginBySymbol[symbol] = newTotalMargin;
+        else delete openMarginBySymbol[symbol];
+
         rs.symbolState = result.symbolState;
-        accountBalance = result.accountBalance;
+        // TICKET-G1R-A "Final Internal Closure" item 1 — `result.accountBalance` is the SIMULATOR's
+        // own bookkeeping and is NO LONGER written back into `accountBalance`. `accountBalance` is now
+        // strictly a cache of the latest exchange-authoritative wallet balance (applyBalanceObservation
+        // is its only writer). Live admission uses this exchange balance directly and does not add
+        // simulator-booked tier PnL that may already be settled in the wallet balance.
+        // `exchangeBalanceRefreshedThisTick` is still maintained (used by the divergence path below).
         rs.lastProcessedCandleTimestamp = latestClosed.timestamp;
       }
+      // TICKET-G1R Checkpoint C — persist after every tick's mutations (orderIds Map updates from
+      // handleOpenEvent/handlePartialCloseEvent/handleCloseEvent above have already landed by this
+      // point). A crash between two persists loses at most one tick's worth of updates — the NEXT
+      // restart's ownership-proof check against a fresh exchange read safely re-reconciles from there
+      // (see liveStateSync.ts's performStartupRestartRecovery doc comment).
+      persistLiveState();
     } catch (err) {
       tickErrorCount++;
       console.error(`[TICK_ERROR] (đã bắt, KHÔNG crash tiến trình): ${(err as Error).stack ?? (err as Error).message}`);
@@ -867,12 +1411,15 @@ async function main(): Promise<void> {
       // (no extra network call). Never fabricates a locally-computed PnL — the simulation can no
       // longer emit a CLOSE event for a position no longer in openPositions, so there is no
       // double-apply risk between this override and a later simulated close.
-      accountBalance = exchangeBalanceUsd;
+      // item 1 — exchange-derived value, applied through the single path (provenance + freshness +
+      // anti-time-travel) instead of a bare assignment.
+      balanceObservationCounter += 1;
+      applyBalanceObservation({ walletBalance: exchangeBalanceUsd, capturedAt: Date.now(), source: 'reconcile:externalClose', requestId: `bal-${Date.now()}-${balanceObservationCounter}` });
 
       telegramQueue.enqueue(
         `[RECONCILE] ${symbol} ${entry.position.side}: vị thế đã bị đóng BÊN NGOÀI bot (sàn xác nhận không còn vị thế) — closeReason=${workflowResult.closeReason}, ` +
-          `realizedPnlUsd=${workflowResult.realizedPnlUsd ?? 'không xác định'} (reconciled_external_close). Risk/margin/slot đã được giải phóng.` +
-          (envLabel === 'testnet' ? '\n[TESTNET]' : ''),
+        `realizedPnlUsd=${workflowResult.realizedPnlUsd ?? 'không xác định'} (reconciled_external_close). Risk/margin/slot đã được giải phóng.` +
+        (envLabel === 'testnet' ? '\n[TESTNET]' : ''),
       );
     } catch (err) {
       console.error(`[RECONCILE_ERROR] ${symbol}: ${(err as Error).message}`);
@@ -880,6 +1427,340 @@ async function main(): Promise<void> {
       reconcileGuard.finish(symbol);
     }
   }
+
+  // TICKET-G1R-A "Freshness Bootstrap Hotfix" items 1-4 — CONFIRMED bug fix: the OLD
+  // runAccountSyncCycleTickBody() returned immediately (`if (positions.length === 0) return;`) BEFORE
+  // either freshness timestamp below was ever touched. On a fresh start (or simply between trades) with
+  // zero bot-owned positions, lastSuccessfulAccountSyncCycleMs (and, transitively, lastSuccessfulBalanceReadMs,
+  // which used to depend on a trade event that can never fire while admission stays blocked) NEVER got
+  // set — admission was blocked PERMANENTLY, not "~5 minutes after restart". This function is the
+  // shared step (a)(b)(c) of the ticket's required order: (a) ALWAYS capture ONE coherent snapshot first,
+  // (b) ALWAYS refresh BOTH freshness timestamps + recover accountSyncState on VALIDATED (independent of
+  // any trade event — this IS how the admission<->event circular dependency is broken), (c) ALWAYS check
+  // for unknown/manual exchange exposure even when this bot owns zero positions. Step (d) — the
+  // protective-order sweep itself — is each caller's own decision (see runAccountSyncCycleTickBody vs.
+  // the read-only startup bootstrap below), never bundled in here.
+  async function captureAndApplyFreshnessSnapshot(): Promise<CoherentReconciliationSnapshotResult> {
+    const now = Date.now();
+    const snapshotResult = await captureCoherentReconciliationSnapshotWithRetry(executor, {
+      incomeWindowStartMs: now - ACCOUNT_SYNC_CYCLE_INTERVAL_MS * 2,
+      incomeWindowEndMs: now,
+    });
+    if (snapshotResult.status !== 'VALIDATED') {
+      if (accountSyncState === 'SYNCED') {
+        accountSyncState = 'ACCOUNT_STATE_UNKNOWN';
+        console.error(`[ACCOUNT_STATE_UNKNOWN] chu kỳ đồng bộ tài khoản thất bại (${snapshotResult.status}) — CHẶN mở lệnh mới TOÀN PORTFOLIO. Chi tiết: ${snapshotResult.detail}`);
+        telegramQueue.enqueue('⚠️ [ACCOUNT_STATE_UNKNOWN] Chu kỳ đồng bộ tài khoản thất bại — ĐÃ CHẶN mở lệnh mới TOÀN BỘ 4 coin cho tới khi đồng bộ lại thành công.');
+      }
+      return snapshotResult;
+    }
+
+    // TICKET-G1R-A "Final Internal Closure" item 1 — THE CONFIRMED BUG FIX. This used to set
+    // `lastSuccessfulBalanceReadMs = Date.now()` while NEVER parsing/applying
+    // `snapshotResult.snapshot.balance.data`, so the timestamp advertised "fresh" for a balance VALUE
+    // that was never updated. Now the value is parsed with the canonical parser and applied
+    // ATOMICALLY with its provenance and freshness timestamp — and if the parse FAILS, the freshness
+    // timestamp is deliberately left untouched so the normal staleness check blocks admission.
+    const balanceLeg = snapshotResult.snapshot.balance;
+    const applied = parseAndApplyBalance(balanceLeg.data, `snapshot:${balanceLeg.source}`, balanceLeg.capturedAt);
+    if (applied === null) {
+      if (accountSyncState === 'SYNCED') {
+        accountSyncState = 'ACCOUNT_STATE_UNKNOWN';
+        console.error('[ACCOUNT_STATE_UNKNOWN] snapshot VALIDATED nhưng parse/apply balance THẤT BẠI — CHẶN mở lệnh mới TOÀN PORTFOLIO, KHÔNG đánh dấu balance fresh.');
+        telegramQueue.enqueue('⚠️ [ACCOUNT_STATE_UNKNOWN] Snapshot hợp lệ nhưng không đọc được số dư — ĐÃ CHẶN mở lệnh mới toàn portfolio.');
+      }
+      return snapshotResult;
+    }
+
+    lastSuccessfulAccountSyncCycleMs = Date.now();
+
+    // item 4 — accountSyncState self-heals from a VALIDATED snapshot alone, no trade event required
+    // (this is the direct fix for the "admission cần event → event cần admission" circular dependency).
+    if (accountSyncState === 'ACCOUNT_STATE_UNKNOWN') {
+      accountSyncState = 'SYNCED';
+      console.log('[ACCOUNT_STATE_SYNCED] snapshot đồng bộ tài khoản VALIDATED (định kỳ/bootstrap) — bỏ chặn admission toàn portfolio.');
+      telegramQueue.enqueue('✅ [ĐÃ ĐỒNG BỘ LẠI] Snapshot tài khoản VALIDATED — đã bỏ chặn mở lệnh mới toàn portfolio.');
+    }
+
+    // item 2 — unknown/manual exposure check: MUST run even when this bot owns zero positions on a
+    // symbol/side (positions.length === 0 must never skip this). Reuses Checkpoint C's exact ownership-
+    // proof decision function (decideSideRecovery) — anything the exchange reports with no matching
+    // internal record fails the proof and is quarantined, same QUARANTINED/PENDING_RECONCILIATION
+    // pattern as startup restart recovery, never silently adopted/ignored.
+    const rawPositionsForExposureCheck = snapshotResult.snapshot.positions.data as Array<{ symbol?: string; positionAmt?: string }>;
+    for (const symbol of SYMBOLS) {
+      if (entriesBlockedDueToRestartQuarantineBySymbol.has(symbol)) continue;
+      const rs = runnerState[symbol];
+      for (const side of ['LONG', 'SHORT'] as PositionSide[]) {
+        const persistedEntries = rs.symbolState.openPositions.filter((e) => e.position.side === side);
+        let exchangeBaseQty = 0;
+        for (const p of rawPositionsForExposureCheck) {
+          if (p.symbol !== symbol) continue;
+          const amt = Number(p.positionAmt);
+          if (!Number.isFinite(amt)) continue;
+          if (side === 'LONG' && amt > 0) exchangeBaseQty += amt;
+          if (side === 'SHORT' && amt < 0) exchangeBaseQty += Math.abs(amt);
+        }
+        const decision = decideSideRecovery({ persistedEntries, exchangeBaseQty, quantityTolerance: quantityToleranceBySymbol[symbol] });
+        if (decision.status === 'QUARANTINED') {
+          entriesBlockedDueToRestartQuarantineBySymbol.add(symbol);
+          console.error(`[UNKNOWN_EXPOSURE_DETECTED] ${symbol} ${side}: ${decision.detail} — CHẶN mở lệnh mới trên ${symbol}.`);
+          telegramQueue.enqueue(`⚠️ [PENDING_RECONCILIATION] ${symbol} ${side}: phát hiện vị thế không rõ nguồn gốc khi đồng bộ tài khoản — ĐÃ CHẶN mở lệnh mới trên ${symbol}. ${decision.detail}`);
+        }
+      }
+    }
+
+    return snapshotResult;
+  }
+
+  // TICKET-G1R-B (Runtime Wiring Pass) items 1+2+3 — the in-run protective-order (SL/TP) monitor,
+  // powered by ONE periodic coherent snapshot (captureAndApplyFreshnessSnapshot above +
+  // runProtectiveOrderMonitorSweep/liveStateSync.ts). Runs on its OWN timer
+  // (ACCOUNT_SYNC_CYCLE_INTERVAL_MS), never the 5s tick loop — a single whole-account
+  // getOpenAlgoOrders() call per cycle covers every symbol, filtered in memory below (never N
+  // per-symbol calls). Only ever touches positions already inside symbolState.openPositions (ownership
+  // VERIFIED) — entriesBlockedDueToRestartQuarantineBySymbol is excluded up front, exactly like every
+  // other quarantine-respecting call site in this file.
+  function buildProtectiveMonitorInputs(): ProtectiveMonitorPositionInput[] {
+    const inputs: ProtectiveMonitorPositionInput[] = [];
+    for (const symbol of SYMBOLS) {
+      if (entriesBlockedDueToRestartQuarantineBySymbol.has(symbol)) continue;
+      const rs = runnerState[symbol];
+      for (const entry of rs.symbolState.openPositions) {
+        const ids = rs.orderIds.get(entry.meta.entryTimestamp);
+        inputs.push({
+          symbol,
+          side: entry.position.side,
+          entryTimestamp: entry.meta.entryTimestamp,
+          remainingPositionSize: entry.position.remainingPositionSize,
+          positionSize: entry.position.positionSize,
+          entryPrice: entry.position.entryPrice,
+          currentSlPrice: entry.position.currentSlPrice,
+          tpLevels: entry.position.tpLevels,
+          filledTiers: entry.position.filledTiers,
+          slAlgoId: ids?.slAlgoId ?? null,
+          tpAlgoIds: ids?.tpAlgoIds ?? [],
+          quantityTolerance: quantityToleranceBySymbol[symbol],
+        });
+      }
+    }
+    return inputs;
+  }
+
+  /**
+   * THE real periodic call — this is the function under test in g1rRuntimeWiringFix.test.ts's
+   * "runtime path uses the real snapshot" behavior tests (mocked executor, same shape as every other
+   * exported liveStateSync.ts function this file wires). Missing/wrong SL -> bounded recovery ->
+   * EMERGENCY_CLOSE/OPERATOR_REQUIRED quarantine via the SAME Set/removal-from-openPositions mechanism
+   * as the startup path and every other quarantine trigger. TP findings are ALWAYS logged as WARNING,
+   * never escalate, and are only ever considered after SL's own outcome for that position is decided
+   * (see verifyOnePositionProtectiveOrders's own doc comment) — SL's message is therefore always
+   * emitted before/instead-of TP's for the same position.
+   */
+  // TICKET-G1R-A "Freshness Bootstrap Hotfix" item 2 — THE confirmed-bug fix, restructured per the
+  // ticket's exact required order: (a) capture snapshot ALWAYS (delegated to
+  // captureAndApplyFreshnessSnapshot, which ALSO does (b) freshness timestamps and (c) unknown-exposure
+  // check, unconditionally — never gated on positions.length); (d) the protective-order SWEEP itself is
+  // the ONLY part that's actually optional when positions.length === 0 (nothing bot-owned to verify
+  // SL/TP for) — this is now a step-(d) optimization, never an early-return that skips (a)(b)(c).
+  // `inStartupBootstrapPhase` (true only for the ONE synchronous bootstrap call below, via the SAME
+  // single-flight guard the periodic timer uses — see item 5's overlap-safety requirement) skips step
+  // (d) unconditionally even when positions.length > 0 — bootstrap must never place/repair an order,
+  // per the ticket's explicit "đây là bootstrap để lấy freshness ban đầu, không phải một
+  // protective-repair cycle". Flipped to false right after the bootstrap call returns, forever after.
+  let inStartupBootstrapPhase = true;
+  async function runAccountSyncCycleTickBody(): Promise<CoherentReconciliationSnapshotResult['status']> {
+    const snapshotResult = await captureAndApplyFreshnessSnapshot();
+    if (snapshotResult.status !== 'VALIDATED') return snapshotResult.status;
+    if (inStartupBootstrapPhase) return snapshotResult.status; // bootstrap: freshness/exposure only, no repair sweep
+
+    const positions = buildProtectiveMonitorInputs();
+    if (positions.length === 0) return snapshotResult.status; // nothing bot-owned to verify SL/TP for — freshness/exposure already handled above
+    const now = Date.now();
+
+    const sweepResults = await runProtectiveOrderMonitorSweep({
+      executor,
+      positions,
+      policy: MISSING_PROTECTIVE_SL_FAILSAFE_POLICY,
+      openAlgoOrders: snapshotResult.snapshot.protectiveOrders.data,
+    });
+
+    // TICKET-G1R-A "Final Safety Hotfix" item 4 — same-side merged-position safety, wired from THIS
+    // cycle's own already-fetched snapshot legs (positions + protectiveOrders — zero extra network
+    // calls). Only relevant for 2+ same-side logical entries on one symbol (Checkpoint C's own merged-
+    // qty limitation). A qty mismatch flips accountSyncState (same sentinel, whole-portfolio block);
+    // a match (VERIFIED_SPLIT/UNVERIFIED_SPLIT) is logged only — exposure already never drops from the
+    // risk ledger regardless (each entry's own remainingBaseQty keeps flowing into rebuildPortfolioRisk
+    // unconditionally), per checkMergedPositionAllocation()'s own contract.
+    const rawPositions = snapshotResult.snapshot.positions.data as Array<{ symbol?: string; positionAmt?: string }>;
+    const rawProtectiveOrders = snapshotResult.snapshot.protectiveOrders.data;
+    for (const symbol of SYMBOLS) {
+      const rs = runnerState[symbol];
+      for (const side of ['LONG', 'SHORT'] as PositionSide[]) {
+        const sideEntries = rs.symbolState.openPositions.filter((e) => e.position.side === side);
+        if (sideEntries.length < 2) continue; // nothing to reconcile — merged-qty ambiguity only exists with 2+ entries
+        const exchangeBaseQty = Math.abs(Number(rawPositions.find((p) => p.symbol === symbol)?.positionAmt ?? '0'));
+        const persistedEntries = sideEntries.map((e) => ({ id: String(e.meta.entryTimestamp), remainingBaseQty: e.position.remainingPositionSize / e.position.entryPrice }));
+        const slAlgoIds = sideEntries.map((e) => rs.orderIds.get(e.meta.entryTimestamp)?.slAlgoId ?? null);
+        let protectiveTotalBaseQty: number | null = null;
+        if (slAlgoIds.every((id): id is number => id !== null)) {
+          const uniqueSlOrders = Array.from(new Set(slAlgoIds)).map((id) => rawProtectiveOrders.find((o) => o.algoId === id));
+          if (uniqueSlOrders.every((o): o is (typeof rawProtectiveOrders)[number] => o !== undefined)) {
+            protectiveTotalBaseQty = uniqueSlOrders.reduce((sum, o) => sum + o.origQty, 0);
+          }
+        }
+        const check = checkMergedPositionAllocation({ persistedEntries, exchangeBaseQty, protectiveTotalBaseQty, quantityTolerance: quantityToleranceBySymbol[symbol] });
+        if (check.status === 'ACCOUNT_STATE_UNKNOWN') {
+          if (accountSyncState === 'SYNCED') {
+            accountSyncState = 'ACCOUNT_STATE_UNKNOWN';
+            console.error(`[ACCOUNT_STATE_UNKNOWN] ${symbol} ${side}: merged same-side position qty không khớp — CHẶN mở lệnh mới TOÀN PORTFOLIO. Chi tiết: ${check.reason}`);
+            telegramQueue.enqueue(`⚠️ [ACCOUNT_STATE_UNKNOWN] ${symbol} ${side}: merged-position qty mismatch — ĐÃ CHẶN mở lệnh mới TOÀN BỘ 4 coin. ${check.reason}`);
+          }
+        } else if (check.allocationQuality === 'UNVERIFIED_SPLIT') {
+          console.warn(`[MERGED_POSITION_UNVERIFIED_SPLIT] ${symbol} ${side}: ${sideEntries.length} logical entries chia sẻ 1 merged exchange qty=${exchangeBaseQty} — tổng khớp, per-entry split giữ nguyên (không đoán lại), không chặn.`);
+        }
+      }
+    }
+
+    let stateChanged = false;
+    for (const posResult of sweepResults) {
+      const rs = runnerState[posResult.symbol];
+      const ids = rs.orderIds.get(posResult.entryTimestamp);
+      const entry = rs.symbolState.openPositions.find((e) => e.meta.entryTimestamp === posResult.entryTimestamp);
+
+      // SL outcome logged/applied FIRST, unconditionally, before this position's TP findings below —
+      // satisfies "SL CRITICAL không bị TP WARNING che khuất".
+      if (posResult.sl.status === 'RECOVERED') {
+        if (ids) ids.slAlgoId = posResult.sl.newSlAlgoId;
+        // item 1 — a prior cycle may have marked this PROTECTION_DEGRADED; a real recovery now
+        // un-degrades it (never resets silently — this IS the "repair succeeded" transition).
+        if (entry) entry.meta.protectionStatus = 'PROTECTED';
+        console.log(`[PROTECTIVE_SL_RECOVERED_IN_RUN] ${posResult.symbol} ${posResult.side}: ${posResult.sl.detail}`);
+        telegramQueue.enqueue(`✅ [SL PHỤC HỒI (in-run)] ${posResult.symbol} ${posResult.side}: ${posResult.sl.detail}`);
+        stateChanged = true;
+      } else if (posResult.sl.status === 'QUARANTINE') {
+        // Confirmed-closed (verified qty=0 via getPositionRisk() — see recoverMissingProtectiveSl's
+        // item 2 fix) — genuinely gone, safe to remove from the ledger/ownership.
+        console.error(`[PROTECTIVE_SL_${posResult.sl.reason}_IN_RUN] ${posResult.symbol} ${posResult.side}: ${posResult.sl.detail}`);
+        telegramQueue.enqueue(`🚨 [EMERGENCY_CLOSE (in-run)] ${posResult.symbol} ${posResult.side}: ${posResult.sl.detail}`);
+        entriesBlockedDueToRestartQuarantineBySymbol.add(posResult.symbol);
+        rs.symbolState.openPositions = rs.symbolState.openPositions.filter((e) => e.meta.entryTimestamp !== posResult.entryTimestamp);
+        rs.orderIds.delete(posResult.entryTimestamp);
+        stateChanged = true;
+      } else if (posResult.sl.status === 'PROTECTION_DEGRADED') {
+        // TICKET-G1R-A "Final Safety Hotfix" item 1 (THE confirmed bug fix) — OPERATOR_REQUIRED and a
+        // failed/unverified emergency close are NOT treated like a confirmed close: the position is
+        // STILL open on the exchange with NO verified SL. It stays in openPositions/orderIds (never
+        // removed here) so it (a) keeps being retried next cycle — buildProtectiveMonitorInputs only
+        // excludes entriesBlockedDueToRestartQuarantineBySymbol, which this status never joins — and
+        // (b) keeps contributing its real risk to rebuildPortfolioRisk(). Portfolio-wide admission
+        // block comes from hasAnyProtectionDegradedPosition() (see the tick loop), not from this Set.
+        if (entry) {
+          entry.meta.protectionStatus = 'PROTECTION_DEGRADED';
+          // item 2 — partial-fill canonical update: a confirmed nonzero residual after a market-close
+          // ATTEMPT is the new true remaining exposure, never the stale pre-close notional.
+          if (posResult.sl.reason === 'EMERGENCY_CLOSE_FAILED' && posResult.sl.residualBaseQty !== null && posResult.sl.residualBaseQty > 0) {
+            entry.position.remainingPositionSize = posResult.sl.residualBaseQty * entry.position.entryPrice;
+          }
+        }
+        console.error(`[PROTECTIVE_SL_${posResult.sl.reason}_IN_RUN] ${posResult.symbol} ${posResult.side}: ${posResult.sl.detail}`);
+        // Throttled CRITICAL resend (item 1's explicit anti-spam requirement) — same
+        // Map-keyed-by-position pattern as balanceDivergenceWarningSent's boolean, generalized per key
+        // since multiple positions can be independently degraded at once.
+        const alertKey = `${posResult.symbol}:${posResult.entryTimestamp}`;
+        const lastSentMs = protectionDegradedAlertLastSentMsByKey.get(alertKey) ?? 0;
+        if (now - lastSentMs >= PROTECTION_DEGRADED_ALERT_RESEND_MS) {
+          protectionDegradedAlertLastSentMsByKey.set(alertKey, now);
+          telegramQueue.enqueue(`🚨🚨 [CRITICAL — CẦN CAN THIỆP THỦ CÔNG (in-run)] ${posResult.symbol} ${posResult.side}: ${posResult.sl.detail}`);
+        }
+        stateChanged = true;
+      } else if (entry && entry.meta.protectionStatus === 'PROTECTION_DEGRADED' && (posResult.sl.status === 'VERIFIED' || posResult.sl.status === 'NO_PERSISTED_ORDERS')) {
+        // Defensive: a position that WAS degraded but this cycle's fresh verify says VERIFIED (e.g. an
+        // operator manually fixed the SL out-of-band) also clears the flag — recovery isn't only
+        // reachable via the RECOVERED branch above.
+        entry.meta.protectionStatus = 'PROTECTED';
+        protectionDegradedAlertLastSentMsByKey.delete(`${posResult.symbol}:${posResult.entryTimestamp}`);
+        stateChanged = true;
+      }
+
+      for (const finding of posResult.tpFindings) {
+        console.warn(`[PROTECTIVE_TP_${finding.kind}_IN_RUN] ${posResult.symbol} ${posResult.side} tier=${finding.tier} algoId=${finding.tpAlgoId}: ${finding.detail}`);
+        telegramQueue.enqueue(`⚠️ [TP CẢNH BÁO (in-run)] ${posResult.symbol} ${posResult.side} ${finding.tier}: ${finding.detail}`);
+      }
+    }
+    if (stateChanged) persistLiveState();
+    return snapshotResult.status;
+  }
+  // TICKET-G1R-A "Final Safety Hotfix" item 3 — single-flight guard: if a cycle is still running when
+  // the timer fires again (e.g. a prior cycle hung longer than ACCOUNT_SYNC_CYCLE_INTERVAL_MS), the
+  // new invocation SKIPS entirely rather than running a second cycle concurrently (which could double
+  // place/close orders for the same position). See createSingleFlightRunner's own doc comment for the
+  // `finally`-guaranteed lock release.
+  // TICKET-G1R-A "Freshness Bootstrap Hotfix" item 1/5 — the SAME single-flight instance is reused for
+  // BOTH the one-time startup bootstrap call (below, before the tick loop starts) and every periodic
+  // timer firing — this is what guarantees they never run concurrently/double (item 5's required test).
+  const accountSyncCycleSingleFlight = createSingleFlightRunner(runAccountSyncCycleTickBody);
+  async function runAccountSyncCycleTick(): Promise<void> {
+    const outcome = await accountSyncCycleSingleFlight.run();
+    if (outcome.skipped) {
+      console.warn('[ACCOUNT_SYNC_CYCLE_SKIPPED] chu kỳ giám sát SL/TP trước vẫn đang chạy — bỏ qua lần gọi này (single-flight, không chạy chồng).');
+    }
+  }
+
+  // TICKET-G1R-A "Freshness Bootstrap Hotfix" item 1 — startup shutdown safety net: SIGINT/SIGTERM
+  // received while the synchronous bootstrap call below is still awaiting must NOT hang the process.
+  // This early handler is intentionally minimal (nothing else has started yet — no feed/tickTimer/
+  // reconciler) and is REPLACED by the full shutdown handler once main() finishes startup (see below).
+  // Reuses the exact bounded-wait-then-exit pattern "Final Safety Hotfix" item 3 already established.
+  let earlyShutdownInProgress = false;
+  async function earlyBootstrapShutdown(): Promise<void> {
+    if (earlyShutdownInProgress) return;
+    earlyShutdownInProgress = true;
+    console.log('Đang dừng liveRunner (SIGINT/SIGTERM) trong lúc bootstrap khởi động...');
+    const deadlineMs = Date.now() + 30_000;
+    while (accountSyncCycleSingleFlight.isInFlight() && Date.now() < deadlineMs) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    if (accountSyncCycleSingleFlight.isInFlight()) {
+      console.warn('[SHUTDOWN] bootstrap vẫn chưa xong sau 30s chờ — thoát tiến trình dù vậy (đã log rõ, không chờ vô hạn).');
+    }
+    try {
+      await telegramQueue.flush();
+    } catch {
+      // best-effort during an early/aborted startup — never let a flush failure block exit.
+    }
+    process.exit(0);
+  }
+  const earlyShutdownSigintHandler = (): void => void earlyBootstrapShutdown();
+  const earlyShutdownSigtermHandler = (): void => void earlyBootstrapShutdown();
+  process.on('SIGINT', earlyShutdownSigintHandler);
+  process.on('SIGTERM', earlyShutdownSigtermHandler);
+
+  // TICKET-G1R-A "Freshness Bootstrap Hotfix" item 1 — THE fix's core requirement: run ONE synchronous
+  // account reconciliation cycle NOW, before the candle/admission tick loop (and the periodic timer)
+  // ever starts — never waiting for accountSyncCycleTimer's first ACCOUNT_SYNC_CYCLE_INTERVAL_MS firing.
+  // Read-only (inStartupBootstrapPhase gates out the repair sweep — see runAccountSyncCycleTickBody's
+  // own doc comment); real SL/TP repair, if actually needed at startup, already happened via the
+  // separate recoverMissingProtectiveSl() loop above (before accountSyncState was even declared).
+  console.log('[STARTUP_BOOTSTRAP] Đang chạy đồng bộ tài khoản lần đầu (đồng bộ, TRƯỚC vòng lặp chính) để thiết lập freshness ban đầu...');
+  const bootstrapOutcome = await accountSyncCycleSingleFlight.run();
+  inStartupBootstrapPhase = false; // periodic timer firings from here on run the FULL cycle (freshness + repair sweep)
+  if (bootstrapOutcome.skipped || bootstrapOutcome.result !== 'VALIDATED') {
+    // Fail-safe per the ticket's explicit rule (same convention as restartRecovery.ok above): never
+    // start the trading loop on an unknown/unvalidated account state.
+    throw new Error(
+      `liveRunner: bootstrap đồng bộ tài khoản lúc khởi động thất bại (${bootstrapOutcome.skipped ? 'SKIPPED — không thể xảy ra lúc khởi động (single-flight đang bận)' : bootstrapOutcome.result}) — dừng khởi động, KHÔNG giao dịch với freshness chưa xác định.`,
+    );
+  }
+  console.log(
+    `[STARTUP_BOOTSTRAP] VALIDATED — freshness ban đầu đã thiết lập (lastSuccessfulBalanceReadMs=${lastSuccessfulBalanceReadMs}, lastSuccessfulAccountSyncCycleMs=${lastSuccessfulAccountSyncCycleMs}, accountSyncState=${accountSyncState}). Bắt đầu vòng lặp chính.`,
+  );
+  // Bootstrap handler done its job — hand shutdown duties to the full handler installed further below
+  // (which also stops feed/reconciler/timers, none of which exist yet at this point in startup).
+  process.removeListener('SIGINT', earlyShutdownSigintHandler);
+  process.removeListener('SIGTERM', earlyShutdownSigtermHandler);
+
+  const accountSyncCycleTimer = setInterval(() => void runAccountSyncCycleTick(), ACCOUNT_SYNC_CYCLE_INTERVAL_MS);
 
   const reconciler = new StateReconciler({
     executor,
@@ -900,8 +1781,12 @@ async function main(): Promise<void> {
       // size/risk$/gửi Telegram. resolveAccountBalanceAfterReconcile() là hàm thuần (testable riêng),
       // trả về currentBalance không đổi nếu không có BALANCE_MISMATCH.
       const oldBalance = accountBalance;
-      accountBalance = resolveAccountBalanceAfterReconcile(accountBalance, result);
-      if (accountBalance !== oldBalance) {
+      const reconciledBalance = resolveAccountBalanceAfterReconcile(accountBalance, result);
+      if (reconciledBalance !== oldBalance) {
+        // item 1 — exchange-derived, so it goes through the SAME single apply path (provenance +
+        // freshness + anti-time-travel), not a bare assignment.
+        balanceObservationCounter += 1;
+        applyBalanceObservation({ walletBalance: reconciledBalance, capturedAt: result.timestamp, source: 'reconciler:BALANCE_MISMATCH', requestId: `bal-${result.timestamp}-${balanceObservationCounter}` });
         console.warn(`[RECONCILE_BALANCE_OVERRIDE] accountBalance ghi đè theo đúng số Sàn: $${oldBalance.toFixed(2)} → $${accountBalance.toFixed(2)}`);
       }
 
@@ -921,8 +1806,7 @@ async function main(): Promise<void> {
 
       // TICKET-151 P0-C — active reconcile ONLY for POSITION_MISSING_ON_EXCHANGE, decided directly
       // from this cycle's exchangePositions/internal openPositions (not by parsing `mismatch.detail`
-      // strings). Every OTHER mismatch type (side mismatch, missing internally, size mismatch outside
-      // this immediate open-time correction path) stays exactly log-only, unchanged — same TICKET-102
+      // strings). Side mismatch / size mismatch stay exactly log-only, unchanged — same TICKET-102
       // rationale as the balance override above: those can come from several different real causes
       // that must not be silently auto-resolved. Fire-and-forget (async) — never blocks the reconcile
       // timer's own tick loop; `reconcileGuard` + the per-symbol tick-freeze above prevent races.
@@ -932,6 +1816,23 @@ async function main(): Promise<void> {
           const hasExchange = result.exchangePositions.some((p) => p.symbol === symbol);
           if (hasInternal && !hasExchange && !reconcileGuard.isReconciling(symbol)) {
             void handlePositionMissingOnExchange(symbol, result.exchangeBalanceUsd);
+          }
+        }
+      }
+      // TICKET-G1R Checkpoint C (G1-F14) — POSITION_MISSING_INTERNALLY: the exchange has a position
+      // this bot's runtime state doesn't know about (a startup-quarantined position resurfacing here
+      // too, a manual trade, or a real bot bug). Same "never auto-adopt/close/cancel" rule as the
+      // startup restart recovery — quarantine only (permanent per-symbol block, same Set the startup
+      // path populates), decided directly from exchangePositions/internal openPositions, never by
+      // parsing `mismatch.detail` strings.
+      if (result.mismatches.some((m) => m.type === 'POSITION_MISSING_INTERNALLY')) {
+        for (const symbol of SYMBOLS) {
+          const hasInternal = runnerState[symbol].symbolState.openPositions.length > 0;
+          const hasExchange = result.exchangePositions.some((p) => p.symbol === symbol);
+          if (hasExchange && !hasInternal && !entriesBlockedDueToRestartQuarantineBySymbol.has(symbol)) {
+            entriesBlockedDueToRestartQuarantineBySymbol.add(symbol);
+            console.error(`[RUNTIME_QUARANTINE] ${symbol}: sàn có vị thế mà bot không có bản ghi nội bộ (POSITION_MISSING_INTERNALLY) — KHÔNG tự nhận quản lý, chuyển PENDING_RECONCILIATION, chặn mở lệnh mới trên ${symbol}.`);
+            telegramQueue.enqueue(`⚠️ [PENDING_RECONCILIATION] ${symbol}: phát hiện vị thế trên sàn không rõ nguồn gốc trong lúc chạy — ĐÃ CHẶN mở lệnh mới trên ${symbol}, cần kiểm tra thủ công.`);
           }
         }
       }
@@ -959,6 +1860,21 @@ async function main(): Promise<void> {
   const shutdown = async (): Promise<void> => {
     console.log('Đang dừng liveRunner (SIGINT/SIGTERM)...');
     clearInterval(tickTimer);
+    clearInterval(accountSyncCycleTimer);
+    // TICKET-G1R-A "Final Safety Hotfix" item 3 — clear the timer FIRST (no new cycle can start), then
+    // wait briefly for an in-flight cycle to finish on its own (never force-kill mid-repair — a half-
+    // finished SL recovery is worse than a slightly slower shutdown). Bounded wait, not indefinite —
+    // logs clearly and exits anyway if the cycle is still running after the deadline.
+    if (accountSyncCycleSingleFlight.isInFlight()) {
+      console.log('Đang chờ chu kỳ giám sát SL/TP hiện tại hoàn tất trước khi thoát...');
+      const deadlineMs = Date.now() + 30_000;
+      while (accountSyncCycleSingleFlight.isInFlight() && Date.now() < deadlineMs) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      if (accountSyncCycleSingleFlight.isInFlight()) {
+        console.warn('[SHUTDOWN] chu kỳ giám sát SL/TP vẫn chưa xong sau 30s chờ — thoát tiến trình dù vậy (đã log rõ, không chờ vô hạn).');
+      }
+    }
     reconciler.stop();
     feed.stop();
     await telegramQueue.flush();

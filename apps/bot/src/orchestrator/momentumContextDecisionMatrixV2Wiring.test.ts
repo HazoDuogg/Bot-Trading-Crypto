@@ -121,7 +121,7 @@ function stateWithOpenPositions(count: number, side: 'LONG' | 'SHORT' = 'LONG'):
     ...INITIAL_SYMBOL_STATE,
     openPositions: Array.from({ length: count }, () => ({
       position: pos,
-      meta: { regime: MarketRegime.TREND_RIDER, setupType: 'OB' as const, entryTimestamp: 0, actualRiskDollar: 10, marginRequired: 33.33, riskMultiplier: 1.0 },
+      meta: { regime: MarketRegime.TREND_RIDER, setupType: 'OB' as const, entryTimestamp: 0, actualRiskDollar: 10, marginRequired: 33.33, riskMultiplier: 1.0, bookedRealizedPnl: 0 },
     })),
   };
 }

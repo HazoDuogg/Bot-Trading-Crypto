@@ -135,6 +135,15 @@ export interface ProcessCandleInput {
    * leave `config.maxTotalMarginPct` permanently non-blocking (treated as 0 margin in use).
    */
   totalOpenMarginDollar?: number;
+  /**
+   * TICKET-G1R-A item 3 — sum of OpenTradeMeta.bookedRealizedPnl across every currently open
+   * position on ALL symbols combined (same one-step-lag/live-updated-within-step convention as
+   * totalOpenMarginDollar above). Added to `accountBalance` ONLY for the admission checks below
+   * (wouldExceedRiskPool/wouldExceedMaxTotalMargin/checkRiskPool) — never added to the
+   * `accountBalance` value itself, never affects CLOSE crediting or accountBalanceAfter. Optional:
+   * omit to leave admission exactly as before (treated as 0 booked, byte-identical old behavior).
+   */
+  bookedRealizedPnlPortfolio?: number;
 }
 
 export interface ProcessCandleResult {
@@ -1133,9 +1142,16 @@ async function tryOpenNewPosition(
     maxMarginCap: config.maxMarginCap,
   });
 
+  // TICKET-G1R-A item 3 — admission (risk-pool%/margin% cap checks) sees partial realized PnL from
+  // TP1/TP2 tiers already filled on OTHER open positions, without changing WHEN accountBalance
+  // itself is credited (still exactly once, at full CLOSE, via computeRealizedPnl() below —
+  // unaffected by this). sizingOutput above intentionally used the real `accountBalance` (real
+  // dollars available), never this inflated figure — only the CAP CHECKS below use it.
+  const accountBalanceForAdmission = accountBalance + (input.bookedRealizedPnlPortfolio ?? 0);
+
   // TICKET-056 Phần C: `input.allOpenPositionsRisk` must now include this symbol's own already-open
   // position(s) too (caller's responsibility) — no longer excludes "this symbol" by construction.
-  if (wouldExceedRiskPool(input.allOpenPositionsRisk, sizingOutput.actualRiskDollar, accountBalance, { riskPoolMaxPct: config.riskPoolMaxPct })) {
+  if (wouldExceedRiskPool(input.allOpenPositionsRisk, sizingOutput.actualRiskDollar, accountBalanceForAdmission, { riskPoolMaxPct: config.riskPoolMaxPct })) {
     return {
       event: { type: 'SKIPPED', symbol: input.symbol, timestamp: currentCandle.timestamp, reason: 'RISK_POOL_EXCEEDED' },
       newEntry: null,
@@ -1145,7 +1161,7 @@ async function tryOpenNewPosition(
   // TICKET-101 Việc 2 — SEPARATE cap from Risk Pool above: bounds real margin$ committed across ALL
   // 4 symbols combined, independent of the risk$-if-SL-hits figure Risk Pool bounds. A candidate can
   // pass the Risk Pool check yet still be rejected here if it would push total margin over the cap.
-  if (wouldExceedMaxTotalMargin(input.totalOpenMarginDollar ?? 0, sizingOutput.marginRequired, accountBalance, config.maxTotalMarginPct)) {
+  if (wouldExceedMaxTotalMargin(input.totalOpenMarginDollar ?? 0, sizingOutput.marginRequired, accountBalanceForAdmission, config.maxTotalMarginPct)) {
     return {
       event: { type: 'SKIPPED', symbol: input.symbol, timestamp: currentCandle.timestamp, reason: 'MAX_TOTAL_MARGIN_EXCEEDED' },
       newEntry: null,
@@ -1186,10 +1202,10 @@ async function tryOpenNewPosition(
 
   // TICKET-078 — pure surfacing of numbers already computed above (checkRiskPool reused exactly as
   // wouldExceedRiskPool already uses it, no new formula), for Telegram's "Risk Pool trước% → sau%" line.
-  const riskPoolBefore = checkRiskPool(input.allOpenPositionsRisk, accountBalance, { riskPoolMaxPct: config.riskPoolMaxPct });
+  const riskPoolBefore = checkRiskPool(input.allOpenPositionsRisk, accountBalanceForAdmission, { riskPoolMaxPct: config.riskPoolMaxPct });
   const riskPoolAfter = checkRiskPool(
     [...input.allOpenPositionsRisk, { id: '__new__', actualRiskDollar: sizingOutput.actualRiskDollar }],
-    accountBalance,
+    accountBalanceForAdmission,
     { riskPoolMaxPct: config.riskPoolMaxPct },
   );
 
@@ -1210,8 +1226,8 @@ async function tryOpenNewPosition(
     adx1h: regimeOutput.computedMetrics.adx1h,
     atrPercentile5m: regimeOutput.computedMetrics.atrPercentile5m,
     momentumScore,
-    riskPoolPctBefore: (riskPoolBefore.totalRiskDollar / accountBalance) * 100,
-    riskPoolPctAfter: (riskPoolAfter.totalRiskDollar / accountBalance) * 100,
+    riskPoolPctBefore: (riskPoolBefore.totalRiskDollar / accountBalanceForAdmission) * 100,
+    riskPoolPctAfter: (riskPoolAfter.totalRiskDollar / accountBalanceForAdmission) * 100,
   };
 
   return {
@@ -1225,6 +1241,8 @@ async function tryOpenNewPosition(
         actualRiskDollar: sizingOutput.actualRiskDollar,
         marginRequired: sizingOutput.marginRequired,
         riskMultiplier: combinedRiskMultiplier,
+        bookedRealizedPnl: 0,
+        protectionStatus: 'PROTECTED',
       },
     },
   };
@@ -1586,25 +1604,32 @@ export async function processCandle(
       // TICKET-078 — TP1/TP2 just filled without closing the position: surfaces the state
       // transition slTpManager.ts's onTp1Hit/onTp2Hit already made, no new decision logic.
       const newlyFilledTier = position.filledTiers.length > entry.position.filledTiers.length ? position.filledTiers[position.filledTiers.length - 1] : undefined;
+      let meta = entry.meta;
       if (newlyFilledTier === 'TP1' || newlyFilledTier === 'TP2') {
         const tier = position.tpLevels.find((t) => t.label === newlyFilledTier) as TpLevel;
+        // TICKET-107: was computeTierGrossPnl() (no fee deducted) — Telegram "Đã chốt X%" never
+        // matched Binance's real net number. computeTierNetPnl() subtracts an ESTIMATED
+        // proportional fee (workaround, not the root fix — see its own doc comment).
+        const tierPnlUsd = computeTierNetPnl(position, newlyFilledTier);
         events.push({
           type: 'PARTIAL_CLOSE',
           symbol: input.symbol,
           side: position.side,
           tier: newlyFilledTier,
           closePercent: tier.closePercent,
-          // TICKET-107: was computeTierGrossPnl() (no fee deducted) — Telegram "Đã chốt X%" never
-          // matched Binance's real net number. computeTierNetPnl() subtracts an ESTIMATED
-          // proportional fee (workaround, not the root fix — see its own doc comment).
-          pnlUsd: computeTierNetPnl(position, newlyFilledTier),
+          pnlUsd: tierPnlUsd,
           newSlPrice: position.currentSlPrice,
           remainingPercent: position.remainingPositionSize / position.positionSize,
           accountBalanceAfter: accountBalance,
           timestamp: currentCandle.timestamp,
         });
+        // TICKET-G1R-A item 3 (Cách B) — booked-but-not-yet-credited-to-accountBalance ledger. Never
+        // double-counted: computeRealizedPnl() at full CLOSE (below) sums each tier's OWN gross leg
+        // independently from entry/exit prices, not from this field — this field is read-only audit
+        // + admission input (accountBalanceForAdmission above), never an addend to accountBalance.
+        meta = { ...entry.meta, bookedRealizedPnl: entry.meta.bookedRealizedPnl + tierPnlUsd };
       }
-      remainingPositions.push({ position, meta: entry.meta });
+      remainingPositions.push({ position, meta });
       continue;
     }
 

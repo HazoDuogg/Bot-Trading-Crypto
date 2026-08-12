@@ -60,6 +60,140 @@ export interface AlgoOrderResult {
   raw: unknown;
 }
 
+/**
+ * TICKET-G1R Final Closure item 2 — one currently-open SL/TP algo order as reported by
+ * `getOpenAlgoOrders()` below. Field names follow the same `{algoId, algoStatus, raw}` shape
+ * `AlgoOrderResult` above already uses for placement; `side`/`positionSide`/`origQty`/
+ * `triggerPrice` are read defensively (see `getOpenAlgoOrders()` doc comment on the unverified
+ * exact response envelope).
+ */
+/** Confirmed real values (see ALGO_ORDER_SCHEMA note on getOpenAlgoOrders()). Only NEW/TRIGGERING mean "still resting on the book". */
+export const ACTIVE_ALGO_STATUSES = ['NEW', 'TRIGGERING'] as const;
+/** Full known `algoStatus` union — the terminal ones must never appear on the open-orders endpoint; if one does, that is an anomaly, not "no order". */
+export const KNOWN_ALGO_STATUSES = ['NEW', 'TRIGGERING', 'TRIGGERED', 'CANCELED', 'FINISHED', 'REJECTED', 'EXPIRED'] as const;
+export const KNOWN_ALGO_ORDER_TYPES = ['STOP_MARKET', 'TAKE_PROFIT_MARKET', 'STOP', 'TAKE_PROFIT', 'TRAILING_STOP_MARKET'] as const;
+export const KNOWN_POSITION_SIDES = ['BOTH', 'LONG', 'SHORT'] as const;
+/** The two protective order types this bot actually places (placeStopMarket/placeTakeProfitMarket). */
+export const PROTECTIVE_ALGO_ORDER_TYPES = ['STOP_MARKET', 'TAKE_PROFIT_MARKET'] as const;
+
+export interface OpenAlgoOrder {
+  algoId: number;
+  /** TICKET-G1R-A item 2 — Binance's own client-supplied order ID, if the real schema carries one under this name; read defensively (see getOpenAlgoOrders() doc comment on the unconfirmed exact field name). Undefined when absent/unparseable — never fabricated. */
+  clientAlgoId?: string;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  positionSide: (typeof KNOWN_POSITION_SIDES)[number];
+  /** Base-asset quantity. Real schema carries it as `quantity` (string); `origQty` is accepted as a fallback name but was NOT present in the confirmed testnet response. */
+  origQty: number;
+  triggerPrice: number;
+  algoStatus: string;
+  /** TICKET-G1R-A "Final Internal Closure" item 3 — confirmed present on the real response as `orderType` (STOP_MARKET/TAKE_PROFIT_MARKET/...). This is what lets item 4 tell an SL apart from a TP by evidence rather than by which local list the ID came from. */
+  orderType: (typeof KNOWN_ALGO_ORDER_TYPES)[number];
+  /** Confirmed present as `algoType` (only value observed/documented: 'CONDITIONAL'). */
+  algoType: string;
+  /** TICKET-G1R-A item 2 — reduce-only flag, read defensively from whichever of reduceOnly/closePosition the real response carries (schema unconfirmed, see doc comment below). Undefined when neither field is present/parseable. */
+  reduceOnly?: boolean;
+  /** TICKET-G1R-A item 2 — Binance Futures' "close entire position" flag (distinct from reduceOnly — closePosition ignores quantity and always closes 100%). Undefined when absent/unparseable. */
+  closePosition?: boolean;
+  raw: unknown;
+}
+
+/**
+ * TICKET-G1R-A "Final Internal Closure" item 3 — STRICT per-entry parser. Replaces the old lenient
+ * mapping whose `side: o.side === 'SELL' ? 'SELL' : 'BUY'` silently turned `undefined`/`null`/a typo
+ * into a valid-looking `'BUY'`, which could make verifyProtectiveSlOrder()/verifyProtectiveTpOrder()
+ * accept a malformed order as correctly-sided and defeat the whole protective-order check.
+ *
+ * FAIL-CLOSED INVARIANT: anything unrecognised THROWS. The caller
+ * (captureCoherentReconciliationSnapshotOnce) turns a throw into READ_ERROR ->
+ * ACCOUNT_STATE_UNKNOWN -> portfolio-wide entry block. A malformed response must never be
+ * indistinguishable from "this position has no protective orders".
+ *
+ * Fields required by the confirmed exchange schema are mandatory. Missing semantic fields are a
+ * hard error; otherwise a malformed order could be accepted as protective by omission.
+ */
+export function parseOpenAlgoOrderEntry(entry: unknown, fallbackSymbol?: string): OpenAlgoOrder {
+  if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+    throw new Error(`getOpenAlgoOrders: algo order entry không phải object: ${JSON.stringify(entry)}`);
+  }
+  const o = entry as Record<string, unknown>;
+  // Explicit annotation on the CONST (not just the arrow) — required for TS control-flow narrowing
+  // to treat a `fail(...)` call as unreachable-after.
+  const fail: (why: string) => never = (why) => {
+    throw new Error(`getOpenAlgoOrders: ${why}: ${JSON.stringify(entry)}`);
+  };
+
+  const algoId = Number(o.algoId);
+  if (!Number.isFinite(algoId) || algoId <= 0) fail(`algoId không hữu hạn hoặc <= 0`);
+
+  const symbol = typeof o.symbol === 'string' && o.symbol !== '' ? o.symbol : fallbackSymbol;
+  if (typeof symbol !== 'string' || symbol === '') fail(`symbol rỗng/thiếu và không có fallback symbol`);
+
+  if (o.side !== 'BUY' && o.side !== 'SELL') fail(`side phải đúng 'BUY' hoặc 'SELL', nhận được ${JSON.stringify(o.side)}`);
+  const side = o.side as 'BUY' | 'SELL';
+
+  if (typeof o.positionSide !== 'string' || !(KNOWN_POSITION_SIDES as readonly string[]).includes(o.positionSide)) {
+    fail(`positionSide thiếu/không hợp lệ (chỉ chấp nhận ${KNOWN_POSITION_SIDES.join('/')}), nhận được ${JSON.stringify(o.positionSide)}`);
+  }
+  const positionSide = o.positionSide as (typeof KNOWN_POSITION_SIDES)[number];
+
+  const origQty = Number(o.quantity ?? o.origQty);
+  if (!Number.isFinite(origQty) || origQty <= 0) fail(`quantity/origQty không hữu hạn hoặc <= 0`);
+
+  const triggerPrice = Number(o.triggerPrice ?? o.stopPrice);
+  if (!Number.isFinite(triggerPrice) || triggerPrice <= 0) fail(`triggerPrice/stopPrice không hữu hạn hoặc <= 0`);
+
+  const algoStatus = o.algoStatus ?? o.status;
+  if (typeof algoStatus !== 'string' || !(KNOWN_ALGO_STATUSES as readonly string[]).includes(algoStatus)) {
+    fail(`algoStatus lạ/không phải string (biết: ${KNOWN_ALGO_STATUSES.join('/')}), nhận được ${JSON.stringify(algoStatus)}`);
+  }
+  if (!(ACTIVE_ALGO_STATUSES as readonly string[]).includes(algoStatus as string)) {
+    // A terminal status on the OPEN-orders endpoint is an anomaly. Reject rather than filter it out
+    // silently — dropping it would look identical to "no protective order exists".
+    fail(`algoStatus='${String(algoStatus)}' không còn active (chỉ chấp nhận ${ACTIVE_ALGO_STATUSES.join('/')}) trên endpoint open-orders`);
+  }
+
+  if (typeof o.orderType !== 'string' || !(KNOWN_ALGO_ORDER_TYPES as readonly string[]).includes(o.orderType)) {
+    fail(`orderType thiếu/không hợp lệ (biết: ${KNOWN_ALGO_ORDER_TYPES.join('/')}), nhận được ${JSON.stringify(o.orderType)}`);
+  }
+  const orderType = o.orderType as (typeof KNOWN_ALGO_ORDER_TYPES)[number];
+
+  if (typeof o.algoType !== 'string' || o.algoType === '') fail(`algoType thiếu hoặc không phải string non-empty`);
+  const algoType = o.algoType as string;
+  if (o.reduceOnly === undefined && o.closePosition === undefined) {
+    fail(`thiếu cả reduceOnly và closePosition; không thể chứng minh semantics đóng vị thế`);
+  }
+
+  return {
+    algoId,
+    clientAlgoId: typeof o.clientAlgoId === 'string' ? o.clientAlgoId : undefined,
+    symbol,
+    side,
+    positionSide,
+    origQty,
+    triggerPrice,
+    algoStatus: algoStatus as string,
+    orderType,
+    algoType,
+    reduceOnly: normalizeAlgoBoolean(o.reduceOnly, 'reduceOnly', fail),
+    closePosition: normalizeAlgoBoolean(o.closePosition, 'closePosition', fail),
+    raw: entry,
+  };
+}
+
+/**
+ * The confirmed testnet response returns REAL booleans here. Binance's REQUEST side documents these
+ * as the strings "true"/"false", so both are normalized — but anything else throws rather than
+ * defaulting to `false`, which would silently read as "this is not a reduce-only order".
+ */
+function normalizeAlgoBoolean(value: unknown, field: string, fail: (why: string) => never): boolean | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === 'boolean') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return fail(`${field} có mặt nhưng không phải boolean/"true"/"false", nhận được ${JSON.stringify(value)}`);
+}
+
 export interface DryRunResult {
   dryRun: true;
   method: string;
@@ -424,8 +558,60 @@ export class BinanceOrderExecutor {
    * ambiguous when config.maxConcurrentPositionsPerSymbol > 1, needs PM to confirm position mode
    * first). `limit` caps the page size Binance returns (max 1000 per their docs).
    */
-  async getIncome(symbol: string, startTime: number, endTime: number, limit = 1000): Promise<unknown> {
-    return this.signedGet('/fapi/v1/income', { symbol, startTime, endTime, limit });
+  /**
+   * TICKET-G1R-A "Final Internal Closure" item 2 — `symbol` is now OPTIONAL and only ever added to the
+   * query when non-empty. It used to be `symbol: string` spread unconditionally, so the whole-account
+   * call site (liveStateSync.ts's coherent-snapshot "fills" leg) sent a literal `symbol=` to Binance
+   * instead of omitting the filter. Same conditional-spread pattern as getPositionRisk()/
+   * getOpenAlgoOrders() above. startTime/endTime/limit semantics unchanged.
+   */
+  async getIncome(symbol: string | undefined, startTime: number, endTime: number, limit = 1000): Promise<unknown> {
+    const params: Record<string, string | number | boolean> = { startTime, endTime, limit };
+    if (typeof symbol === 'string' && symbol.trim() !== '') params.symbol = symbol;
+    return this.signedGet('/fapi/v1/income', params);
+  }
+
+  /**
+   * TICKET-G1R Final Closure item 2 — reads currently-OPEN SL/TP algo orders (STOP_MARKET/
+   * TAKE_PROFIT_MARKET, placed via `placeStopMarket()`/`placeTakeProfitMarket()` above) for
+   * protective-order reconciliation after restart. Read-only, never gated by dryRun (same
+   * convention as getAccountInfo/getPositionRisk/getIncome).
+   *
+   * TICKET-G1R-A "Final Internal Closure" item 5 — ENDPOINT **AND RESPONSE SCHEMA CONFIRMED**
+   * (DQ-A). Path: `GET /fapi/v1/openAlgoOrders`. Two independent sources agree:
+   * - Docs/typed connectors: Binance `New-Algo-Order` docs page + `tiagosiebler/binance`
+   *   (`src/usdm-client.ts` `getOpenAlgoOrders() => Promise<FuturesAlgoOrderResponse[]>`, i.e. a
+   *   BARE ARRAY, and `src/types/futures.ts` for the field/union definitions).
+   * - One bounded, read-only, explicitly-authorized TESTNET GET performed 2026-08-11 against a
+   *   testnet account holding 8 resting orders. Sanitized capture (no key/secret/signature/URL):
+   *   `src/live/fixtures/openAlgoOrdersResponseFixture.json` + its `.md` provenance note.
+   *
+   * CONFIRMED FACTS the parser below now relies on:
+   * - Envelope: BARE ARRAY (never `{orders:[...]}`). The `.orders` fallback is kept only as a
+   *   defensive accept, not as an expectation.
+   * - Quantity field is `quantity` (a STRING). `origQty` is ABSENT — the `?? o.quantity` fallback
+   *   this parser already had is what made it work; the `origQty` name is now the fallback, not the
+   *   primary.
+   * - Trigger field is `triggerPrice` (STRING). `stopPrice` is ABSENT.
+   * - Status field is `algoStatus` (STRING). `status` is ABSENT.
+   * - `reduceOnly`/`closePosition`/`priceProtect` are REAL BOOLEANS, not "true"/"false" strings
+   *   (the request side takes BooleanString; the response side does not). Both spellings are still
+   *   normalized below so a future response-format change fails loudly rather than reading false.
+   * - `orderType` distinguishes STOP_MARKET vs TAKE_PROFIT_MARKET; `algoType` was always
+   *   `CONDITIONAL`; `positionSide` was `BOTH` (One-Way account).
+   *
+   * HONEST LIMITATION: every one of the 8 observed orders was TAKE_PROFIT_MARKET / BOTH / NEW /
+   * reduceOnly=true. STOP_MARKET, LONG/SHORT positionSide, and the TRIGGERING status are taken from
+   * the typed-connector unions (same endpoint, same `CONDITIONAL` algoType), not from a directly
+   * observed row.
+   */
+  async getOpenAlgoOrders(symbol?: string): Promise<OpenAlgoOrder[]> {
+    const raw = await this.signedGet('/fapi/v1/openAlgoOrders', symbol ? { symbol } : {});
+    const list: unknown[] | undefined = Array.isArray(raw) ? raw : (raw as { orders?: unknown[] } | null | undefined)?.orders;
+    if (!Array.isArray(list)) {
+      throw new Error(`getOpenAlgoOrders: response shape không như dự kiến (không phải mảng, không có field .orders là mảng) — endpoint path/response envelope CHƯA được xác nhận thật, cần kiểm tra thủ công: ${JSON.stringify(raw)}`);
+    }
+    return list.map((entry) => parseOpenAlgoOrderEntry(entry, symbol));
   }
 
   // --- Mutating endpoints (gated by dryRun) ---

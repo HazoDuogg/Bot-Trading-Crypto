@@ -37,6 +37,7 @@ import {
 } from '../dist/xgbFilter/config.js';
 import type { OpenPositionRisk } from '../dist/risk/riskPool.js';
 import type { TpPlan } from '../dist/risk/slTpManager.js';
+import { computeCurrentPositionRisk } from '../dist/risk/currentRisk.js';
 import { emptyFunnelStats, fmtInt, funnelReportMarkdown, pct, STATE_PASS_REGIMES, type RegimeFunnelStats } from './entryFunnelReport.js';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
@@ -901,7 +902,11 @@ async function main(): Promise<void> {
     // real margin$ (marginRequired) instead of risk$ — a SEPARATE, independent cap.
     const openMarginBySymbol: Record<string, number> = {};
     for (const symbol of SYMBOLS) {
-      const totalRisk = symbolsData[symbol].state.openPositions.reduce((sum, entry) => sum + entry.meta.actualRiskDollar, 0);
+      // TICKET-G1R Checkpoint D (G1-F04): recomputed from CURRENT remainingPositionSize/currentSlPrice
+      // every time (rebuild-from-scratch), not the stale meta.actualRiskDollar frozen at open — a
+      // position's committed risk must shrink as TP1/TP2 fire and SL ratchets, never stay at its
+      // full initial value.
+      const totalRisk = symbolsData[symbol].state.openPositions.reduce((sum, entry) => sum + computeCurrentPositionRisk(entry.position).openRiskDollar, 0);
       if (totalRisk > 0) openRiskBySymbol[symbol] = totalRisk;
       const totalMargin = symbolsData[symbol].state.openPositions.reduce((sum, entry) => sum + entry.meta.marginRequired, 0);
       if (totalMargin > 0) openMarginBySymbol[symbol] = totalMargin;
@@ -968,6 +973,10 @@ async function main(): Promise<void> {
       // TICKET-101 Việc 2: single aggregate across ALL 4 symbols (not a per-symbol breakdown like
       // allOpenPositionsRisk above) — wouldExceedMaxTotalMargin() only ever needs the total.
       const totalOpenMarginDollar = Object.values(openMarginBySymbol).reduce((sum, m) => sum + m, 0);
+      // TICKET-G1R-A item 3 — sum of meta.bookedRealizedPnl across every open position on ALL 4
+      // symbols, live-updated within this same step exactly like openRiskBySymbol/openMarginBySymbol
+      // above (recomputed fresh each symbol's turn, not a step-start snapshot).
+      const bookedRealizedPnlPortfolio = SYMBOLS.reduce((sum, s) => sum + symbolsData[s].state.openPositions.reduce((s2, e) => s2 + e.meta.bookedRealizedPnl, 0), 0);
 
       const input: ProcessCandleInput = {
         symbol,
@@ -982,6 +991,7 @@ async function main(): Promise<void> {
         totalOpenMarginDollar,
         accountBalance,
         allOpenPositionsRisk,
+        bookedRealizedPnlPortfolio,
         momentumDirectOpenPositionsTotal,
         momentumDirectOpenPositions,
       };
@@ -1123,7 +1133,8 @@ async function main(): Promise<void> {
       // pre-step total — under-counting real concentrated risk within a single step. Refresh
       // immediately after each symbol's own processCandle() so the NEXT symbol in this step's loop
       // sees this symbol's up-to-date total.
-      const newTotalRisk = sd.state.openPositions.reduce((sum, entry) => sum + entry.meta.actualRiskDollar, 0);
+      // TICKET-G1R Checkpoint D (G1-F04): same rebuild-from-scratch recompute as the pre-loop seed above.
+      const newTotalRisk = sd.state.openPositions.reduce((sum, entry) => sum + computeCurrentPositionRisk(entry.position).openRiskDollar, 0);
       if (newTotalRisk > 0) openRiskBySymbol[symbol] = newTotalRisk;
       else delete openRiskBySymbol[symbol];
       const newTotalMargin = sd.state.openPositions.reduce((sum, entry) => sum + entry.meta.marginRequired, 0);
