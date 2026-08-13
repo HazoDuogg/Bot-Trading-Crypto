@@ -61,6 +61,15 @@ import {
   type PartialCloseEvent,
   type SymbolState,
 } from '../dist/orchestrator/types.js';
+import {
+  reconstructRegimeStatesAcrossSymbols,
+  decideRegimeStateSource,
+  formatRegimeReconstructionLog,
+  RECON_REQUIRED_5M,
+  RECON_REQUIRED_15M,
+  RECON_REQUIRED_1H,
+  type SymbolCandleHistory,
+} from '../dist/live/regimeStateReconstruction.js';
 import { computeCorrelatedRiskRatio } from '../dist/regime/correlatedRisk.js';
 import { RegimeConfig } from '../dist/regime/config.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
@@ -389,7 +398,14 @@ async function main(): Promise<void> {
       const file: LiveStateFile = {
         schemaVersion: LIVE_STATE_SCHEMA_VERSION,
         savedAtMs: Date.now(),
-        symbols: Object.fromEntries(SYMBOLS.map((s) => [s, { symbolState: runnerState[s].symbolState, orderIds: Array.from(runnerState[s].orderIds.entries()) }])),
+        // TICKET-G3R — regimeStateCandleTimestamp is the candle boundary the persisted regimeState
+        // belongs to; without it a restart cannot tell a current regime state from a stale one.
+        symbols: Object.fromEntries(
+          SYMBOLS.map((s) => [
+            s,
+            { symbolState: runnerState[s].symbolState, orderIds: Array.from(runnerState[s].orderIds.entries()), regimeStateCandleTimestamp: runnerState[s].lastProcessedCandleTimestamp },
+          ]),
+        ),
       };
       writeLiveStateFileAtomic(LIVE_STATE_FILE_PATH, file);
     } catch (err) {
@@ -584,7 +600,16 @@ async function main(): Promise<void> {
   const feed = new LiveCandleFeed({
     symbols: SYMBOLS,
     baseUrl: envConfig.baseUrl,
-    windowSizes: { '1h': WINDOW_1H_MOMENTUM }, // covers both candles1h (last 40) and candles1hMomentum (full 500) from the SAME buffer
+    // TICKET-G3R — the buffers must ALSO carry the warm-up the startup regime reconstruction needs on
+    // EVERY timeframe it replays, not just 5m: 5m/15m/1h are all deepened together (the ticket's
+    // explicit "không được backfill 5m dài mà để 15m/1h ngắn hơn" rule). Decision-neutral: every
+    // decision-time window below is still sliced to WINDOW_5M/WINDOW_15M/WINDOW_1H/WINDOW_1H_MOMENTUM
+    // from the tail of these buffers, so a deeper buffer changes no input the orchestrator sees.
+    windowSizes: {
+      '5m': RECON_REQUIRED_5M + 1, // +1 keeps Binance's forming candle without evicting a required closed one
+      '15m': RECON_REQUIRED_15M + 1,
+      '1h': Math.max(WINDOW_1H_MOMENTUM, RECON_REQUIRED_1H) + 1, // covers candles1h (last 40), candles1hMomentum (500) and reconstruction from the SAME buffer
+    },
     onError: (err, symbol, interval) => console.error(`[FEED_ERROR] ${symbol} ${interval}: ${err.message}`),
     onGapFilled: (symbol, interval, gaps) => console.log(`[FEED] ${symbol} ${interval}: đã vá ${gaps.length} khoảng trống`),
     onThrottled: (symbol, interval) => console.warn(`[FEED_THROTTLE] ${symbol} ${interval}: bỏ qua poll (gần chạm ngưỡng weight)`),
@@ -592,6 +617,97 @@ async function main(): Promise<void> {
   console.log('Đang tải lịch sử nến ban đầu cho 4 coin...');
   await feed.start();
   console.log('LiveCandleFeed đã sẵn sàng.');
+
+  // ---- TICKET-G3R: cold-start regime-state reconstruction ---------------------------------------
+  //
+  // Startup sequencing. The ticket asks for
+  //   candle backfill -> input integrity -> regime reconstruction -> exchange/restart reconciliation
+  //   -> entry admission enabled -> live tick
+  // but G1R Checkpoint C deliberately runs exchange/restart reconciliation BEFORE the candle feed, so
+  // no candle can ever be processed against an unreconciled guess of what is open. Rather than invert
+  // that safety-critical ordering, reconstruction is placed here — it reads ONLY candle-feed data and
+  // makes no exchange call, so its position relative to the exchange reconciliation is immaterial. The
+  // ticket's actual invariant ("no entry may be admitted while reconstruction is running or has
+  // failed") is preserved exactly: this runs BEFORE the first tick is scheduled, and any symbol left
+  // without a trustworthy regime state blocks new-entry admission for the WHOLE portfolio through the
+  // same sentinel-over-cap mechanism Checkpoint D / G2R F-01 already use. Effective order:
+  //   exchange reconciliation -> candle backfill -> input integrity -> regime reconstruction
+  //   -> entry admission enabled -> live tick.
+  //
+  // Symbols whose regime state could not be established from EITHER a fresh persisted state or a full
+  // candle replay. Permanent for the life of the process (same convention as
+  // entriesBlockedDueToRestartQuarantineBySymbol) — new entries blocked portfolio-wide, open-position
+  // management continues untouched.
+  const symbolsWithUnavailableRegimeState = new Set<string>();
+  {
+    const reconstructionNow = Date.now();
+    const historyBySymbol: Record<string, SymbolCandleHistory> = {};
+    for (const symbol of SYMBOLS) {
+      historyBySymbol[symbol] = {
+        candles5m: feed.getClosedCandles(symbol, '5m', reconstructionNow),
+        candles15m: feed.getClosedCandles(symbol, '15m', reconstructionNow),
+        candles1h: feed.getClosedCandles(symbol, '1h', reconstructionNow),
+      };
+      const h = historyBySymbol[symbol];
+      console.log(
+        `[REGIME_RECONSTRUCTION_INPUT] symbol=${symbol} closed5m=${h.candles5m.length}/${RECON_REQUIRED_5M} closed15m=${h.candles15m.length}/${RECON_REQUIRED_15M} closed1h=${h.candles1h.length}/${RECON_REQUIRED_1H}`,
+      );
+    }
+    let reconstruction: ReturnType<typeof reconstructRegimeStatesAcrossSymbols>;
+    try {
+      reconstruction = reconstructRegimeStatesAcrossSymbols({ symbols: SYMBOLS, historyBySymbol });
+    } catch (err) {
+      // The function itself already fails closed per symbol; this only covers a truly unexpected
+      // throw. Never falls back to a default regime state and then trades.
+      console.error(`[REGIME_RECONSTRUCTION_ERROR] dựng lại regime state thất bại toàn cục (đã bắt): ${(err as Error).message}`);
+      reconstruction = Object.fromEntries(
+        SYMBOLS.map((s) => [
+          s,
+          {
+            status: 'INVALID' as const,
+            symbol: s,
+            reason: 'RECONSTRUCTION_EXCEPTION' as const,
+            telemetry: {
+              symbol: s, replayStart: null, replayEnd: null, replayedCandles: 0, previousRegime: null, candidateRegime: null,
+              streakCount: 0, lastDangerZoneTimestamp: null, cooldownRemainingMinutes: 0, inputQuality: 'RECONSTRUCTION_EXCEPTION' as const,
+              available5m: historyBySymbol[s].candles5m.length, available15m: historyBySymbol[s].candles15m.length, available1h: historyBySymbol[s].candles1h.length,
+              detail: (err as Error).message,
+            },
+          },
+        ]),
+      );
+    }
+
+    const persistedFile = persistedLiveState.status === 'OK' ? persistedLiveState.file : null;
+    for (const symbol of SYMBOLS) {
+      const closed5m = historyBySymbol[symbol].candles5m;
+      const latestClosedCandleTimestamp = closed5m.length > 0 ? closed5m[closed5m.length - 1].timestamp : null;
+      const persistedRecord = persistedFile?.symbols[symbol];
+      const decision = decideRegimeStateSource({
+        persistedFileStatus: persistedLiveState.status,
+        persisted: persistedRecord !== undefined ? { regimeState: persistedRecord.symbolState.regimeState, regimeStateCandleTimestamp: persistedRecord.regimeStateCandleTimestamp } : null,
+        reconstruction: reconstruction[symbol],
+        latestClosedCandleTimestamp,
+      });
+      const rs = runnerState[symbol];
+      if (decision.source === 'UNAVAILABLE') {
+        symbolsWithUnavailableRegimeState.add(symbol);
+      } else {
+        rs.symbolState = { ...rs.symbolState, regimeState: decision.regimeState };
+        // The reconstruction/persisted state ALREADY accounts for this candle — letting the tick loop
+        // process it again would advance the hysteresis chain one extra step off the same candle and
+        // diverge from a continuously-running process.
+        rs.lastProcessedCandleTimestamp = decision.anchorTimestamp;
+      }
+      console.log(formatRegimeReconstructionLog(symbol, decision.source, reconstruction[symbol].telemetry, decision.reason));
+    }
+    if (symbolsWithUnavailableRegimeState.size > 0) {
+      const list = [...symbolsWithUnavailableRegimeState].join(',');
+      console.error(`[REGIME_STATE_UNAVAILABLE] ${list}: không dựng lại được regime state — CHẶN mở lệnh mới TOÀN PORTFOLIO (vẫn quản lý vị thế đang mở). Cần người kiểm tra dữ liệu nến trước khi giao dịch lại.`);
+      telegramQueue.enqueue(`⚠️ [REGIME_STATE_UNAVAILABLE] Không dựng lại được trạng thái Regime cho: ${list}. ĐÃ CHẶN mở lệnh mới toàn bộ 4 coin (vị thế đang mở vẫn được quản lý).`);
+    }
+    persistLiveState(); // persist the just-established regime state + its candle anchor
+  }
 
   console.log(
     `TICKET-124 oodGuardEnabled=${OOD_GUARD_ENABLED}${OOD_GUARD_ENABLED ? ` (RISK_REDUCTION, emaRatioSlowThreshold=${OOD_GUARD_EMA_RATIO_SLOW_THRESHOLD}, riskReductionMultiplier=${OOD_GUARD_RISK_REDUCTION_MULTIPLIER})` : ' (shadow monitoring only — set OOD_GUARD_ENABLED=true to actually apply)'}`,
@@ -1006,9 +1122,18 @@ async function main(): Promise<void> {
       // Item 5 — stale balance OR stale protective-cycle evidence is a further, INDEPENDENT trigger:
       // either one alone is sufficient to fail closed (both isFreshnessEvidenceStale calls are
       // evaluated, not short-circuited away — see the dedicated freshness tests).
+      // TICKET-G3R — `symbolsWithUnavailableRegimeState` joins the same sentinel-over-cap mechanism
+      // below: a symbol whose regime state could not be reconstructed OR restored from a fresh
+      // persisted state has an UNKNOWN post-DANGER cooldown anchor, so its regime label cannot be
+      // trusted for admission. No new parallel gate, no change to the 15% cap or to orchestrator's
+      // decision logic. Portfolio-wide, per the ticket's "block TOÀN BỘ new-entry admission" rule.
+      // (Kept OUT of the expression body: g1rFinalClosureFix/g1rFinalSafetyHotfixFix/
+      // g1rFinalInternalClosureFix scan a fixed 600-char window from the `const` below to prove no
+      // condition was silently dropped, and an inline comment would push conditions out of it.)
       const hasUnquantifiableExposureBlockingAdmission =
         entriesBlockedDueToUnreconciledFillBySymbol.size > 0 ||
         entriesBlockedDueToRestartQuarantineBySymbol.size > 0 ||
+        symbolsWithUnavailableRegimeState.size > 0 ||
         accountSyncState === 'ACCOUNT_STATE_UNKNOWN' ||
         hasAnyProtectionDegradedPosition() ||
         // item 1 — the THREE balance conditions, not just freshness: parsed+applied
@@ -1066,6 +1191,16 @@ async function main(): Promise<void> {
         const latestClosed = closed5m[closed5m.length - 1];
         if (rs.lastProcessedCandleTimestamp !== null && latestClosed.timestamp <= rs.lastProcessedCandleTimestamp) continue; // already processed this candle
 
+        // TICKET-G2R F-01 — the LOW_LIQUIDITY input backtest.ts has always supplied and live never
+        // did. INSUFFICIENT_WARMUP is never treated as "volume is normal": the field is withheld AND
+        // admission is blocked below, so LOW_LIQUIDITY is never silently evaluated as false.
+        const sessionVolume = feed.getSessionVolumeWindow(symbol, now);
+        if (sessionVolume.status !== 'READY') {
+          console.warn(
+            `[SESSION_VOLUME_WARMUP] ${symbol}: chưa đủ nến 5m cho LOW_LIQUIDITY (${sessionVolume.closedCount}/${sessionVolume.required}, lý do=${sessionVolume.reason}) — chặn mở lệnh mới toàn danh mục cho tới khi đủ.`,
+          );
+        }
+
         const window5m = slice(closed5m, WINDOW_5M);
         const window15m = slice(feed.getClosedCandles(symbol, '15m', now), WINDOW_15M);
         const window1hFull = feed.getClosedCandles(symbol, '1h', now);
@@ -1087,6 +1222,13 @@ async function main(): Promise<void> {
         if (hasUnquantifiableExposureBlockingAdmission) {
           allOpenPositionsRisk.push({ id: 'UNKNOWN_EXPOSURE_BLOCK', actualRiskDollar: accountBalance * CONFIG.riskPoolMaxPct + 1 });
         }
+        // TICKET-G2R F-01 — same sentinel-over-cap mechanism as the block above (no change to
+        // orchestrator's decision logic or the 15% cap): while the session-volume window is not
+        // ready, LOW_LIQUIDITY cannot be evaluated at all, so no NEW entry may be admitted.
+        // Already-open positions still process this candle normally (management must not stop).
+        if (sessionVolume.status !== 'READY') {
+          allOpenPositionsRisk.push({ id: 'SESSION_VOLUME_WARMUP_BLOCK', actualRiskDollar: accountBalance * CONFIG.riskPoolMaxPct + 1 });
+        }
         // TICKET-101 Việc 2: single aggregate across ALL 4 symbols (not a per-symbol breakdown) —
         // wouldExceedMaxTotalMargin() only ever needs the total.
         const totalOpenMarginDollar = Object.values(openMarginBySymbol).reduce((sum, m) => sum + m, 0);
@@ -1098,6 +1240,7 @@ async function main(): Promise<void> {
           candles1m: window1m,
           candles1d: window1d,
           candles1hMomentum: window1hMomentum,
+          candles5mSessionVolume: sessionVolume.candles,
           correlatedRiskRatio,
           accountBalance,
           allOpenPositionsRisk,

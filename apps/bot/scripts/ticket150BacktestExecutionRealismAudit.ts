@@ -40,7 +40,8 @@
  */
 import { writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import type { CandleData } from '../dist/regime/types.js';
+import { MarketRegime, type CandleData } from '../dist/regime/types.js';
+import { detectRegime } from '../dist/regime/regimeDetector.js';
 import { processCandle, type ProcessCandleInput } from '../dist/orchestrator/orchestrator.js';
 import { INITIAL_SYMBOL_STATE, type OrchestratorConfig, type SymbolState } from '../dist/orchestrator/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
@@ -233,7 +234,37 @@ export interface ReplayResult {
   eventTrace: Record<string, unknown>[];
 }
 
-export async function runReplay(cfg: OrchestratorConfig, fillModel: FillModel | null, endStepInclusive: number | null): Promise<ReplayResult> {
+/**
+ * TICKET-G2R P1 — OPT-IN research hooks. Omitted (the default for every pre-G2R caller) leaves this
+ * replay byte-identical: no shadow detectRegime() call is made and no state is rewritten. They exist
+ * so the NEUTRAL and cooldown variants run through THIS full orchestrator path — real entry router,
+ * XGBoost gate, risk sizing/pool, T152 guard, position conflicts, path-dependent balance — instead
+ * of a shortcut evaluation. Neither hook can change orchestrator decision logic: `blockEntry` uses
+ * the SAME over-cap risk-pool sentinel liveRunner.ts already uses to fail closed, and
+ * `rewriteDangerAnchor` only rewrites the cooldown ANCHOR TIMESTAMP that detectRegime already takes
+ * as a plain input.
+ */
+export interface ReplayVariantHooks {
+  blockEntry?: (ctx: { symbol: string; step: number; timestamp: number; regime: MarketRegime; candidateRegime: MarketRegime }) => boolean;
+  rewriteDangerAnchor?: (ctx: { symbol: string; timestamp: number; regime: MarketRegime; current: number | null }) => number | null;
+  onStepRegime?: (ctx: { symbol: string; step: number; timestamp: number; regime: MarketRegime; candidateRegime: MarketRegime; blocked: boolean }) => void;
+  /**
+   * TICKET-G3 — OPT-IN observability passthroughs to processCandle()'s own existing diagnostic
+   * callbacks (onFunnelEvent arg 6, onMomentumGateEvaluation arg 9). Both are documented in
+   * orchestrator.ts as pure observability that never affects any decision; omitting them (the
+   * default for every pre-G3 caller) passes `undefined` exactly as before. Proven behaviourally,
+   * not asserted: the G3 run's trade ledger is reconciled trade-for-trade against G2R's archived
+   * N0_CURRENT/CENTRAL ledger.
+   */
+  onFunnelEvent?: (symbol: string, timestamp: number, event: Record<string, unknown>) => void;
+  onMomentumGateEvaluation?: (evaluation: Record<string, unknown>) => void;
+  /** TICKET-G3 — fires once per (symbol, step) before processCandle, carrying the shadow regime read. */
+  onStepContext?: (ctx: { symbol: string; step: number; timestamp: number; regime: MarketRegime; adxDirection1h: 'UP' | 'DOWN' | 'FLAT' | undefined; atrPercentile5m: number | undefined; candle: CandleData; accountBalance: number }) => void;
+  /** TICKET-G3 — fires for each SKIPPED entry event (RISK_POOL_EXCEEDED / MAX_TOTAL_MARGIN_EXCEEDED / NEUTRAL_GATE_REJECTED). */
+  onSkippedEntry?: (ctx: { symbol: string; step: number; timestamp: number; reason: string }) => void;
+}
+
+export async function runReplay(cfg: OrchestratorConfig, fillModel: FillModel | null, endStepInclusive: number | null, hooks?: ReplayVariantHooks): Promise<ReplayResult> {
   const symbolsData: Record<string, SymbolData> = {};
   for (const symbol of SYMBOLS) symbolsData[symbol] = loadSymbolData(symbol);
 
@@ -306,6 +337,30 @@ export async function runReplay(cfg: OrchestratorConfig, fillModel: FillModel | 
       const allOpenPositionsRisk: OpenPositionRisk[] = SYMBOLS.filter((s) => openRiskBySymbol[s] !== undefined).map((s) => ({ id: s, actualRiskDollar: openRiskBySymbol[s] }));
       const totalOpenMarginDollar = Object.values(openMarginBySymbol).reduce((sum, m) => sum + m, 0);
 
+      // TICKET-G2R P1 — shadow regime read (pure, no state mutation): detectRegime() is a pure
+      // function of its input, and this passes the SAME state processCandle is about to pass, so
+      // this is exactly the regime that call will confirm. Only runs when a hook asks for it.
+      let variantBlocked = false;
+      if (hooks?.blockEntry !== undefined || hooks?.onStepRegime !== undefined || hooks?.rewriteDangerAnchor !== undefined || hooks?.onStepContext !== undefined) {
+        const shadow = detectRegime({
+          candles5m: window5m,
+          candles15m: w15.window,
+          candles1h: w1hBySymbol[symbol],
+          previousRegime: sd.state.regimeState.previousRegime,
+          previousCandidateRegime: sd.state.regimeState.previousCandidateRegime,
+          streakCount: sd.state.regimeState.streakCount,
+          previousDangerZoneTimestamp: sd.state.regimeState.previousDangerZoneTimestamp,
+          candles5mSessionVolume: windowSessionVolume5m,
+          correlatedRiskRatio,
+        });
+        variantBlocked = hooks?.blockEntry?.({ symbol, step, timestamp: currentCandle.timestamp, regime: shadow.regime, candidateRegime: shadow.candidateRegime }) ?? false;
+        hooks?.onStepRegime?.({ symbol, step, timestamp: currentCandle.timestamp, regime: shadow.regime, candidateRegime: shadow.candidateRegime, blocked: variantBlocked });
+        hooks?.onStepContext?.({ symbol, step, timestamp: currentCandle.timestamp, regime: shadow.regime, adxDirection1h: shadow.adxDirection1h, atrPercentile5m: shadow.computedMetrics.atrPercentile5m as number | undefined, candle: currentCandle, accountBalance: shadowBalance });
+        // Same sentinel-over-cap mechanism liveRunner.ts uses: an honestly over-cap portfolio risk
+        // total makes tryOpenNewPosition() reject, without touching its logic or the cap value.
+        if (variantBlocked) allOpenPositionsRisk.push({ id: 'G2R_VARIANT_ENTRY_BLOCK', actualRiskDollar: shadowBalance * (cfg.riskPoolMaxPct ?? 0.15) + 1 });
+      }
+
       const input: ProcessCandleInput = {
         symbol,
         candles5m: window5m,
@@ -326,7 +381,9 @@ export async function runReplay(cfg: OrchestratorConfig, fillModel: FillModel | 
       const riskBefore = Object.values(openRiskBySymbol).reduce((sum, risk) => sum + risk, 0);
       const openBefore = SYMBOLS.reduce((sum, s) => sum + symbolsData[s].state.openPositions.length, 0);
 
-      const result = await processCandle(input, sd.state, cfg, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, (diagnostic) => {
+      // Args 6 (onFunnelEvent) and 9 (onMomentumGateEvaluation) are TICKET-G3 opt-in observability;
+      // both stay `undefined` unless a caller supplies the hook, so pre-G3 behaviour is unchanged.
+      const result = await processCandle(input, sd.state, cfg, undefined, undefined, hooks?.onFunnelEvent as never, undefined, undefined, hooks?.onMomentumGateEvaluation as never, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, (diagnostic) => {
         if (!firstSameSideBlockLogged) {
           firstSameSideBlockLogged = true;
           console.log(`T153A_FIRST_SAME_SIDE_BLOCK step=${step} timestamp=${diagnostic.timestamp} iso=${new Date(diagnostic.timestamp).toISOString()} symbol=${diagnostic.symbol} side=${diagnostic.side} openSameSideCount=${diagnostic.openSameSideCount} balance=${shadowBalance}`);
@@ -334,9 +391,23 @@ export async function runReplay(cfg: OrchestratorConfig, fillModel: FillModel | 
         eventTrace.push({ step, timestamp: diagnostic.timestamp, symbol: diagnostic.symbol, eventType: 'ADMISSION_BLOCK', candidateSetup: '', candidateSide: diagnostic.side, admissionResult: 'BLOCKED', blockReason: 'SAME_SIDE_POSITION_BLOCKED', entryReferencePrice: '', entryExecutedPrice: '', qty: '', riskDollars: '', margin: '', exitReason: '', exitReferencePrice: '', exitExecutedPrice: '', realizedPnl: '', balanceBefore, balanceAfter: shadowBalance, riskPoolBefore: riskBefore, riskPoolAfter: riskBefore, openPositionCount: openBefore });
       });
       sd.state = result.symbolState;
+      // TICKET-G2R P1 — cooldown variants rewrite ONLY the anchor timestamp detectRegime already
+      // consumes as an input; nothing inside regimeDetector.ts is changed or bypassed.
+      if (hooks?.rewriteDangerAnchor !== undefined) {
+        const rewritten = hooks.rewriteDangerAnchor({
+          symbol,
+          timestamp: currentCandle.timestamp,
+          regime: sd.state.regimeState.previousRegime ?? MarketRegime.NEUTRAL_TRANSITION,
+          current: sd.state.regimeState.previousDangerZoneTimestamp,
+        });
+        sd.state = { ...sd.state, regimeState: { ...sd.state.regimeState, previousDangerZoneTimestamp: rewritten } };
+      }
       theoreticalBalance = result.accountBalance; // production's own frictionless number, for reference only
 
       for (const event of result.events) {
+        if (hooks?.onSkippedEntry !== undefined && event.type === 'SKIPPED' && event.symbol === symbol) {
+          hooks.onSkippedEntry({ symbol, step, timestamp: event.timestamp, reason: event.reason });
+        }
         if (event.type === 'OPEN' && event.symbol === symbol) {
           const rec: OpenRec = {
             symbol,

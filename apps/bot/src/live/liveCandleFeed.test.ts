@@ -109,8 +109,13 @@ describe('LiveCandleFeed', () => {
     expect(feed.getCandles('BTCUSDT', '5m')).toHaveLength(2);
     expect(feed.getCandles('BTCUSDT', '1h')).toHaveLength(2);
     feed.stop();
-    // 1 symbol x 5 intervals = 5 initial calls
-    expect(fetchMock).toHaveBeenCalledTimes(5);
+    // TICKET-G2R F-01: the 5m seed is now PAGED (4033 candles > Binance's 1500/request cap), so the
+    // old flat "exactly 5 calls" no longer holds. What must still hold: every interval is seeded,
+    // and only 5m issues more than one request.
+    for (const interval of ['15m', '1h', '1m', '1d']) {
+      expect(fetchMock.mock.calls.filter(([url]) => (url as string).includes(`interval=${interval}`))).toHaveLength(1);
+    }
+    expect(fetchMock.mock.calls.filter(([url]) => (url as string).includes('interval=5m')).length).toBeGreaterThanOrEqual(1);
   });
 
   // TICKET-086 — start() must request each interval's FULL windowSize on the initial poll, not the

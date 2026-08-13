@@ -877,8 +877,12 @@ async function main(): Promise<void> {
   // calendar range, while still feeding every OLDER candle through detectRegime()/etc as normal so
   // hysteresis/indicator history is warmed up exactly like every backtest run already needs — same
   // "warm up, then trade" mechanism as skipDays above, just pinned to an absolute date instead of a
-  // day-count from the dataset's start. Uses BTCUSDT's own 5m timestamps as the reference axis (all
-  // 4 symbols' 5m series are aligned 1:1 by construction — same fetchOhlcv.ts run for all of them).
+  // day-count from the dataset's start. Uses BTCUSDT's own 5m timestamps as the reference axis.
+  // TICKET-G2R F-02: the old claim here that "all 4 symbols' 5m series are aligned 1:1 by
+  // construction" is FALSE for the registered dataset (XRPUSDT starts one 5m candle later). Only
+  // the trading-window bounds use this axis; every symbol's own indicators run off its own series
+  // and its own decisionTime, and the one genuinely cross-symbol calculation
+  // (regime/correlatedRisk.ts) now joins by timestamp instead of by index.
   const referenceCandles = symbolsData.BTCUSDT.candles5m;
   const dateFromMs = dateFrom ? Date.parse(`${dateFrom}T00:00:00.000Z`) : undefined;
   const dateToExclusiveMs = dateTo ? Date.parse(`${dateTo}T00:00:00.000Z`) + 24 * 60 * 60_000 : undefined; // exclusive upper bound, covers the whole dateTo calendar day

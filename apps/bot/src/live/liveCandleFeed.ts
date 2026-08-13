@@ -4,6 +4,8 @@
  * Uses the public klines endpoint (`GET /fapi/v1/klines`), no API key needed.
  */
 
+import { RegimeConfig } from '../regime/config.js';
+
 export interface CandleData {
   timestamp: number; // epoch ms UTC, candle open time
   open: number;
@@ -23,10 +25,20 @@ export const INTERVAL_MS: Record<Interval, number> = {
   '1d': 24 * 60 * 60_000,
 };
 
+const CANDLES_PER_DAY_5M = 288; // 24h / 5min — same stride regime/indicators.ts's sessionRelativeVolumeRatio walks
+
+/**
+ * TICKET-G2R F-01: identical to scripts/backtest.ts's WINDOW_5M_SESSION_VOLUME (14 * 288 + 1),
+ * derived from RegimeConfig here so the two can never drift. LOW_LIQUIDITY is unreachable without
+ * a 5m buffer this deep, which is why the 5m window below is sized to it rather than to 320.
+ */
+export const SESSION_VOLUME_WINDOW_5M = RegimeConfig.LOW_LIQUIDITY_SESSION_LOOKBACK_DAYS * CANDLES_PER_DAY_5M + 1;
+
 // Mirrors scripts/backtest.ts's WINDOW_5M/WINDOW_15M/WINDOW_1H/WINDOW_1M/WINDOW_1D — same bounded
 // lookback every indicator needs, kept in sync manually (backtest.ts's consts aren't exported).
+// The extra slot keeps Binance's forming candle without evicting a required closed candle.
 export const DEFAULT_WINDOW_SIZES: Record<Interval, number> = {
-  '5m': 320,
+  '5m': SESSION_VOLUME_WINDOW_5M + 1,
   '15m': 325,
   '1h': 40,
   '1m': 200,
@@ -59,6 +71,11 @@ const REQUEST_TIMEOUT_MS = 10_000;
 // as final one tick too early (which would feed the orchestrator a value that still gets revised).
 const CLOSE_SAFETY_BUFFER_MS = 2_000;
 const BACKFILL_LIMIT = 1000;
+// Binance's own hard per-request cap on GET /fapi/v1/klines. Anything deeper needs paging.
+const BINANCE_MAX_KLINES_LIMIT = 1500;
+// Bound on seed paging so a misbehaving/looping endpoint can never spin forever. 4033 candles need
+// 3 pages; the margin absorbs short pages without allowing an unbounded loop.
+const MAX_SEED_BACKFILL_PAGES = 12;
 // TICKET-077 1.2: ground-truthed from GET /fapi/v1/exchangeInfo's `rateLimits` array (REQUEST_WEIGHT,
 // 1 MINUTE) at time of writing — this is Binance's own published number for the IP, not a guess.
 // Kept as a constant (not fetched at runtime) since re-deriving it on every poll would itself cost
@@ -196,8 +213,25 @@ function fetchKlines(baseUrl: string, symbol: string, interval: Interval, limit:
 }
 
 /** TICKET-077 1.1: fetches an explicit [startTime, endTime] range to backfill a detected gap — same retry policy as the regular poll. */
-function fetchKlinesRange(baseUrl: string, symbol: string, interval: Interval, startTime: number, endTime: number): Promise<KlinesResult> {
-  return fetchKlinesFromUrl(`${baseUrl}/fapi/v1/klines?symbol=${symbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=${BACKFILL_LIMIT}`);
+function fetchKlinesRange(baseUrl: string, symbol: string, interval: Interval, startTime: number, endTime: number, limit: number = BACKFILL_LIMIT): Promise<KlinesResult> {
+  return fetchKlinesFromUrl(`${baseUrl}/fapi/v1/klines?symbol=${symbol}&interval=${interval}&startTime=${startTime}&endTime=${endTime}&limit=${limit}`);
+}
+
+/**
+ * TICKET-G2R F-01 — explicit readiness state for the deep 5m session-volume window.
+ * `INSUFFICIENT_WARMUP` is NOT "volume looks normal": the caller must withhold
+ * `candles5mSessionVolume` AND block any decision that depends on LOW_LIQUIDITY, never silently
+ * treat the absent field as "no low liquidity".
+ */
+export type SessionVolumeStatus = 'READY' | 'INSUFFICIENT_WARMUP';
+
+export interface SessionVolumeWindow {
+  status: SessionVolumeStatus;
+  /** Defined ONLY when status === 'READY'. Exactly `required` contiguous closed 5m candles. */
+  candles?: CandleData[];
+  closedCount: number;
+  required: number;
+  reason?: 'NOT_ENOUGH_CANDLES' | 'GAP_IN_WINDOW';
 }
 
 /** Maintains an in-memory rolling buffer of candles per symbol/interval, refreshed by REST polling on independent per-interval timers. */
@@ -248,6 +282,22 @@ export class LiveCandleFeed {
     return this.getCandles(symbol, interval).filter((c) => isCandleClosed(c, intervalMs, nowMs));
   }
 
+  /**
+   * TICKET-G2R F-01 — the 5m window `sessionRelativeVolumeRatio` needs, or an explicit
+   * INSUFFICIENT_WARMUP state. Contiguity is required, not just count: the metric addresses
+   * i-288*k by INDEX, so a hole inside the window would silently compare the wrong time-of-day slot.
+   */
+  getSessionVolumeWindow(symbol: string, nowMs: number = Date.now()): SessionVolumeWindow {
+    const required = SESSION_VOLUME_WINDOW_5M;
+    const closed = this.getClosedCandles(symbol, '5m', nowMs);
+    if (closed.length < required) return { status: 'INSUFFICIENT_WARMUP', closedCount: closed.length, required, reason: 'NOT_ENOUGH_CANDLES' };
+    const window = closed.slice(closed.length - required);
+    if (detectGaps(window, INTERVAL_MS['5m']).length > 0) {
+      return { status: 'INSUFFICIENT_WARMUP', closedCount: closed.length, required, reason: 'GAP_IN_WINDOW' };
+    }
+    return { status: 'READY', candles: window, closedCount: closed.length, required };
+  }
+
   private noteWeight(result: KlinesResult): void {
     if (result.usedWeight1m === undefined) return;
     this.lastKnownUsedWeight1m = result.usedWeight1m;
@@ -275,7 +325,7 @@ export class LiveCandleFeed {
     }
   }
 
-  private async pollOnce(symbol: string, interval: Interval, limitOverride?: number): Promise<void> {
+  private async pollOnce(symbol: string, interval: Interval, limitOverride?: number, skipGapBackfill = false): Promise<void> {
     // TICKET-077 1.2: "tự động giãn interval khi gần chạm ngưỡng" — skipping this tick has the same
     // rate-reducing effect as widening the interval, without needing a scheduling refactor (weight
     // resets every rolling minute on Binance's side, so the next tick re-checks fresh).
@@ -291,14 +341,55 @@ export class LiveCandleFeed {
       const merged = mergeCandles(this.buffers.get(key) ?? [], result.candles, windowSize);
       this.buffers.set(key, merged);
       this.config.onPoll?.(symbol, interval, merged);
-      await this.backfillGaps(symbol, interval);
+      // During a paged seed the older pages haven't arrived yet, so a "gap" here is just the part
+      // still being paged in — start() runs one repair sweep after all pages instead.
+      if (!skipGapBackfill) await this.backfillGaps(symbol, interval);
     } catch (err) {
       this.config.onError?.(err as Error, symbol, interval);
     }
   }
 
   /**
-   * Kicks off one immediate poll per symbol/interval BEFORE start() returns, requesting each
+   * TICKET-G2R F-01 — seeds a FULL windowSize buffer at startup, paging backwards when windowSize
+   * exceeds Binance's per-request cap (the 5m window needs 4 033 candles = 3 pages). Deliberately
+   * uptime-independent: the buffer must be complete the moment start() returns, never accumulated
+   * over hours of running, so a restart reproduces the same downstream state from the same data.
+   * Idempotent — mergeCandles() is keyed by timestamp, so overlapping/duplicated pages collapse.
+   */
+  private async seedBackfill(symbol: string, interval: Interval, targetCount: number, requiredClosedCount: number = targetCount): Promise<void> {
+    await this.pollOnce(symbol, interval, Math.min(targetCount, BINANCE_MAX_KLINES_LIMIT), true);
+    if (targetCount <= BINANCE_MAX_KLINES_LIMIT) return;
+
+    const key = this.key(symbol, interval);
+    const intervalMs = INTERVAL_MS[interval];
+    const windowSize = this.config.windowSizes[interval] ?? DEFAULT_WINDOW_SIZES[interval];
+
+    for (let page = 1; page < MAX_SEED_BACKFILL_PAGES; page++) {
+      const buffer = this.buffers.get(key) ?? [];
+      if (buffer.length === 0) return; // first page failed — onError already fired inside pollOnce
+      const closedCount = buffer.filter((c) => isCandleClosed(c, intervalMs, Date.now())).length;
+      if (buffer.length >= targetCount && closedCount >= requiredClosedCount) return;
+
+      const endTime = buffer[0].timestamp - 1; // strictly older than everything held
+      if (endTime <= 0) return; // nothing can exist before the epoch — no further page to ask for
+      const limit = Math.min(Math.max(targetCount - buffer.length, requiredClosedCount - closedCount), BINANCE_MAX_KLINES_LIMIT);
+      const startTime = Math.max(0, endTime - limit * intervalMs);
+      try {
+        const older = await fetchKlinesRange(this.config.baseUrl, symbol, interval, startTime, endTime, limit);
+        this.noteWeight(older);
+        if (older.candles.length === 0) return; // exchange has no older history — nothing more to page
+        this.buffers.set(key, mergeCandles(buffer, older.candles, windowSize));
+        // A page that adds nothing new (all duplicates) would otherwise loop forever on the same endTime.
+        if ((this.buffers.get(key) ?? []).length === buffer.length) return;
+      } catch (err) {
+        this.config.onError?.(new Error(`seedBackfill(${symbol},${interval}) trang ${page} thất bại: ${(err as Error).message}`), symbol, interval);
+        return;
+      }
+    }
+  }
+
+  /**
+   * Kicks off one immediate seed per symbol/interval BEFORE start() returns, requesting each
    * interval's FULL configured windowSize (not the regular per-poll klineLimit, default 3) — so a
    * caller has a complete history buffer immediately, instead of waiting real-time (potentially
    * hours, for a 320-candle 5m window at the default 2s poll) for the rolling poll to build it up
@@ -308,16 +399,20 @@ export class LiveCandleFeed {
     if (this.running) return;
     this.running = true;
     const intervals = Object.keys(INTERVAL_MS) as Interval[];
-    const BINANCE_MAX_KLINES_LIMIT = 1500;
 
     await Promise.all(
       this.config.symbols.flatMap((symbol) =>
         intervals.map((interval) => {
           const windowSize = this.config.windowSizes[interval] ?? DEFAULT_WINDOW_SIZES[interval];
-          return this.pollOnce(symbol, interval, Math.min(windowSize, BINANCE_MAX_KLINES_LIMIT));
+          const requiredClosedCount = interval === '5m' ? Math.min(SESSION_VOLUME_WINDOW_5M, windowSize) : windowSize;
+          return this.seedBackfill(symbol, interval, windowSize, requiredClosedCount);
         }),
       ),
     );
+
+    // A short/missing page leaves a hole; repair it through the same range-request path a runtime
+    // gap uses, so the seeded buffer is contiguous before any decision reads it.
+    await Promise.all(this.config.symbols.flatMap((symbol) => intervals.map((interval) => this.backfillGaps(symbol, interval))));
 
     for (const symbol of this.config.symbols) {
       for (const interval of intervals) {

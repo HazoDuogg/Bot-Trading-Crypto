@@ -494,6 +494,15 @@ export interface PersistedSymbolRecord {
   symbolState: SymbolState;
   /** JSON-safe form of liveRunner.ts's `Map<entryTimestamp, LiveOrderIds>`. */
   orderIds: Array<[number, PersistedOrderIds]>;
+  /**
+   * TICKET-G3R — the 5m candle `symbolState.regimeState` was produced from. Optional (absent in files
+   * written before G3R, and null before this process has confirmed any candle), and its absence makes
+   * the persisted regime state unusable rather than trusted: without a candle-boundary anchor there is
+   * no way to tell a current state from one that predates a DANGER_ZONE the process slept through.
+   * See regimeStateReconstruction.ts's decideRegimeStateSource(). Never read by Checkpoint C's
+   * position-ownership logic, which is unchanged.
+   */
+  regimeStateCandleTimestamp?: number | null;
 }
 
 export interface LiveStateFile {
