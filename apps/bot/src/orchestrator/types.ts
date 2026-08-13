@@ -296,7 +296,6 @@ export interface OrchestratorConfig {
    * cascade found NOTHING for this candle. Default false — matches every ticket before this one exactly.
    */
   momentumDirectEnabled: boolean;
-  momentumDirectBodyRatioEnabled?: boolean;
   /** Research-only T159 timing challenger. Undefined preserves current entry semantics. */
   momentumEntryTimingResearch?: MomentumTimingResearchConfig;
   /** TODO_CONFIRM: PM suggested 0.75. Momentum score (own-side model) must be >= this to trigger MOMENTUM_DIRECT. */

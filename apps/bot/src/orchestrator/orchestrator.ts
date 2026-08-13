@@ -23,7 +23,7 @@ import { computeReversalThesis } from './setupThesis/reversalThesis.js';
 import type { SetupThesisResult } from './setupThesis/types.js';
 import { routeEntry } from '../entry/entryRouter.js';
 import { EntryConfig } from '../entry/config.js';
-import { detectMomentumDirect, passesMomentumDirectBodyRatio } from '../entry/momentumDirect.js';
+import { detectMomentumDirect } from '../entry/momentumDirect.js';
 import type { DraftSetup, FunnelCallback } from '../entry/types.js';
 import { detectSwingPoints, latestSwingPointBefore } from '../entry/detectors/swingPoints.js';
 import { computeDirection5m, type Direction5m } from './neutral5mDirectionSelector.js';
@@ -710,11 +710,6 @@ async function tryMomentumDirect(
   // do, take the higher-scoring side rather than leaving this undefined behavior.
   const side: 'LONG' | 'SHORT' =
     longPasses && shortPasses ? ((longScore as number) >= (shortScore as number) ? 'LONG' : 'SHORT') : longPasses ? 'LONG' : 'SHORT';
-
-  if (
-    config.momentumDirectBodyRatioEnabled === true &&
-    !passesMomentumDirectBodyRatio(currentCandle.open, currentCandle.high, currentCandle.low, currentCandle.close, EntryConfig.BOX_BREAKOUT_MIN_BODY_RATIO)
-  ) return null;
 
   // TICKET-081 — per symbol+side circuit breaker: N consecutive SL losses on this exact symbol+side
   // pauses MOMENTUM_DIRECT signals for that side only, until cooldownUntilTimestamp passes. Other
