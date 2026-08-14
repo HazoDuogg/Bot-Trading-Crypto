@@ -108,16 +108,19 @@ for (const t of trades) {
   // ---- classification (documented, deterministic, evaluated top-down) ----
   const mfe = mfeR === '' ? NaN : +mfeR;
   const ext = extAtr === '' ? NaN : +extAtr;
+  // G4A-R fix: loss-side no longer defaults everything to one bucket. Entry-failure checks
+  // run first (unchanged order/logic); remaining losses are split by MFE-in-R.
   let cls;
   if (idx === undefined || !Number.isFinite(R)) cls = 'INSUFFICIENT_DATA';
   else if (t.pnl > 0) cls = 'GOOD_ENTRY_GOOD_OUTCOME';
-  else if (Number.isFinite(mfe) && mfe >= 1.0) cls = 'GOOD_ENTRY_MANAGEMENT_LOSS';
   else if (Number.isFinite(ext) && ext >= 3.0) cls = 'OVEREXTENDED_ENTRY';
   else if (brokeByBody === 'WICK' && returnedInto === 'YES' && Number.isFinite(mfe) && mfe < 0.3) cls = 'FALSE_BREAKOUT';
   else if (htfAgree === 'CONFLICT') cls = 'HTF_DIRECTION_CONFLICT';
   else if (Number.isFinite(ext) && ext >= 1.5 && Number.isFinite(mfe) && mfe < 0.5) cls = 'LATE_ENTRY';
-  else if (Number.isFinite(mfe) && mfe < 0.3) cls = 'INSUFFICIENT_REWARD';
-  else cls = 'GOOD_ENTRY_MANAGEMENT_LOSS';
+  else if (!Number.isFinite(mfe)) cls = 'INSUFFICIENT_DATA';
+  else if (mfe >= 1.0) cls = 'POSITIVE_EXCURSION_MANAGEMENT_LOSS';
+  else if (mfe >= 0.3) cls = 'PARTIAL_EXCURSION_REVERSAL';
+  else cls = 'INSUFFICIENT_REWARD';
 
   rows.push({ ...t, atr, R, mfeR, maeR, extAtr, bodyRatio, brokeByBody, returnedInto, barsHeld, htfAgree, availRewardR, cls });
 }
