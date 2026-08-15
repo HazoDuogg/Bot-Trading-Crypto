@@ -48,6 +48,41 @@ coverage/
 .DS_Store
 Thumbs.db
 
+# Local editor, OS and temporary files (safe to regenerate).
+.idea/
+*.swp
+*.swo
+*~
+*.tmp
+*.temp
+*.bak
+*.orig
+*.pid
+*.pid.lock
+
+# Tool and compiler caches.
+.cache/
+.eslintcache
+.stylelintcache
+.turbo/
+.nx/
+.vite/
+*.tsbuildinfo
+
+# Python environments and caches outside the ML workspace-specific paths above.
+.venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Explicit local scratch areas. Canonical research evidence belongs under data/
+# and remains governed by the narrow allowlist above.
+scratch/
+tmp/
+temp/
+
 .agents
 .claude
 skills-lock.json

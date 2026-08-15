@@ -9,7 +9,6 @@ import type { LocalTradeThesis5mResult } from './localTradeThesis5m.js';
 import type { SetupThesisResult } from './setupThesis/types.js';
 import type { MomentumCandidateIntegrityResult } from './setupThesis/momentumThesis.js';
 import type { MomentumContextDecisionResult } from './momentumContextDecisionMatrix.js';
-import type { MomentumPullbackArm, MomentumTimingResearchConfig } from '../backtest/momentumEntryTimingResearch.js';
 
 export interface RegimeHysteresisState {
   previousRegime: MarketRegime | null;
@@ -147,8 +146,6 @@ export interface SymbolState {
   openPositions: OpenPositionEntry[];
   /** TICKET-081 — per-side (LONG/SHORT) MOMENTUM_DIRECT loss-streak circuit breaker for THIS symbol. */
   momentumDirectCircuitBreaker: { LONG: MomentumDirectCircuitBreakerSideState; SHORT: MomentumDirectCircuitBreakerSideState };
-  /** Research-only T159 arm; absent for every production configuration. */
-  momentumPullbackArm?: MomentumPullbackArm;
   /** TICKET-139 — see HtfSafetyDiagnosticState doc comment. Undefined when the flag is off/unused so far. */
   htfSafetyDiagnostic?: HtfSafetyDiagnosticState;
   /** TICKET-140 — see SafetyState5mStabilizedDiagnosticState doc comment. Undefined when the flag is off/unused so far. */
@@ -296,8 +293,6 @@ export interface OrchestratorConfig {
    * cascade found NOTHING for this candle. Default false — matches every ticket before this one exactly.
    */
   momentumDirectEnabled: boolean;
-  /** Research-only T159 timing challenger. Undefined preserves current entry semantics. */
-  momentumEntryTimingResearch?: MomentumTimingResearchConfig;
   /** TODO_CONFIRM: PM suggested 0.75. Momentum score (own-side model) must be >= this to trigger MOMENTUM_DIRECT. */
   momentumDirectThreshold: number;
   /**
