@@ -42,7 +42,7 @@ import { writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { MarketRegime, type CandleData } from '../dist/regime/types.js';
 import { detectRegime } from '../dist/regime/regimeDetector.js';
-import { processCandle, type ProcessCandleInput } from '../dist/orchestrator/orchestrator.js';
+import { processCandle, type ProcessCandleInput, type ProcessCandleResult } from '../dist/orchestrator/orchestrator.js';
 import { INITIAL_SYMBOL_STATE, type OrchestratorConfig, type SymbolState } from '../dist/orchestrator/types.js';
 import { DEFAULT_ENTRY_ROUTER_CONFIG } from '../dist/entry/entryRouter.js';
 import { DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG, DEFAULT_MOMENTUM_FILTER_CONFIG, DEFAULT_PLAN_AUTO_SELECTION_CONFIG } from '../dist/xgbFilter/config.js';
@@ -259,9 +259,12 @@ export interface ReplayVariantHooks {
   onFunnelEvent?: (symbol: string, timestamp: number, event: Record<string, unknown>) => void;
   onMomentumGateEvaluation?: (evaluation: Record<string, unknown>) => void;
   /** TICKET-G3 — fires once per (symbol, step) before processCandle, carrying the shadow regime read. */
-  onStepContext?: (ctx: { symbol: string; step: number; timestamp: number; regime: MarketRegime; adxDirection1h: 'UP' | 'DOWN' | 'FLAT' | undefined; atrPercentile5m: number | undefined; candle: CandleData; accountBalance: number }) => void;
+  onStepContext?: (ctx: { symbol: string; step: number; timestamp: number; regime: MarketRegime; adxDirection1h: 'UP' | 'DOWN' | 'FLAT' | undefined; atrPercentile5m: number | undefined; bbWidthPercentile15m: number | undefined; volumeZScore5m: number | undefined; candle: CandleData; accountBalance: number }) => void;
   /** TICKET-G3 — fires for each SKIPPED entry event (RISK_POOL_EXCEEDED / MAX_TOTAL_MARGIN_EXCEEDED / NEUTRAL_GATE_REJECTED). */
   onSkippedEntry?: (ctx: { symbol: string; step: number; timestamp: number; reason: string }) => void;
+  /** G6R CP2 — research-only full-path seam. Inputs/results are observed, never replaced. */
+  onBeforeProcessCandle?: (ctx: { symbol: string; step: number; timestamp: number; input: ProcessCandleInput; state: SymbolState; config: OrchestratorConfig }) => void;
+  onAfterProcessCandle?: (ctx: { symbol: string; step: number; timestamp: number; input: ProcessCandleInput; stateBefore: SymbolState; config: OrchestratorConfig; result: ProcessCandleResult }) => void;
 }
 
 export async function runReplay(cfg: OrchestratorConfig, fillModel: FillModel | null, endStepInclusive: number | null, hooks?: ReplayVariantHooks): Promise<ReplayResult> {
@@ -355,7 +358,7 @@ export async function runReplay(cfg: OrchestratorConfig, fillModel: FillModel | 
         });
         variantBlocked = hooks?.blockEntry?.({ symbol, step, timestamp: currentCandle.timestamp, regime: shadow.regime, candidateRegime: shadow.candidateRegime }) ?? false;
         hooks?.onStepRegime?.({ symbol, step, timestamp: currentCandle.timestamp, regime: shadow.regime, candidateRegime: shadow.candidateRegime, blocked: variantBlocked });
-        hooks?.onStepContext?.({ symbol, step, timestamp: currentCandle.timestamp, regime: shadow.regime, adxDirection1h: shadow.adxDirection1h, atrPercentile5m: shadow.computedMetrics.atrPercentile5m as number | undefined, candle: currentCandle, accountBalance: shadowBalance });
+        hooks?.onStepContext?.({ symbol, step, timestamp: currentCandle.timestamp, regime: shadow.regime, adxDirection1h: shadow.adxDirection1h, atrPercentile5m: shadow.computedMetrics.atrPercentile5m as number | undefined, bbWidthPercentile15m: shadow.computedMetrics.bbWidthPercentile15m as number | undefined, volumeZScore5m: shadow.computedMetrics.volumeZScore5m as number | undefined, candle: currentCandle, accountBalance: shadowBalance });
         // Same sentinel-over-cap mechanism liveRunner.ts uses: an honestly over-cap portfolio risk
         // total makes tryOpenNewPosition() reject, without touching its logic or the cap value.
         if (variantBlocked) allOpenPositionsRisk.push({ id: 'G2R_VARIANT_ENTRY_BLOCK', actualRiskDollar: shadowBalance * (cfg.riskPoolMaxPct ?? 0.15) + 1 });
@@ -383,6 +386,8 @@ export async function runReplay(cfg: OrchestratorConfig, fillModel: FillModel | 
 
       // Args 6 (onFunnelEvent) and 9 (onMomentumGateEvaluation) are TICKET-G3 opt-in observability;
       // both stay `undefined` unless a caller supplies the hook, so pre-G3 behaviour is unchanged.
+      const stateBefore = sd.state;
+      hooks?.onBeforeProcessCandle?.({ symbol, step, timestamp: currentCandle.timestamp, input, state: stateBefore, config: cfg });
       const result = await processCandle(input, sd.state, cfg, undefined, undefined, hooks?.onFunnelEvent as never, undefined, undefined, hooks?.onMomentumGateEvaluation as never, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, (diagnostic) => {
         if (!firstSameSideBlockLogged) {
           firstSameSideBlockLogged = true;
@@ -390,6 +395,7 @@ export async function runReplay(cfg: OrchestratorConfig, fillModel: FillModel | 
         }
         eventTrace.push({ step, timestamp: diagnostic.timestamp, symbol: diagnostic.symbol, eventType: 'ADMISSION_BLOCK', candidateSetup: '', candidateSide: diagnostic.side, admissionResult: 'BLOCKED', blockReason: 'SAME_SIDE_POSITION_BLOCKED', entryReferencePrice: '', entryExecutedPrice: '', qty: '', riskDollars: '', margin: '', exitReason: '', exitReferencePrice: '', exitExecutedPrice: '', realizedPnl: '', balanceBefore, balanceAfter: shadowBalance, riskPoolBefore: riskBefore, riskPoolAfter: riskBefore, openPositionCount: openBefore });
       });
+      hooks?.onAfterProcessCandle?.({ symbol, step, timestamp: currentCandle.timestamp, input, stateBefore, config: cfg, result });
       sd.state = result.symbolState;
       // TICKET-G2R P1 — cooldown variants rewrite ONLY the anchor timestamp detectRegime already
       // consumes as an input; nothing inside regimeDetector.ts is changed or bypassed.
