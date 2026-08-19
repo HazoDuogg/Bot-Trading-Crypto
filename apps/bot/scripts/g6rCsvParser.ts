@@ -129,6 +129,43 @@ export function parseCsv(text: string): ParsedCsv {
   return { header, rows };
 }
 
+/**
+ * TICKET-G6R-CP3H (Step 2 / ticket Section G): RFC4180-ish writer, the round-trip counterpart of
+ * `parseCsv()` above. A field is quoted whenever it contains a comma, quote, or CR/LF; embedded
+ * quotes are doubled. Never quotes unnecessarily so plain numeric/enum cells stay human-readable.
+ * `writeCsv(parseCsv(writeCsv(rows)).rows) === rows` is the round-trip invariant asserted in tests.
+ */
+export function csvEscapeField(value: string): string {
+  if (value.includes(',') || value.includes('"') || value.includes('\n') || value.includes('\r')) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+/**
+ * Writes rows (each a plain string-valued object) to RFC4180-ish CSV text using `header` as the
+ * column order. Every row MUST have exactly the same keys as `header` (fails closed — no silent
+ * column drop/reorder). Values are already-stringified by the caller (this writer does no type
+ * coercion, mirroring parseCsv's "no type coercion" contract) so the caller controls exactly how
+ * null/enum/number values are rendered (e.g. explicit "null" strings, never `undefined`).
+ */
+export function writeCsv(header: readonly string[], rows: ReadonlyArray<Record<string, string>>): string {
+  const seen = new Set<string>();
+  for (const h of header) {
+    if (seen.has(h)) throw new CsvParseError(`Duplicate header column name: ${h}`);
+    seen.add(h);
+  }
+  const lines: string[] = [header.map(csvEscapeField).join(',')];
+  rows.forEach((row, i) => {
+    const rowKeys = Object.keys(row);
+    if (rowKeys.length !== header.length || !header.every((h) => h in row)) {
+      throw new CsvParseError(`Row ${i}: keys ${JSON.stringify(rowKeys)} do not match header ${JSON.stringify(header)}`);
+    }
+    lines.push(header.map((h) => csvEscapeField(row[h])).join(','));
+  });
+  return lines.join('\r\n') + '\r\n';
+}
+
 const EVALUATION_ID_PATTERN = /^[^|]+\|-?\d+\|[^|]+\|\d+$/;
 
 /** Validates evaluationId column values against the documented schema symbol|evaluationTimestamp|regime|routeInvocationOrdinal. */

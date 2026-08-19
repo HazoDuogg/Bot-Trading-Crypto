@@ -212,7 +212,17 @@ function directionOf(side: ShadowSide): 'BULLISH' | 'BEARISH' {
  * ever read here. See the module-level DUPLICATION DEBT note: this formula is a research-side
  * replica of entryRouter.ts's inline logic, not a shared production helper.
  */
-function evaluateStage(
+/**
+ * TICKET-G6R-CP3H (Step 1): exported unchanged (pure extraction, no formula/return-value edit) so
+ * research-side fixture tests can exercise the ACTUAL MSS evaluation code path with real candle
+ * windows, instead of hand-building StageEvaluation/DecisionFeatureProvenance objects as CP3G's
+ * g6rCp3RootCauseRepro.test.ts did. Parity between the pre- and post-extraction behavior is proven
+ * in g6rShadowAnalyzer.test.ts (calling this exported function directly reproduces byte-identical
+ * StageEvaluation results as the private-logic-driven public observeDecision() API on the same
+ * fixtures). This file remains a research module (apps/bot/scripts/**), not production
+ * (apps/bot/src/**) — the carve-out this extraction relies on.
+ */
+export function evaluateStage(
   setupType: 'OB' | ShadowSetupType,
   side: ShadowSide,
   sourceTimestamp: number,
