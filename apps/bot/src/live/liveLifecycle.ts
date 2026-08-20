@@ -36,6 +36,18 @@ export interface LiveOrderIds {
   tpAlgoIds: number[];
 }
 
+export interface OpenEventTelemetryCommon {
+  traceId: string;
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  setupType: string;
+  source: string;
+  candidateId: string;
+  decisionId: string;
+  riskAdmissionId: string;
+  positionId: string;
+}
+
 export type OpenEventOutcome =
   | { kind: 'DRY_RUN' }
   | { kind: 'NOT_FILLED'; detail: string }
@@ -109,6 +121,7 @@ export type LifecycleExecutor = Pick<
   | 'placeTakeProfitMarket'
   | 'updateStopOrder'
   | 'cancelAlgoOrder'
+  | 'getIncome'
 >;
 
 export interface RunnerStateAccess {
@@ -117,6 +130,8 @@ export interface RunnerStateAccess {
   getOrderIds(symbol: string, entryTimestamp: number): LiveOrderIds | undefined;
   deleteOrderIds(symbol: string, entryTimestamp: number): void;
   blockSymbolAdmission(symbol: string): void;
+  blockIncomeReconciliation?(symbol: string): void;
+  clearIncomeReconciliation?(symbol: string): void;
 }
 
 export interface LifecycleContext {
@@ -134,6 +149,8 @@ export interface LifecycleContext {
   onAccountSyncUnknown: () => void;
   onWillOpen: () => void;
   persistLiveState: () => boolean;
+  incomeReconciliationRetryDelaysMs?: readonly number[];
+  wait?: (delayMs: number) => Promise<void>;
 }
 
 async function establishReconciledProtectedPosition(
@@ -147,9 +164,10 @@ async function establishReconciledProtectedPosition(
     classificationOrderId: number | null;
     classificationAvgPrice: unknown;
     preSubmissionBaselineQtyAbs: number;
+    telemetryCommon: OpenEventTelemetryCommon;
   },
 ): Promise<OpenEventOutcome> {
-  const { symbol, event, balanceAtOpen, clientOrderId, canonicalQty, classificationOrderId, classificationAvgPrice, preSubmissionBaselineQtyAbs } = params;
+  const { symbol, event, balanceAtOpen, clientOrderId, canonicalQty, classificationOrderId, classificationAvgPrice, preSubmissionBaselineQtyAbs, telemetryCommon } = params;
   const postFillPositionRisk = await readPositionRiskForSide(ctx.executor, symbol, event.side);
   const reconciled = reconcileExecutedOpenState({
     initialSlPrice: event.slPrice,
@@ -225,8 +243,13 @@ async function establishReconciledProtectedPosition(
       }
     }
     ctx.runnerState.setOrderIds(symbol, event.entryTimestamp, { slAlgoId: protection.slAlgoId, tpAlgoIds });
+    ctx.emitTelemetry({ ...telemetryCommon, clientOrderId, eventType: 'ORDER_SENT', quality: { role: 'OBSERVED', algoId: protection.slAlgoId !== null ? 'OBSERVED' : 'MISSING', price: 'OBSERVED' }, data: { role: 'PROTECTIVE_SL', algoId: protection.slAlgoId ?? 'MISSING', triggerPrice: roundPrice(event.slPrice) } });
+    for (const algoId of tpAlgoIds) {
+      ctx.emitTelemetry({ ...telemetryCommon, clientOrderId, eventType: 'ORDER_SENT', quality: { role: 'OBSERVED', algoId: 'OBSERVED', price: 'OBSERVED' }, data: { role: 'TAKE_PROFIT', algoId } });
+    }
   } else {
     ctx.runnerState.setOrderIds(symbol, event.entryTimestamp, { slAlgoId: null, tpAlgoIds: [] });
+    ctx.emitTelemetry({ ...telemetryCommon, clientOrderId, eventType: 'ORDER_SENT', quality: { role: 'MISSING', algoId: 'MISSING', price: 'MISSING' }, data: { role: 'PROTECTIVE_SL', algoId: 'MISSING', triggerPrice: 'MISSING', protectionStatus: protection.status } });
   }
 
   const oodGuardApplied = ctx.oodGuardEnabled && event.setupType === 'MOMENTUM_DIRECT' && event.side === 'SHORT' && event.riskMultiplier < 1;
@@ -246,8 +269,9 @@ export async function handleOpenEvent(ctx: LifecycleContext, symbol: string, eve
   const candidateId = stableTelemetryId('candidate', traceId);
   const decisionId = stableTelemetryId('decision', traceId);
   const riskAdmissionId = stableTelemetryId('risk', traceId);
-  const common = { traceId, symbol, side: event.side, setupType: event.setupType, source: 'LIVE_RUNNER', candidateId, decisionId, riskAdmissionId } as const;
-  ctx.emitTelemetry({ ...common, eventType: 'CANDIDATE_CREATED', eventTimestampUtc: new Date(event.entryTimestamp).toISOString(), quality: { entryProposal: 'DERIVED', stopProposal: 'DERIVED', takeProfitProposal: 'DERIVED' }, data: { timeframe: '5m', candleOpenTimestamp: event.entryTimestamp, entryProposal: event.entryPrice, stopProposal: event.slPrice, takeProfitProposal: event.tpLevels, regime: event.regime, xgbScore: event.momentumScore ?? 'MISSING', t152SameSideGuardEnabled: true } });
+  const positionId = stableTelemetryId('position', traceId);
+  const common: OpenEventTelemetryCommon = { traceId, symbol, side: event.side, setupType: event.setupType, source: 'LIVE_RUNNER', candidateId, decisionId, riskAdmissionId, positionId };
+  ctx.emitTelemetry({ ...common, eventType: 'CANDIDATE_CREATED', eventTimestampUtc: new Date(event.entryTimestamp).toISOString(), quality: { entryProposal: 'DERIVED', stopProposal: 'DERIVED', takeProfitProposal: 'DERIVED', regime: 'OBSERVED' }, data: { timeframe: '5m', candleOpenTimestamp: event.entryTimestamp, entryProposal: event.entryPrice, stopProposal: event.slPrice, takeProfitProposal: event.tpLevels, regime: event.regime, xgbScore: event.momentumScore ?? 'MISSING', t152SameSideGuardEnabled: true } });
   ctx.emitTelemetry({ ...common, eventType: 'DECISION_MADE', quality: { decision: 'DERIVED' }, data: { decision: 'ALLOW', reasonCode: 'ORCHESTRATOR_OPEN_EVENT', openPositionCount: ctx.runnerState.getOpenPositionCount(symbol) } });
   ctx.emitTelemetry({ ...common, eventType: 'RISK_ADMISSION', quality: { balance: 'OBSERVED', requestedRisk: 'DERIVED', quantity: 'DERIVED' }, data: { admission: 'ALLOW', balance: balanceAtOpen, requestedRiskDollar: event.actualRiskDollar, requestedNotional: event.marginRequired * ctx.leverage, proposedQuantity: quantity, marginRequired: event.marginRequired, leverage: ctx.leverage, riskPoolPctBefore: event.riskPoolPctBefore, riskPoolPctAfter: event.riskPoolPctAfter, riskMultiplier: event.riskMultiplier } });
   ctx.emitTelemetry({ ...common, eventType: 'MARKET_SNAPSHOT', quality: { bestBid: 'MISSING', bestAsk: 'MISSING', mid: 'MISSING', markPrice: 'MISSING', indexPrice: 'MISSING' }, data: { captureStatus: 'MISSING', reasonCode: 'NO_NON_BLOCKING_BOOK_TICKER_FEED', candleReferencePrice: event.entryPrice } });
@@ -293,7 +317,7 @@ export async function handleOpenEvent(ctx: LifecycleContext, symbol: string, eve
   console.log(`[CANONICAL_QTY] ${symbol} source=CONFIRMED_FILLED submittedQty=${quantity} canonicalQty=${canonicalQty}`);
 
   try {
-    return await establishReconciledProtectedPosition(ctx, { symbol, event, balanceAtOpen, clientOrderId, canonicalQty, classificationOrderId: classification.orderId, classificationAvgPrice: classification.avgPrice, preSubmissionBaselineQtyAbs });
+    return await establishReconciledProtectedPosition(ctx, { symbol, event, balanceAtOpen, clientOrderId, canonicalQty, classificationOrderId: classification.orderId, classificationAvgPrice: classification.avgPrice, preSubmissionBaselineQtyAbs, telemetryCommon: common });
   } catch (err) {
     const recovery: MissingSlRecoveryOutcome = { status: 'EXHAUSTED_OPERATOR_REQUIRED', attemptsUsed: 0, detail: `xử lý sau-khớp-lệnh gặp lỗi không mong đợi (đã bắt): ${(err as Error).message}` };
     const protection: EstablishProtectiveStopLossResult = { status: 'PROTECTION_DEGRADED', firstAttemptReason: `unexpected-post-fill-error: ${(err as Error).message}`, recovery };
@@ -358,9 +382,99 @@ export async function handlePartialCloseEvent(
   ctx.enqueueTelegram(formatPartialCloseMessage(event, { env: ctx.envLabel, exchangeBalance }) + (ctx.dryRun ? '\n\n[DRY-RUN]' : ''));
 }
 
+const INCOME_RECONCILIATION_BUFFER_MS = 5_000;
+
+export interface TradeIncomeReconciliation {
+  quality: 'OBSERVED' | 'AMBIGUOUS' | 'MISSING';
+  realizedPnl: number | null;
+  commission: number | null;
+  funding: number | null;
+  detail: string;
+}
+
+export function reconcileTradeIncomeFromRecords(records: unknown, entryTimestamp: number, exitTimestamp: number, bufferMs: number = INCOME_RECONCILIATION_BUFFER_MS): TradeIncomeReconciliation {
+  if (!Array.isArray(records)) {
+    return { quality: 'MISSING', realizedPnl: null, commission: null, funding: null, detail: 'getIncome() không trả về mảng — không đối soát được.' };
+  }
+  const windowStart = entryTimestamp - bufferMs;
+  const windowEnd = exitTimestamp + bufferMs;
+  const inWindow = records.filter((r): r is { incomeType: unknown; income: unknown; time: unknown } => {
+    if (typeof r !== 'object' || r === null) return false;
+    const time = (r as { time?: unknown }).time;
+    return typeof time === 'number' && time >= windowStart && time <= windowEnd;
+  });
+  if (inWindow.length === 0) {
+    return { quality: 'MISSING', realizedPnl: null, commission: null, funding: null, detail: `Không có income record nào trong window [${windowStart},${windowEnd}].` };
+  }
+  let realizedPnl = 0;
+  let commission = 0;
+  let funding = 0;
+  let sawRealizedPnl = false;
+  let sawCommission = false;
+  let sawFunding = false;
+  for (const record of inWindow) {
+    const amount = Number(record.income);
+    if (!Number.isFinite(amount)) {
+      return { quality: 'AMBIGUOUS', realizedPnl: null, commission: null, funding: null, detail: `income record có giá trị không parse được: ${JSON.stringify(record)}.` };
+    }
+    if (record.incomeType === 'REALIZED_PNL') { realizedPnl += amount; sawRealizedPnl = true; }
+    else if (record.incomeType === 'COMMISSION') { commission += amount; sawCommission = true; }
+    else if (record.incomeType === 'FUNDING_FEE') { funding += amount; sawFunding = true; }
+  }
+  if (!sawRealizedPnl || !sawCommission) {
+    const missing = [!sawRealizedPnl ? 'REALIZED_PNL' : null, !sawCommission ? 'COMMISSION' : null].filter(Boolean).join(',');
+    return { quality: 'MISSING', realizedPnl: sawRealizedPnl ? realizedPnl : null, commission: sawCommission ? commission : null, funding: sawFunding ? funding : null, detail: `Thiếu income type bắt buộc trong window: ${missing}.` };
+  }
+  return {
+    quality: 'OBSERVED',
+    realizedPnl: sawRealizedPnl ? realizedPnl : null,
+    commission: sawCommission ? commission : null,
+    funding: sawFunding ? funding : null,
+    detail: `${inWindow.length} income record(s) trong window (${records.length - inWindow.length} bị loại vì ngoài window).`,
+  };
+}
+
+async function reconcileTradeIncomeAfterClose(ctx: LifecycleContext, symbol: string, event: CloseTradeEvent, traceId: string, positionId: string): Promise<void> {
+  if (ctx.dryRun) return;
+  const emitReconciled = (quality: TradeIncomeReconciliation['quality'], result: Omit<TradeIncomeReconciliation, 'quality'>) => {
+    const observed = (value: number | null) => quality === 'OBSERVED' && value !== null ? 'OBSERVED' as const : 'MISSING' as const;
+    ctx.emitTelemetry({
+      traceId, symbol, side: event.side, setupType: event.setupType, positionId,
+      eventType: 'POSITION_RECONCILED', source: 'EXCHANGE_INCOME_RECONCILIATION',
+      quality: { realizedPnl: observed(result.realizedPnl), commission: observed(result.commission), funding: observed(result.funding) },
+      data: { realizedPnl: result.realizedPnl ?? 'MISSING', commission: result.commission ?? 'MISSING', funding: result.funding ?? 'MISSING', modeledPnl: event.pnlUsd, detail: result.detail },
+    });
+  };
+  const startTime = event.entryTimestamp - INCOME_RECONCILIATION_BUFFER_MS;
+  const endTime = event.exitTimestamp + INCOME_RECONCILIATION_BUFFER_MS;
+  const retryDelays = ctx.incomeReconciliationRetryDelaysMs ?? [500, 1_500, 3_000];
+  const wait = ctx.wait ?? ((delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)));
+  let lastResult: TradeIncomeReconciliation = { quality: 'MISSING', realizedPnl: null, commission: null, funding: null, detail: 'Chưa đối soát.' };
+  for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
+    try {
+      const raw = await ctx.executor.getIncome(symbol, startTime, endTime);
+      lastResult = reconcileTradeIncomeFromRecords(raw, event.entryTimestamp, event.exitTimestamp);
+    } catch (err) {
+      lastResult = { quality: 'MISSING', realizedPnl: null, commission: null, funding: null, detail: `lỗi getIncome(): ${(err as Error).message}` };
+    }
+    if (lastResult.quality === 'OBSERVED') {
+      ctx.runnerState.clearIncomeReconciliation?.(symbol);
+      emitReconciled(lastResult.quality, lastResult);
+      return;
+    }
+    if (ctx.runnerState.blockIncomeReconciliation) ctx.runnerState.blockIncomeReconciliation(symbol);
+    else ctx.runnerState.blockSymbolAdmission(symbol);
+    if (attempt < retryDelays.length) await wait(retryDelays[attempt]);
+  }
+  emitReconciled(lastResult.quality, lastResult);
+  console.error(`[EXCHANGE_INCOME_RECONCILIATION_${lastResult.quality}] ${symbol}: ${lastResult.detail} — ĐÃ CHẶN mở lệnh mới trên ${symbol} cho tới khi đối soát PnL sàn xong.`);
+  ctx.enqueueTelegram(`🚨🚨 [CRITICAL — ĐỐI SOÁT PNL SÀN ${lastResult.quality}] ${symbol}: ${lastResult.detail}\nĐÃ CHẶN mở lệnh mới trên ${symbol} — cần kiểm tra thủ công.`);
+}
+
 export async function handleCloseEvent(ctx: LifecycleContext, symbol: string, event: CloseTradeEvent): Promise<void> {
   const closeTraceId = stableTelemetryId('trace', symbol, event.entryTimestamp, event.side, event.setupType);
-  ctx.emitTelemetry({ traceId: closeTraceId, symbol, side: event.side, setupType: event.setupType, positionId: stableTelemetryId('position', closeTraceId), eventType: 'TRADE_CLOSED', eventTimestampUtc: new Date(event.exitTimestamp).toISOString(), source: 'LIVE_RUNNER', quality: { pnl: 'MODELED', fees: 'MODELED', funding: 'MISSING', entryVwap: 'MISSING', exitVwap: 'MISSING' }, data: { exitReason: event.exitReason, modeledNetPnl: event.pnlUsd, referenceEntry: event.entryPrice, referenceExit: event.exitPrice, holdingDurationMs: event.exitTimestamp - event.entryTimestamp, observedFees: 'MISSING', funding: 'MISSING' } });
+  const closePositionId = stableTelemetryId('position', closeTraceId);
+  ctx.emitTelemetry({ traceId: closeTraceId, symbol, side: event.side, setupType: event.setupType, positionId: closePositionId, eventType: 'TRADE_CLOSED', eventTimestampUtc: new Date(event.exitTimestamp).toISOString(), source: 'LIVE_RUNNER', quality: { pnl: 'MODELED', fees: 'MODELED', funding: 'MISSING', entryVwap: 'MISSING', exitVwap: 'MISSING' }, data: { exitReason: event.exitReason, modeledNetPnl: event.pnlUsd, referenceEntry: event.entryPrice, referenceExit: event.exitPrice, holdingDurationMs: event.exitTimestamp - event.entryTimestamp, observedFees: 'MISSING', funding: 'MISSING' } });
   if (ctx.dryRun) {
     console.log(`[SẼ ĐÓNG LỆNH] ${symbol} exitReason=${event.exitReason} pnlUsd=${event.pnlUsd.toFixed(2)}`);
   } else {
@@ -390,6 +504,7 @@ export async function handleCloseEvent(ctx: LifecycleContext, symbol: string, ev
   }
   const exchangeBalance = await ctx.refreshBalanceForTelegram();
   ctx.enqueueTelegram(formatFullCloseMessage(event, { env: ctx.envLabel, exchangeBalance }) + (ctx.dryRun ? '\n\n[DRY-RUN]' : ''));
+  await reconcileTradeIncomeAfterClose(ctx, symbol, event, closeTraceId, closePositionId);
 }
 
 export interface PersistLiveStateDeps {

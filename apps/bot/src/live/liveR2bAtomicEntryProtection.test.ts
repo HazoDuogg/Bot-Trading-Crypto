@@ -648,3 +648,45 @@ describe('liveRunner.ts wiring — TICKET-LIVE-R2BR', () => {
     expect(block).toContain('avgPrice: classification.avgPrice');
   });
 });
+
+describe('liveRunner.ts wiring — TICKET-LIVE-R5T requirement 1/2', () => {
+  it('Requirement 1: mainnet+dryRun=false requires EXECUTION_TELEMETRY_ENABLED before anything else can start', () => {
+    const idx = liveRunnerSrc.indexOf("if (envConfig.env === 'mainnet' && dryRun === false) {");
+    expect(idx).toBeGreaterThan(-1);
+    const block = liveRunnerSrc.slice(idx, idx + 900);
+    expect(block).toContain('if (!EXECUTION_TELEMETRY_ENABLED) {');
+    expect(block).toContain('throw new Error(');
+    expect(liveRunnerSrc.indexOf("if (envConfig.env === 'mainnet' && dryRun === false) {")).toBeLessThan(liveRunnerSrc.indexOf('new ExecutionTelemetry({'));
+  });
+
+  it('Requirement 1: the mandatory-telemetry gate performs a real write-probe against the telemetry root dir, not just existsSync', () => {
+    const idx = liveRunnerSrc.indexOf("if (envConfig.env === 'mainnet' && dryRun === false) {");
+    const block = liveRunnerSrc.slice(idx, idx + 900);
+    expect(block).toContain('mkdirSync(EXECUTION_TELEMETRY_ROOT_DIR');
+    expect(block).toContain('openSync(probePath');
+    expect(block).toContain('writeSync(probeFd');
+    expect(block).toContain('unlinkSync(probePath)');
+    expect(block).not.toContain('existsSync(EXECUTION_TELEMETRY_ROOT_DIR)');
+  });
+
+  it('Requirement 2: onHealthAlert sets the portfolio-wide telemetry-failure sentinel and dispatches a CRITICAL Telegram alert', () => {
+    const idx = liveRunnerSrc.indexOf('onHealthAlert: (message) => {');
+    expect(idx).toBeGreaterThan(-1);
+    const block = liveRunnerSrc.slice(idx, idx + 400);
+    expect(block).toContain('telemetryFailureBlockingAdmission = true;');
+    expect(block).toContain('dispatchTelemetryAlert(');
+    expect(block).toContain('CRITICAL');
+  });
+
+  it('Requirement 2: telemetryFailureBlockingAdmission joins the SAME portfolio-wide admission sentinel as every other unquantifiable-exposure trigger', () => {
+    const idx = liveRunnerSrc.indexOf('const hasUnquantifiableExposureBlockingAdmission =');
+    expect(idx).toBeGreaterThan(-1);
+    const block = liveRunnerSrc.slice(idx, idx + 700);
+    expect(block).toContain('telemetryFailureBlockingAdmission ||');
+  });
+
+  it('Requirement 2: a mandatory-mainnet telemetry becoming unavailable at runtime is also caught defensively inside the tick loop', () => {
+    const idx = liveRunnerSrc.indexOf("if (envLabel === 'mainnet' && dryRun === false && !telemetry.isEnabled()");
+    expect(idx).toBeGreaterThan(-1);
+  });
+});

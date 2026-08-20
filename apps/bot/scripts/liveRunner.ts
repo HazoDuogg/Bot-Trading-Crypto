@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { createHash } from 'node:crypto';
+import { mkdirSync, openSync, closeSync, writeSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { LiveCandleFeed, type CandleData } from '../dist/live/liveCandleFeed.js';
 import { assessCandleFreshnessForSymbol, hasAnyStaleRequiredTimeframe } from '../dist/live/candleFreshnessGate.js';
@@ -188,16 +189,40 @@ async function main(): Promise<void> {
   const dryRun = process.argv.includes('--dry-run=false') ? false : true; // default true, NEVER default false — TICKET-086's hard rule
   console.log(`dryRun=${dryRun}${dryRun ? ' (KHÔNG gọi API đặt lệnh thật — chỉ log)' : ' !!! SẼ ĐẶT LỆNH THẬT !!!'}`);
 
+  const EXECUTION_TELEMETRY_ROOT_DIR = path.resolve(process.cwd(), process.env.EXECUTION_TELEMETRY_DIR ?? 'data/live-telemetry');
+  if (envConfig.env === 'mainnet' && dryRun === false) {
+    if (!EXECUTION_TELEMETRY_ENABLED) {
+      throw new Error('liveRunner: EXECUTION_TELEMETRY_ENABLED phải =true khi ENV=mainnet và dryRun=false — dừng khởi động, KHÔNG giao dịch mainnet thật mà không có telemetry.');
+    }
+    try {
+      mkdirSync(EXECUTION_TELEMETRY_ROOT_DIR, { recursive: true });
+      const probePath = path.join(EXECUTION_TELEMETRY_ROOT_DIR, `.telemetry-write-probe-${process.pid}-${Date.now()}`);
+      const probeFd = openSync(probePath, 'w');
+      writeSync(probeFd, Buffer.from('probe', 'utf8'));
+      closeSync(probeFd);
+      unlinkSync(probePath);
+    } catch (err) {
+      throw new Error(`liveRunner: thư mục telemetry root (${EXECUTION_TELEMETRY_ROOT_DIR}) không tạo/ghi được (${(err as Error).message}) — dừng khởi động, KHÔNG giao dịch mainnet thật mà không có telemetry khả dụng.`);
+    }
+  }
+
+  let telemetryFailureBlockingAdmission = false;
+  const pendingTelemetryAlerts: string[] = [];
+  let dispatchTelemetryAlert: (message: string) => void = (message) => { pendingTelemetryAlerts.push(message); };
   const telemetry = new ExecutionTelemetry({
     enabled: EXECUTION_TELEMETRY_ENABLED,
-    rootDir: path.resolve(process.cwd(), process.env.EXECUTION_TELEMETRY_DIR ?? 'data/live-telemetry'),
+    rootDir: EXECUTION_TELEMETRY_ROOT_DIR,
     strategyVersion: 'current-production-t152-semantics',
     configHash: createHash('sha256').update(JSON.stringify(CONFIG)).digest('hex'),
     modelVersion: 'xgb-momentum-v1',
     maxQueueSize: Number(process.env.EXECUTION_TELEMETRY_MAX_QUEUE ?? 5000),
     maxFileBytes: Number(process.env.EXECUTION_TELEMETRY_MAX_FILE_BYTES ?? 25 * 1024 * 1024),
     retentionDays: Number(process.env.EXECUTION_TELEMETRY_RETENTION_DAYS ?? 90),
-    onHealthAlert: (message) => console.error(`[TELEMETRY_HEALTH] ${message}`),
+    onHealthAlert: (message) => {
+      telemetryFailureBlockingAdmission = true;
+      console.error(`[TELEMETRY_HEALTH] ${message}`);
+      dispatchTelemetryAlert(`🚨🚨 [CRITICAL — TELEMETRY LỖI] ${message}\nĐÃ CHẶN mở lệnh mới TOÀN BỘ portfolio cho tới khi khắc phục — các vị thế đang mở vẫn được quản lý bình thường.`);
+    },
   });
   const emitTelemetry = (event: TelemetryEventDraft): void => { telemetry.emit(event); };
   console.log(`executionTelemetry=${EXECUTION_TELEMETRY_ENABLED ? `ENABLED session=${telemetry.getSessionId()}` : 'DISABLED'}`);
@@ -293,6 +318,8 @@ async function main(): Promise<void> {
 
   const telegramConfig = loadTelegramConfig();
   const telegramQueue = new TelegramMessageQueue(telegramConfig);
+  dispatchTelemetryAlert = (message) => telegramQueue.enqueue(message);
+  for (const message of pendingTelemetryAlerts.splice(0)) telegramQueue.enqueue(message);
 
   // TICKET-G1R Checkpoint C (G1-F14) — restart persistence + startup reconciliation. Runs BEFORE
   // the candle feed / tick loop start below so no candle is ever processed against an unreconciled
@@ -327,6 +354,7 @@ async function main(): Promise<void> {
 
   const runnerState: Record<string, RunnerSymbolState> = {};
   const entriesBlockedDueToRestartQuarantineBySymbol = new Set<string>();
+  const symbolsBlockedDueToIncomeReconciliation = new Set<string>();
   let pendingEntryQuarantinesBySymbol: Record<string, PendingEntryQuarantineRecord[]> =
     persistedLiveState.status === 'OK' ? { ...(persistedLiveState.file.pendingEntryQuarantines ?? {}) } : {};
   const restartFold = foldPendingEntryQuarantinesOnRestart(pendingEntryQuarantinesBySymbol);
@@ -856,6 +884,8 @@ async function main(): Promise<void> {
     getOrderIds: (symbol, entryTimestamp) => runnerState[symbol].orderIds.get(entryTimestamp),
     deleteOrderIds: (symbol, entryTimestamp) => { runnerState[symbol].orderIds.delete(entryTimestamp); },
     blockSymbolAdmission: (symbol) => { entriesBlockedDueToRestartQuarantineBySymbol.add(symbol); },
+    blockIncomeReconciliation: (symbol) => { symbolsBlockedDueToIncomeReconciliation.add(symbol); },
+    clearIncomeReconciliation: (symbol) => { symbolsBlockedDueToIncomeReconciliation.delete(symbol); },
   };
   const lifecycleCtx: LifecycleContext = {
     executor,
@@ -886,6 +916,12 @@ async function main(): Promise<void> {
   async function tick(): Promise<void> {
     try {
       const now = Date.now();
+
+      if (envLabel === 'mainnet' && dryRun === false && !telemetry.isEnabled() && !telemetryFailureBlockingAdmission) {
+        telemetryFailureBlockingAdmission = true;
+        console.error('[TELEMETRY_UNAVAILABLE_MANDATORY] telemetry không còn enabled trong khi ENV=mainnet/dryRun=false bắt buộc — chặn mở lệnh mới TOÀN BỘ portfolio.');
+        dispatchTelemetryAlert('🚨🚨 [CRITICAL — TELEMETRY KHÔNG KHẢ DỤNG] telemetry đã tắt/đóng trong khi mainnet live yêu cầu bắt buộc — ĐÃ CHẶN mở lệnh mới TOÀN BỘ portfolio, các vị thế đang mở vẫn được quản lý bình thường.');
+      }
 
       // Correlated-risk ratio: same once-per-step-across-4-symbols computation backtest.ts uses.
       const w1hBySymbol: Record<string, CandleData[]> = {};
@@ -952,6 +988,7 @@ async function main(): Promise<void> {
         accountSyncState === 'ACCOUNT_STATE_UNKNOWN' ||
         hasAnyProtectionDegradedPosition() ||
         livePersistFailureBlockingAdmission ||
+        telemetryFailureBlockingAdmission ||
         // item 1 — the THREE balance conditions, not just freshness: parsed+applied
         // (`accountBalanceKnown`), and still fresh. `accountBalanceKnown` is the explicit
         // "UNKNOWN until a real exchange read" sentinel; it can never be satisfied by a default.
@@ -986,6 +1023,10 @@ async function main(): Promise<void> {
         // via POSITION_MISSING_INTERNALLY, see reconciler.onMismatch below) — see the Set's declaration.
         if (entriesBlockedDueToRestartQuarantineBySymbol.has(symbol)) {
           console.warn(`[ENTRY_BLOCKED_RESTART_QUARANTINE] ${symbol}: bỏ qua tick — PENDING_RECONCILIATION, cần kiểm tra thủ công trước khi giao dịch lại trên symbol này.`);
+          continue;
+        }
+        if (symbolsBlockedDueToIncomeReconciliation.has(symbol)) {
+          console.warn(`[ENTRY_BLOCKED_INCOME_RECONCILIATION] ${symbol}: bỏ qua tick — PnL/commission sàn chưa đối soát xong.`);
           continue;
         }
         const closed5m = feed.getClosedCandles(symbol, '5m', now);

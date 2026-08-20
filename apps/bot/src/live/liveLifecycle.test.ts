@@ -11,6 +11,7 @@ import {
   foldPendingEntryQuarantinesOnRestart,
   applyAmbiguousOpenOutcome,
   handleOpenEventIfFresh,
+  reconcileTradeIncomeFromRecords,
   type LifecycleContext,
   type RunnerStateAccess,
   type LiveOrderIds,
@@ -52,6 +53,7 @@ function makeRunnerState() {
   const orderIdsBySymbol = new Map<string, Map<number, LiveOrderIds>>();
   const openPositionCounts: Record<string, number> = {};
   const blockedSymbols = new Set<string>();
+  const incomeBlockedSymbols = new Set<string>();
   const access: RunnerStateAccess = {
     getOpenPositionCount: (s) => openPositionCounts[s] ?? 0,
     setOrderIds: (s, t, ids) => {
@@ -65,8 +67,14 @@ function makeRunnerState() {
     blockSymbolAdmission: (s) => {
       blockedSymbols.add(s);
     },
+    blockIncomeReconciliation: (s) => {
+      incomeBlockedSymbols.add(s);
+    },
+    clearIncomeReconciliation: (s) => {
+      incomeBlockedSymbols.delete(s);
+    },
   };
-  return { access, orderIdsBySymbol, openPositionCounts, blockedSymbols };
+  return { access, orderIdsBySymbol, openPositionCounts, blockedSymbols, incomeBlockedSymbols };
 }
 
 function makeCtx(executor: Partial<BinanceOrderExecutor>, overrides: Partial<LifecycleContext> = {}) {
@@ -97,6 +105,8 @@ function makeCtx(executor: Partial<BinanceOrderExecutor>, overrides: Partial<Lif
       persistCallCount += 1;
       return true;
     },
+    incomeReconciliationRetryDelaysMs: [],
+    wait: async () => {},
     ...overrides,
   };
   return {
@@ -503,5 +513,192 @@ describe('TICKET-LIVE-R3 item 4 scenario 9b — a restart-quarantined position w
     const ledger = rebuildPortfolioRisk({ knownPositions: known, unknownExposures: [] });
     expect(ledger.hasUnquantifiableExposure).toBe(false);
     expect(ledger.totalRiskDollar).toBeGreaterThan(0);
+  });
+});
+
+describe('TICKET-LIVE-R5T requirement 3 — positionId threads through the whole open chain and SL/TP algo ids are emitted', () => {
+  it('every telemetry event from handleOpenEvent carries the same positionId, and ORDER_SENT events surface the SL/TP algo ids', async () => {
+    let positionRiskCalls = 0;
+    const executor: Partial<BinanceOrderExecutor> = {
+      openMarketPosition: async () => ({ orderId: 1, symbol: 'BTCUSDT', status: 'FILLED', raw: { executedQty: '0.09', avgPrice: '101' } }),
+      getPositionRisk: async () => {
+        positionRiskCalls += 1;
+        if (positionRiskCalls === 1) return [{ symbol: 'BTCUSDT', positionAmt: '0', entryPrice: '0' }];
+        return [{ symbol: 'BTCUSDT', positionAmt: '0.09', entryPrice: '101' }];
+      },
+      placeStopMarket: async () => ({ algoId: 501, symbol: 'BTCUSDT', algoStatus: 'NEW', raw: {} }),
+      getOpenAlgoOrders: async () => [{ algoId: 501, symbol: 'BTCUSDT', side: 'SELL', origQty: 0.09, triggerPrice: 98, algoStatus: 'NEW', positionSide: 'BOTH', orderType: 'STOP_MARKET', reduceOnly: true, closePosition: false, algoType: 'CONDITIONAL', raw: {} }],
+      placeTakeProfitMarket: async () => ({ algoId: 601, symbol: 'BTCUSDT', algoStatus: 'NEW', raw: {} }),
+    };
+    const telemetryEvents: Array<{ eventType?: string; positionId?: string; data?: Record<string, unknown> }> = [];
+    const { ctx } = makeCtx(executor, { emitTelemetry: (event) => telemetryEvents.push(event as never) });
+    const outcome = await handleOpenEvent(ctx, 'BTCUSDT', baseOpenEvent(), 300);
+    expect(outcome.kind).toBe('FILLED');
+    expect(telemetryEvents.length).toBeGreaterThan(0);
+    const positionIds = new Set(telemetryEvents.map((e) => e.positionId));
+    expect(positionIds.size).toBe(1);
+    expect([...positionIds][0]).toMatch(/^position_/);
+    const orderSentEvents = telemetryEvents.filter((e) => e.eventType === 'ORDER_SENT' && (e.data?.role === 'PROTECTIVE_SL' || e.data?.role === 'TAKE_PROFIT'));
+    expect(orderSentEvents.length).toBeGreaterThanOrEqual(2);
+    const slEvent = orderSentEvents.find((e) => e.data?.role === 'PROTECTIVE_SL');
+    expect(slEvent?.data?.algoId).toBe(501);
+    const tpEvents = orderSentEvents.filter((e) => e.data?.role === 'TAKE_PROFIT');
+    expect(tpEvents.every((e) => e.data?.algoId === 601)).toBe(true);
+  });
+
+  it('when protection is degraded, an ORDER_SENT event still fires with MISSING algoId/price quality instead of silently omitting the stage', async () => {
+    const executor: Partial<BinanceOrderExecutor> = {
+      openMarketPosition: async () => ({ orderId: 1, symbol: 'BTCUSDT', status: 'FILLED', raw: { executedQty: '0.09', avgPrice: undefined } }),
+      getPositionRisk: async () => [{ symbol: 'BTCUSDT', positionAmt: '0' }],
+      placeStopMarket: async () => { throw new Error('should never be called'); },
+      getOpenAlgoOrders: async () => [],
+    };
+    const telemetryEvents: Array<{ eventType?: string; quality?: Record<string, unknown>; data?: Record<string, unknown> }> = [];
+    const { ctx } = makeCtx(executor, { emitTelemetry: (event) => telemetryEvents.push(event as never) });
+    const outcome = await handleOpenEvent(ctx, 'BTCUSDT', baseOpenEvent(), 300);
+    expect(outcome.kind).toBe('FILLED');
+    if (outcome.kind !== 'FILLED') throw new Error('unreachable');
+    expect(outcome.protection.status).toBe('PROTECTION_DEGRADED');
+    const degraded = telemetryEvents.find((e) => e.eventType === 'ORDER_SENT' && e.data?.role === 'PROTECTIVE_SL' && e.data?.algoId === 'MISSING');
+    expect(degraded).toBeDefined();
+    expect(degraded?.quality?.algoId).toBe('MISSING');
+  });
+});
+
+function baseCloseEvent(overrides: Partial<CloseTradeEvent> = {}): CloseTradeEvent {
+  return {
+    type: 'CLOSE', symbol: 'BTCUSDT', side: 'LONG', regime: MarketRegime.TREND_RIDER, setupType: 'OB', tpPlan: 'PLAN_A',
+    entryTimestamp: 1000, entryPrice: 100, exitTimestamp: 5000, exitPrice: 108, exitReason: 'TP2', pnlUsd: 6, pnlPct: 0.6,
+    riskMultiplier: 1, accountBalanceAfter: 306,
+    ...overrides,
+  };
+}
+
+describe('TICKET-LIVE-R5T requirement 4 — reconcileTradeIncomeFromRecords (pure)', () => {
+  it('sums REALIZED_PNL/COMMISSION/FUNDING_FEE for records inside the window and reports OBSERVED quality', () => {
+    const records = [
+      { incomeType: 'REALIZED_PNL', income: '5.5', time: 2000 },
+      { incomeType: 'COMMISSION', income: '-0.4', time: 2000 },
+      { incomeType: 'FUNDING_FEE', income: '-0.1', time: 4000 },
+      { incomeType: 'REALIZED_PNL', income: '999', time: 999_999 },
+    ];
+    const result = reconcileTradeIncomeFromRecords(records, 1000, 5000, 500);
+    expect(result.quality).toBe('OBSERVED');
+    expect(result.realizedPnl).toBeCloseTo(5.5, 6);
+    expect(result.commission).toBeCloseTo(-0.4, 6);
+    expect(result.funding).toBeCloseTo(-0.1, 6);
+  });
+
+  it('reports MISSING when no income record falls inside the window', () => {
+    const result = reconcileTradeIncomeFromRecords([{ incomeType: 'REALIZED_PNL', income: '5', time: 999_999 }], 1000, 5000, 500);
+    expect(result.quality).toBe('MISSING');
+    expect(result.realizedPnl).toBeNull();
+  });
+
+  it('reports MISSING when getIncome did not return an array', () => {
+    const result = reconcileTradeIncomeFromRecords({ not: 'an array' }, 1000, 5000);
+    expect(result.quality).toBe('MISSING');
+  });
+
+  it('reports AMBIGUOUS when an in-window record has a non-numeric income value', () => {
+    const result = reconcileTradeIncomeFromRecords([{ incomeType: 'REALIZED_PNL', income: 'not-a-number', time: 2000 }], 1000, 5000, 500);
+    expect(result.quality).toBe('AMBIGUOUS');
+  });
+
+  it('does not report OBSERVED when the window lacks realized PnL or commission evidence', () => {
+    const unrelated = reconcileTradeIncomeFromRecords([{ incomeType: 'TRANSFER', income: '10', time: 2000 }], 1000, 5000, 500);
+    const fundingOnly = reconcileTradeIncomeFromRecords([{ incomeType: 'FUNDING_FEE', income: '-0.1', time: 2000 }], 1000, 5000, 500);
+    expect(unrelated.quality).toBe('MISSING');
+    expect(fundingOnly.quality).toBe('MISSING');
+  });
+});
+
+describe('TICKET-LIVE-R5T requirement 4 — handleCloseEvent wires exchange-income reconciliation, read-only and per-symbol fail-closed', () => {
+  it('a clean getIncome() result emits an OBSERVED POSITION_RECONCILED event and never blocks the symbol', async () => {
+    const executor: Partial<BinanceOrderExecutor> = {
+      getPositionRisk: async () => [{ symbol: 'BTCUSDT', positionAmt: '0' }],
+      cancelAlgoOrder: async () => {},
+      getIncome: async () => [{ incomeType: 'REALIZED_PNL', income: '6', time: 5000 }, { incomeType: 'COMMISSION', income: '-0.5', time: 5000 }],
+    };
+    const telemetryEvents: Array<{ eventType?: string; quality?: Record<string, unknown>; data?: Record<string, unknown> }> = [];
+    const { ctx, runner } = makeCtx(executor, { emitTelemetry: (event) => telemetryEvents.push(event as never) });
+    await handleCloseEvent(ctx, 'BTCUSDT', baseCloseEvent());
+    const reconciled = telemetryEvents.find((e) => e.eventType === 'POSITION_RECONCILED');
+    expect(reconciled).toBeDefined();
+    expect(reconciled?.quality?.realizedPnl).toBe('OBSERVED');
+    expect(reconciled?.quality?.commission).toBe('OBSERVED');
+    expect(reconciled?.quality?.funding).toBe('MISSING');
+    expect(reconciled?.data?.realizedPnl).toBeCloseTo(6, 6);
+    expect(runner.blockedSymbols.has('BTCUSDT')).toBe(false);
+  });
+
+  it('a getIncome() failure blocks NEW entry admission on that symbol, sends a CRITICAL Telegram alert, and records MISSING quality — never fabricating a 0', async () => {
+    const executor: Partial<BinanceOrderExecutor> = {
+      getPositionRisk: async () => [{ symbol: 'BTCUSDT', positionAmt: '0' }],
+      cancelAlgoOrder: async () => {},
+      getIncome: async () => { throw new Error('network unreachable'); },
+    };
+    const telemetryEvents: Array<{ eventType?: string; quality?: Record<string, unknown>; data?: Record<string, unknown> }> = [];
+    const { ctx, runner, telegramMessages } = makeCtx(executor, { emitTelemetry: (event) => telemetryEvents.push(event as never) });
+    await handleCloseEvent(ctx, 'BTCUSDT', baseCloseEvent());
+    const reconciled = telemetryEvents.find((e) => e.eventType === 'POSITION_RECONCILED');
+    expect(reconciled?.quality?.realizedPnl).toBe('MISSING');
+    expect(reconciled?.data?.realizedPnl).toBe('MISSING');
+    expect(runner.incomeBlockedSymbols.has('BTCUSDT')).toBe(true);
+    expect(telegramMessages.some((m) => m.includes('CRITICAL') && m.includes('BTCUSDT'))).toBe(true);
+  });
+
+  it('an ambiguous/empty income window blocks only the affected symbol, not the whole portfolio, via the same blockSymbolAdmission sentinel', async () => {
+    const executor: Partial<BinanceOrderExecutor> = {
+      getPositionRisk: async () => [{ symbol: 'BTCUSDT', positionAmt: '0' }],
+      cancelAlgoOrder: async () => {},
+      getIncome: async () => [],
+    };
+    const { ctx, runner } = makeCtx(executor);
+    await handleCloseEvent(ctx, 'BTCUSDT', baseCloseEvent());
+    expect(runner.incomeBlockedSymbols.has('BTCUSDT')).toBe(true);
+    expect(runner.blockedSymbols.size).toBe(0);
+  });
+
+  it('retries a temporarily missing income ledger and clears only the income reconciliation block after complete evidence arrives', async () => {
+    let calls = 0;
+    const executor: Partial<BinanceOrderExecutor> = {
+      getPositionRisk: async () => [{ symbol: 'BTCUSDT', positionAmt: '0' }],
+      cancelAlgoOrder: async () => {},
+      getIncome: async () => {
+        calls += 1;
+        if (calls === 1) return [];
+        return [{ incomeType: 'REALIZED_PNL', income: '6', time: 5000 }, { incomeType: 'COMMISSION', income: '-0.5', time: 5000 }];
+      },
+    };
+    const { ctx, runner } = makeCtx(executor, { incomeReconciliationRetryDelaysMs: [0] });
+    await handleCloseEvent(ctx, 'BTCUSDT', baseCloseEvent());
+    expect(calls).toBe(2);
+    expect(runner.incomeBlockedSymbols.has('BTCUSDT')).toBe(false);
+    expect(runner.blockedSymbols.size).toBe(0);
+  });
+
+  it('never calls getIncome and never blocks admission in dryRun mode (telemetry-only feature, inert when nothing was actually traded)', async () => {
+    let getIncomeCalls = 0;
+    const executor: Partial<BinanceOrderExecutor> = {
+      getIncome: async () => { getIncomeCalls += 1; return []; },
+    };
+    const { ctx, runner } = makeCtx(executor, { dryRun: true });
+    await handleCloseEvent(ctx, 'BTCUSDT', baseCloseEvent());
+    expect(getIncomeCalls).toBe(0);
+    expect(runner.blockedSymbols.has('BTCUSDT')).toBe(false);
+    expect(runner.incomeBlockedSymbols.has('BTCUSDT')).toBe(false);
+  });
+
+  it('reconciliation never touches accountBalanceAfter/risk-ledger inputs — it only reads via getIncome and emits telemetry', async () => {
+    const executor: Partial<BinanceOrderExecutor> = {
+      getPositionRisk: async () => [{ symbol: 'BTCUSDT', positionAmt: '0' }],
+      cancelAlgoOrder: async () => {},
+      getIncome: async () => [{ incomeType: 'REALIZED_PNL', income: '6', time: 5000 }],
+    };
+    const { ctx } = makeCtx(executor);
+    const event = baseCloseEvent({ accountBalanceAfter: 306 });
+    await handleCloseEvent(ctx, 'BTCUSDT', event);
+    expect(event.accountBalanceAfter).toBe(306);
   });
 });
