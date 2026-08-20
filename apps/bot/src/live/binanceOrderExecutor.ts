@@ -577,6 +577,19 @@ export class BinanceOrderExecutor {
     return this.signedGet('/fapi/v2/positionRisk', symbol ? { symbol } : {});
   }
 
+  async getOpenOrders(symbol?: string): Promise<unknown[]> {
+    const raw = await this.signedGet('/fapi/v1/openOrders', symbol ? { symbol } : {});
+    if (!Array.isArray(raw)) throw new Error(`getOpenOrders: response shape không hợp lệ: ${JSON.stringify(raw)}`);
+    return raw;
+  }
+
+  async getPositionMode(): Promise<{ dualSidePosition: boolean }> {
+    const raw = await this.signedGet('/fapi/v1/positionSide/dual');
+    const dualSidePosition = (raw as { dualSidePosition?: unknown } | null)?.dualSidePosition;
+    if (typeof dualSidePosition !== 'boolean') throw new Error(`getPositionMode: dualSidePosition không hợp lệ: ${JSON.stringify(raw)}`);
+    return { dualSidePosition };
+  }
+
   /**
    * TICKET-107 — GET /fapi/v1/income: real REALIZED_PNL/COMMISSION/FUNDING_FEE entries Binance
    * itself recorded, per symbol/time-window. Read-only, never gated by dryRun (same convention as

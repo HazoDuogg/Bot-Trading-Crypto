@@ -159,6 +159,37 @@ describe('BinanceOrderExecutor — syncClock', () => {
   });
 });
 
+describe('BinanceOrderExecutor — LIVE-R4 read-only account gates', () => {
+  it('reads ordinary open orders for one symbol', async () => {
+    const rows = [{ orderId: 1, symbol: 'BTCUSDT', status: 'NEW' }];
+    const fetchFn = vi.fn().mockResolvedValueOnce(jsonResponse(200, rows));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, fetchFn });
+    await expect(exec.getOpenOrders('BTCUSDT')).resolves.toEqual(rows);
+    expect(fetchFn.mock.calls[0][0]).toContain('/fapi/v1/openOrders?');
+    expect(fetchFn.mock.calls[0][0]).toContain('symbol=BTCUSDT');
+    expect(fetchFn.mock.calls[0][1]).toMatchObject({ method: 'GET' });
+  });
+
+  it('fails when ordinary open-orders response is not an array', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(jsonResponse(200, { orders: [] }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, fetchFn });
+    await expect(exec.getOpenOrders('BTCUSDT')).rejects.toThrow(/response shape/);
+  });
+
+  it('reads the authoritative position mode', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(jsonResponse(200, { dualSidePosition: false }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, fetchFn });
+    await expect(exec.getPositionMode()).resolves.toEqual({ dualSidePosition: false });
+    expect(fetchFn.mock.calls[0][0]).toContain('/fapi/v1/positionSide/dual?');
+  });
+
+  it('fails when position mode is not a boolean', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(jsonResponse(200, { dualSidePosition: 'false' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, fetchFn });
+    await expect(exec.getPositionMode()).rejects.toThrow(/dualSidePosition/);
+  });
+});
+
 describe('BinanceOrderExecutor — TICKET-100: setLeverage (POST /fapi/v1/leverage)', () => {
   it('dryRun blocks setLeverage from ever hitting the network, same as every other mutating call', async () => {
     const fetchFn = vi.fn();
