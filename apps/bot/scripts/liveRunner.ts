@@ -89,8 +89,12 @@ import {
   formatMomentumContextDecisionMessage,
 } from '../dist/telegram/messageFormatters.js';
 import { computeCurrentPositionRisk, rebuildPortfolioRisk, type KnownPositionForRisk, type UnknownExposureForRisk } from '../dist/risk/currentRisk.js';
+import { LIVE_SYMBOL_UNIVERSE } from './liveSymbolUniverse.js';
 
-const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
+// Mutable copy of the frozen authoritative list — several pre-existing APIs below (loadExchangeInfo,
+// initializeLeverageForSymbols, LiveCandleFeed's `symbols` option, etc.) require a plain `string[]`
+// parameter; LIVE_SYMBOL_UNIVERSE itself stays readonly/frozen so it can never be mutated in place.
+const SYMBOLS: string[] = [...LIVE_SYMBOL_UNIVERSE];
 const EXECUTION_TELEMETRY_ENABLED = process.env.EXECUTION_TELEMETRY_ENABLED === 'true';
 const TICK_INTERVAL_MS = 5_000; // how often we check "has a new 5m candle closed" — cheap, reads already-polled in-memory buffers only
 // TICKET-G1R-B (Runtime Wiring Pass) item 1 — in-run protective-order (SL/TP) monitor interval. NOT
