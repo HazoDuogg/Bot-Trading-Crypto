@@ -95,7 +95,9 @@ describe('G1-F08 — riskDollarOrPercent is a literal $ amount, not a % of balan
     const sizer = new DynamicRMarginSizer();
     const balance = 100;
     const output = sizer.calculate({
+      accountBalance: balance,
       riskDollarOrPercent: 15, // live CONFIG.riskDollarOrPercent — apps/bot/scripts/liveRunner.ts CONFIG
+      entryPrice: 100,
       leverage: 30,
       slDistancePercent: 0.02, // 2% SL distance — a normal ATR-based SL
       maxMarginCap: 37.5,
@@ -110,7 +112,7 @@ describe('G1-F08 — riskDollarOrPercent is a literal $ amount, not a % of balan
 describe('G1-F10 — core sizing unit convention: positionSize is USD notional, not base quantity (CORRECT, confirmed)', () => {
   it('marginRequired = positionSize / leverage and actualRiskDollar = positionSize * slDistancePercent hold internally', () => {
     const sizer = new DynamicRMarginSizer();
-    const output = sizer.calculate({ riskDollarOrPercent: 15, leverage: 30, slDistancePercent: 0.02, maxMarginCap: 37.5 });
+    const output = sizer.calculate({ accountBalance: 100, entryPrice: 100, riskDollarOrPercent: 15, leverage: 30, slDistancePercent: 0.02, maxMarginCap: 37.5 });
     expect(output.positionSize).toBeCloseTo(output.marginRequired * 30, 6);
     expect(output.actualRiskDollar).toBeCloseTo(output.positionSize * 0.02, 6);
     // slTpManager.ts's own positionSize is likewise USD notional (openPosition's own doc comment says

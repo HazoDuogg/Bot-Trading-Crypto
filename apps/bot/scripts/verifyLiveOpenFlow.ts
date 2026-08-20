@@ -112,7 +112,7 @@ async function main(): Promise<void> {
   const quantity = roundQty((event.marginRequired * LEVERAGE) / event.entryPrice);
   console.log(`[SẼ MỞ LỆNH] ${event.symbol} ${event.side} entry=${event.entryPrice} sl=${event.slPrice} qty=${quantity} setupType=${event.setupType}`);
 
-  const dryRunResult = await executor.openMarketPosition(event.symbol, event.side, quantity);
+  const dryRunResult = await executor.openMarketPosition(event.symbol, event.side, quantity, event.entryPrice);
   if (!('dryRun' in dryRunResult)) {
     throw new Error('verifyLiveOpenFlow: executor.openMarketPosition KHÔNG trả về DryRunResult dù dryRun=true — dừng ngay, không được để lọt lệnh thật.');
   }

@@ -27,22 +27,22 @@ export interface IPositionSizer {
 
 /** Shared validation for both sizers — throws instead of returning NaN/0 on bad input. */
 export function validatePositionSizingInput(input: PositionSizingInput): void {
-  if (input.accountBalance <= 0) {
-    throw new Error(`PositionSizingInput.accountBalance must be > 0, got ${input.accountBalance}`);
+  if (!Number.isFinite(input.accountBalance) || input.accountBalance <= 0) {
+    throw new Error(`PositionSizingInput.accountBalance must be a finite number > 0, got ${input.accountBalance}`);
   }
-  if (input.slDistancePercent <= 0) {
-    throw new Error(`PositionSizingInput.slDistancePercent must be > 0, got ${input.slDistancePercent}`);
+  if (!Number.isFinite(input.slDistancePercent) || input.slDistancePercent <= 0) {
+    throw new Error(`PositionSizingInput.slDistancePercent must be a finite number > 0, got ${input.slDistancePercent}`);
   }
-  if (input.leverage <= 0) {
-    throw new Error(`PositionSizingInput.leverage must be > 0, got ${input.leverage}`);
+  if (!Number.isFinite(input.leverage) || input.leverage <= 0) {
+    throw new Error(`PositionSizingInput.leverage must be a finite number > 0, got ${input.leverage}`);
   }
-  if (input.riskDollarOrPercent <= 0) {
-    throw new Error(`PositionSizingInput.riskDollarOrPercent must be > 0, got ${input.riskDollarOrPercent}`);
+  if (!Number.isFinite(input.riskDollarOrPercent) || input.riskDollarOrPercent <= 0) {
+    throw new Error(`PositionSizingInput.riskDollarOrPercent must be a finite number > 0, got ${input.riskDollarOrPercent}`);
   }
-  if (input.maxMarginCap !== undefined && input.maxMarginCap <= 0) {
-    throw new Error(`PositionSizingInput.maxMarginCap must be > 0 when provided, got ${input.maxMarginCap}`);
+  if (input.maxMarginCap !== undefined && (!Number.isFinite(input.maxMarginCap) || input.maxMarginCap <= 0)) {
+    throw new Error(`PositionSizingInput.maxMarginCap must be a finite number > 0 when provided, got ${input.maxMarginCap}`);
   }
-  if (input.entryPrice <= 0) {
-    throw new Error(`PositionSizingInput.entryPrice must be > 0, got ${input.entryPrice}`);
+  if (!Number.isFinite(input.entryPrice) || input.entryPrice <= 0) {
+    throw new Error(`PositionSizingInput.entryPrice must be a finite number > 0, got ${input.entryPrice}`);
   }
 }

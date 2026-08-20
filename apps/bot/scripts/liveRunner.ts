@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { LiveCandleFeed, type CandleData } from '../dist/live/liveCandleFeed.js';
+import { assessCandleFreshnessForSymbol, hasAnyStaleRequiredTimeframe } from '../dist/live/candleFreshnessGate.js';
 import { BinanceOrderExecutor, initializeLeverageForSymbols, type PositionSide } from '../dist/live/binanceOrderExecutor.js';
 import { StateReconciler, resolveAccountBalanceAfterReconcile, type InternalStateSnapshot } from '../dist/live/stateReconciler.js';
 import {
@@ -956,7 +957,7 @@ async function main(): Promise<void> {
       emitTelemetry({ ...common, clientOrderId, eventType: 'ORDER_SENT', quality: { localSendTimestamp: 'OBSERVED' }, data: { localSendTimestampMs: Date.now(), attempt: 1 } });
       let openResult;
       try {
-        openResult = await executor.openMarketPosition(symbol, event.side, quantity);
+        openResult = await executor.openMarketPosition(symbol, event.side, quantity, event.entryPrice);
       } catch (err) {
         emitTelemetry({ ...common, clientOrderId, eventType: 'EXCHANGE_REJECT', quality: { error: 'OBSERVED' }, data: { localAckTimestampMs: Date.now(), sanitizedErrorCode: (err as Error).name } });
         throw err;
@@ -1206,12 +1207,35 @@ async function main(): Promise<void> {
         }
 
         const window5m = slice(closed5m, WINDOW_5M);
-        const window15m = slice(feed.getClosedCandles(symbol, '15m', now), WINDOW_15M);
+        const closed15m = feed.getClosedCandles(symbol, '15m', now);
+        const window15m = slice(closed15m, WINDOW_15M);
         const window1hFull = feed.getClosedCandles(symbol, '1h', now);
         const window1h = slice(window1hFull, WINDOW_1H);
         const window1hMomentum = slice(window1hFull, WINDOW_1H_MOMENTUM);
-        const window1m = slice(feed.getClosedCandles(symbol, '1m', now), WINDOW_1M);
-        const window1d = slice(feed.getClosedCandles(symbol, '1d', now), WINDOW_1D);
+        const closed1m = feed.getClosedCandles(symbol, '1m', now);
+        const window1m = slice(closed1m, WINDOW_1M);
+        const closed1d = feed.getClosedCandles(symbol, '1d', now);
+        const window1d = slice(closed1d, WINDOW_1D);
+
+        const candleFreshnessVerdicts = assessCandleFreshnessForSymbol(
+          {
+            '5m': window5m,
+            '15m': window15m,
+            '1h': window1hMomentum,
+            '1m': window1m,
+            '1d': window1d,
+          },
+          ['5m', '15m', '1h', '1m', '1d'],
+          now,
+        );
+        const hasStaleRequiredCandleData = hasAnyStaleRequiredTimeframe(candleFreshnessVerdicts);
+        if (hasStaleRequiredCandleData) {
+          const staleList = candleFreshnessVerdicts
+            .filter((v): v is Extract<typeof v, { fresh: false }> => !v.fresh)
+            .map((v) => `${v.interval}:${v.reason}`)
+            .join(',');
+          console.warn(`[CANDLE_FRESHNESS_STALE] ${symbol}: ${staleList} — chặn mở lệnh mới trên symbol này cho tới khi dữ liệu nến tươi trở lại (vẫn quản lý vị thế đang mở).`);
+        }
 
         // TICKET-101 Việc 1: built fresh from the live-updated openRiskBySymbol map, right before
         // THIS symbol's own processCandle() call — includes any new position(s) opened by an earlier
@@ -1232,6 +1256,9 @@ async function main(): Promise<void> {
         // Already-open positions still process this candle normally (management must not stop).
         if (sessionVolume.status !== 'READY') {
           allOpenPositionsRisk.push({ id: 'SESSION_VOLUME_WARMUP_BLOCK', actualRiskDollar: accountBalance * CONFIG.riskPoolMaxPct + 1 });
+        }
+        if (hasStaleRequiredCandleData) {
+          allOpenPositionsRisk.push({ id: 'CANDLE_FRESHNESS_STALE_BLOCK', actualRiskDollar: accountBalance * CONFIG.riskPoolMaxPct + 1 });
         }
         // TICKET-101 Việc 2: single aggregate across ALL 4 symbols (not a per-symbol breakdown) —
         // wouldExceedMaxTotalMargin() only ever needs the total.

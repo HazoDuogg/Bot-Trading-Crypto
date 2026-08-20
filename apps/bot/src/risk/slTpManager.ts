@@ -129,18 +129,27 @@ export function computeTpLevels(
 }
 
 export function openPosition(input: SlTpManagerInput): ManagedPositionState {
-  if (input.entryPrice <= 0) {
-    throw new Error(`SlTpManager: entryPrice must be > 0, got ${input.entryPrice}`);
+  if (!Number.isFinite(input.entryPrice) || input.entryPrice <= 0) {
+    throw new Error(`SlTpManager: entryPrice must be a finite number > 0, got ${input.entryPrice}`);
   }
-  if (input.positionSize <= 0) {
-    throw new Error(`SlTpManager: positionSize must be > 0, got ${input.positionSize}`);
+  if (!Number.isFinite(input.slPrice) || input.slPrice <= 0) {
+    throw new Error(`SlTpManager: slPrice must be a finite number > 0, got ${input.slPrice}`);
   }
-  if (input.takerFeeRate < 0) {
-    throw new Error(`SlTpManager: takerFeeRate must be >= 0, got ${input.takerFeeRate}`);
+  if (!Number.isFinite(input.positionSize) || input.positionSize <= 0) {
+    throw new Error(`SlTpManager: positionSize must be a finite number > 0, got ${input.positionSize}`);
+  }
+  if (!Number.isFinite(input.takerFeeRate) || input.takerFeeRate < 0) {
+    throw new Error(`SlTpManager: takerFeeRate must be a finite number >= 0, got ${input.takerFeeRate}`);
   }
   const r = Math.abs(input.entryPrice - input.slPrice);
   if (r === 0) {
     throw new Error('SlTpManager: slPrice cannot equal entryPrice (R would be 0)');
+  }
+  if (input.side === 'LONG' && input.slPrice > input.entryPrice) {
+    throw new Error(`SlTpManager: LONG requires slPrice < entryPrice, got slPrice=${input.slPrice} entryPrice=${input.entryPrice}`);
+  }
+  if (input.side === 'SHORT' && input.slPrice < input.entryPrice) {
+    throw new Error(`SlTpManager: SHORT requires slPrice > entryPrice, got slPrice=${input.slPrice} entryPrice=${input.entryPrice}`);
   }
 
   return {

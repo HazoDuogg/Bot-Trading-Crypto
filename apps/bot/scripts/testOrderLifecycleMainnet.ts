@@ -101,7 +101,7 @@ async function main(): Promise<void> {
   console.log(`Giá tham chiếu ${SYMBOL} lúc bắt đầu: ${price}`);
 
   // 1. Đặt lệnh MARKET mở vị thế (size tối thiểu)
-  await step('1_openMarketPosition', () => executor.openMarketPosition(SYMBOL, 'LONG', QUANTITY));
+  await step('1_openMarketPosition', () => executor.openMarketPosition(SYMBOL, 'LONG', QUANTITY, price));
 
   // 2. Poll getPositionRisk() để xác nhận khớp
   const detectStart = Date.now();

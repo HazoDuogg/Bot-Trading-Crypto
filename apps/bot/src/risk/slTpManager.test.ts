@@ -117,3 +117,57 @@ describe('computeTierNetPnl', () => {
     expect(() => computeTierNetPnl(opened, 'TP3_RUNNER')).toThrow(/no fixed-price tier/);
   });
 });
+
+const badValues = [NaN, Infinity, -Infinity, 0, -1];
+
+describe('openPosition — Number.isFinite guards (TICKET-LIVE-R2A item 2)', () => {
+  for (const bad of badValues) {
+    it(`rejects entryPrice=${bad}`, () => {
+      expect(() => openPosition({ ...trendLongPlanA, entryPrice: bad })).toThrow();
+    });
+    it(`rejects slPrice=${bad}`, () => {
+      expect(() => openPosition({ ...trendLongPlanA, slPrice: bad })).toThrow();
+    });
+    it(`rejects positionSize=${bad}`, () => {
+      expect(() => openPosition({ ...trendLongPlanA, positionSize: bad })).toThrow();
+    });
+  }
+  for (const bad of [NaN, Infinity, -Infinity, -1]) {
+    it(`rejects takerFeeRate=${bad}`, () => {
+      expect(() => openPosition({ ...trendLongPlanA, takerFeeRate: bad })).toThrow();
+    });
+  }
+  it('accepts takerFeeRate=0', () => {
+    expect(() => openPosition({ ...trendLongPlanA, takerFeeRate: 0 })).not.toThrow();
+  });
+});
+
+describe('openPosition — SL geometry fail-closed boundary (TICKET-LIVE-R2A item 3, LIVE-R1 gate #7)', () => {
+  it('accepts a correct-side LONG (slPrice < entryPrice)', () => {
+    expect(() => openPosition({ ...trendLongPlanA, side: 'LONG', entryPrice: 100, slPrice: 99 })).not.toThrow();
+  });
+
+  it('accepts a correct-side SHORT (slPrice > entryPrice)', () => {
+    expect(() => openPosition({ ...trendLongPlanA, side: 'SHORT', entryPrice: 100, slPrice: 101 })).not.toThrow();
+  });
+
+  it('rejects slPrice equal to entryPrice (existing R=0 check, kept)', () => {
+    expect(() => openPosition({ ...trendLongPlanA, side: 'LONG', entryPrice: 100, slPrice: 100 })).toThrow(/slPrice cannot equal entryPrice/);
+  });
+
+  it('rejects a wrong-side LONG (slPrice above entryPrice)', () => {
+    expect(() => openPosition({ ...trendLongPlanA, side: 'LONG', entryPrice: 100, slPrice: 101 })).toThrow(/LONG requires slPrice < entryPrice/);
+  });
+
+  it('rejects a wrong-side SHORT (slPrice below entryPrice)', () => {
+    expect(() => openPosition({ ...trendLongPlanA, side: 'SHORT', entryPrice: 100, slPrice: 99 })).toThrow(/SHORT requires slPrice > entryPrice/);
+  });
+
+  it('rejects a non-finite entryPrice before the sign check can even run', () => {
+    expect(() => openPosition({ ...trendLongPlanA, side: 'LONG', entryPrice: NaN, slPrice: 99 })).toThrow(/entryPrice must be a finite number/);
+  });
+
+  it('rejects a non-finite slPrice before the sign check can even run', () => {
+    expect(() => openPosition({ ...trendLongPlanA, side: 'LONG', entryPrice: 100, slPrice: Infinity })).toThrow(/slPrice must be a finite number/);
+  });
+});

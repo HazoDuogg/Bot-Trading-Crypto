@@ -515,6 +515,9 @@ export class BinanceOrderExecutor {
   /** TICKET-099 Phần A: rounds DOWN to stepSize (never rounds up past the caller's intended size) and rejects below minQty rather than silently sending an invalid tiny order. */
   /** `enforceMinQty=false` for reduceOnly closes — a small leftover position remainder is legitimate to close even below the exchange's minQty for OPENING a new position. */
   private roundQtyToStepSize(symbol: string, qty: number, enforceMinQty = true): number {
+    if (!Number.isFinite(qty) || qty <= 0) {
+      throw new Error(`roundQtyToStepSize(${symbol}): quantity ${qty} phải là số hữu hạn > 0 — không gửi lệnh.`);
+    }
     const { stepSize, minQty, stepSizeDecimals } = this.getSymbolFilters(symbol);
     const steps = Math.floor(qty / stepSize + 1e-9); // +epsilon guards against qty/stepSize landing just under an integer due to float error
     const rounded = Number((steps * stepSize).toFixed(stepSizeDecimals));
@@ -526,9 +529,25 @@ export class BinanceOrderExecutor {
 
   /** TICKET-099 Phần A: rounds to the nearest tickSize (Binance rejects any price not an exact multiple). */
   private roundPriceToTickSize(symbol: string, price: number): number {
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new Error(`roundPriceToTickSize(${symbol}): price ${price} phải là số hữu hạn > 0 — không gửi lệnh.`);
+    }
     const { tickSize, tickSizeDecimals } = this.getSymbolFilters(symbol);
     const ticks = Math.round(price / tickSize);
     return Number((ticks * tickSize).toFixed(tickSizeDecimals));
+  }
+
+  private roundPriceDownToTickSize(symbol: string, price: number): number {
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new Error(`roundPriceDownToTickSize(${symbol}): price ${price} phải là số hữu hạn > 0 — không gửi lệnh.`);
+    }
+    const { tickSize, tickSizeDecimals } = this.getSymbolFilters(symbol);
+    const ticks = Math.floor(price / tickSize + 1e-9);
+    const rounded = Number((ticks * tickSize).toFixed(tickSizeDecimals));
+    if (rounded <= 0) {
+      throw new Error(`roundPriceDownToTickSize(${symbol}): price ${price} làm tròn xuống thành ${rounded} — không gửi lệnh.`);
+    }
+    return rounded;
   }
 
   /** TICKET-099 Phần A: MIN_NOTIONAL check — Binance rejects an order below this dollar value outright. */
@@ -632,10 +651,10 @@ export class BinanceOrderExecutor {
     return { leverage: raw.leverage, symbol, raw };
   }
 
-  async openMarketPosition(symbol: string, side: PositionSide, quantity: number): Promise<OrderResult | DryRunResult> {
-    // TICKET-099 Phần A: no price param on a MARKET order, so minNotional can't be checked here —
-    // the caller sizes from the candle close price and checkMinNotional() there before calling.
+  async openMarketPosition(symbol: string, side: PositionSide, quantity: number, referencePrice: number): Promise<OrderResult | DryRunResult> {
+    const roundedPrice = this.roundPriceDownToTickSize(symbol, referencePrice);
     const roundedQty = this.roundQtyToStepSize(symbol, quantity);
+    this.checkMinNotional(symbol, roundedPrice, roundedQty);
     const params = { symbol, side: side === 'LONG' ? 'BUY' : 'SELL', type: 'MARKET', quantity: roundedQty };
     const dry = this.logOrDryRun('POST', '/fapi/v1/order', params, `openMarketPosition(${symbol},${side})`);
     if (dry) return dry;
