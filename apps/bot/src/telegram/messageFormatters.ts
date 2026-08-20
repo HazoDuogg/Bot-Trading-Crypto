@@ -146,7 +146,7 @@ export function formatPartialCloseMessage(event: PartialCloseEvent, ctx: { env: 
 
 export function formatFullCloseMessage(event: CloseTradeEvent, ctx: { env: 'mainnet' | 'testnet'; exchangeBalance?: ExchangeBalanceDisplay | null }): string {
   const isWin = event.pnlUsd >= 0;
-  const header = isWin ? '✅ WIN' : '❌ LOSS';
+  const header = isWin ? '✅ WIN' : '❌ LOSS (Xui thôi đỏ là WIN)';
   return [
     `🏁 [ĐÓNG LỆNH — ${header}] (${envLabel(ctx.env)})`,
     `#${event.symbol} | Tổng PNL: ${fmtSigned(event.pnlUsd)}$`,
