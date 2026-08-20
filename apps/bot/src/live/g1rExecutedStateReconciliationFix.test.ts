@@ -6,6 +6,7 @@ import { reconcileExecutedOpenState } from './liveStateSync.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const liveRunnerSrc = fs.readFileSync(path.resolve(__dirname, '../../scripts/liveRunner.ts'), 'utf8');
+const liveLifecycleSrc = fs.readFileSync(path.resolve(__dirname, './liveLifecycle.ts'), 'utf8');
 
 describe('G1-F05 fixed — partial fill and quantity-normalization reconciliation', () => {
   it('partial fill (canonicalQty < planned qty) reconciles positionSize/actualRiskDollar/marginRequired against the corrected notional, entryPrice from observed avg fill', () => {
@@ -231,9 +232,9 @@ describe('G1-F05 fixed — unreconcilable fill provenance blocks instead of gues
 
 describe('G1-F05 fixed — liveRunner.ts wiring applies the reconciled basis and blocks on failure', () => {
   it('handleOpenEvent (via establishReconciledProtectedPosition) passes the real fill evidence (canonicalQty/rawAvgPrice/freshPositionRisk) into reconcileExecutedOpenState, computed BEFORE SL placement', () => {
-    const fnStart = liveRunnerSrc.indexOf('async function establishReconciledProtectedPosition(');
-    const fnEnd = liveRunnerSrc.indexOf('async function handlePartialCloseEvent(');
-    const block = liveRunnerSrc.slice(fnStart, fnEnd);
+    const fnStart = liveLifecycleSrc.indexOf('async function establishReconciledProtectedPosition(');
+    const fnEnd = liveLifecycleSrc.indexOf('export async function handleOpenEvent(');
+    const block = liveLifecycleSrc.slice(fnStart, fnEnd);
     expect(block).toContain('canonicalQtySource: \'EXECUTED_QTY\',');
     expect(block).toContain('rawAvgPrice: classificationAvgPrice,');
     expect(block).toContain('initialSlPrice: event.slPrice,');
@@ -243,7 +244,7 @@ describe('G1-F05 fixed — liveRunner.ts wiring applies the reconciled basis and
 
   it('a RECONCILIATION_FAILED (or geometry-invalid) fill routes to the unified quarantine path and blocks the symbol', () => {
     const phaseIdx = liveRunnerSrc.indexOf("phase: 'RECONCILIATION_FAILED',");
-    const blockAddIdx = liveRunnerSrc.indexOf('entriesBlockedDueToRestartQuarantineBySymbol.add(record.symbol);');
+    const blockAddIdx = liveLifecycleSrc.indexOf('deps.blockSymbolAdmission(record.symbol);');
     expect(phaseIdx).toBeGreaterThan(-1);
     expect(blockAddIdx).toBeGreaterThan(-1);
   });

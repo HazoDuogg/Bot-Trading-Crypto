@@ -91,21 +91,21 @@ describe('G1-F06 — only one TP tier processed per 5m candle even if price cros
 });
 
 describe('G1-F08 — riskDollarOrPercent is a literal $ amount, not a % of balance (SYSTEMIC_BEHAVIOR, confirmed)', () => {
-  it('with the live-confirmed config (riskDollarOrPercent=15, maxMarginCap=37.5, leverage=30) and a ~$100 balance, ONE trade can consume the entire 15%-of-balance risk pool', () => {
+  it('with the live-confirmed fixed $20 risk and a $100 balance, one trade exceeds the 15%-of-balance risk pool', () => {
     const sizer = new DynamicRMarginSizer();
     const balance = 100;
     const output = sizer.calculate({
       accountBalance: balance,
-      riskDollarOrPercent: 15, // live CONFIG.riskDollarOrPercent — apps/bot/scripts/liveRunner.ts CONFIG
+      riskDollarOrPercent: 20,
       entryPrice: 100,
       leverage: 30,
       slDistancePercent: 0.02, // 2% SL distance — a normal ATR-based SL
       maxMarginCap: 37.5,
     });
 
-    expect(output.actualRiskDollar).toBeCloseTo(15, 6); // uncapped here -> literally $15, exactly riskDollarOrPercent
+    expect(output.actualRiskDollar).toBeCloseTo(20, 6);
     const poolMaxDollar = balance * 0.15; // CONFIG.riskPoolMaxPct
-    expect(output.actualRiskDollar).toBeCloseTo(poolMaxDollar, 6); // one single candidate trade == the WHOLE pool
+    expect(output.actualRiskDollar).toBeGreaterThan(poolMaxDollar);
   });
 });
 

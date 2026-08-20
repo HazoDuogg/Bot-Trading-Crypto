@@ -16,6 +16,7 @@ import { syncBalanceForTelegramEvent } from './liveBalanceSync.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const liveRunnerSrc = fs.readFileSync(path.resolve(__dirname, '../../scripts/liveRunner.ts'), 'utf8');
+const liveLifecycleSrc = fs.readFileSync(path.resolve(__dirname, './liveLifecycle.ts'), 'utf8');
 
 function mockExecutor(totalWalletBalance: string) {
   return { getAccountInfo: async () => ({ totalWalletBalance, totalMarginBalance: totalWalletBalance, availableBalance: totalWalletBalance }) };
@@ -143,11 +144,11 @@ describe('G1-F05 — canonical qty correction leaves risk/margin/entry-price bas
   // meta.actualRiskDollar/marginRequired together from the same reconciled basis — no longer leaves
   // risk/margin/entryPrice at their planned values while only positionSize gets corrected.
   it('G1R FIX: the OPEN-event correction reconciles positionSize, entryPrice, r, actualRiskDollar AND marginRequired together, computed BEFORE SL placement (see LIVE-R2BR item 4)', () => {
-    const reconcileStart = liveRunnerSrc.indexOf('async function establishReconciledProtectedPosition(');
+    const reconcileStart = liveLifecycleSrc.indexOf('async function establishReconciledProtectedPosition(');
     expect(reconcileStart).toBeGreaterThan(-1);
-    const reconcileEnd = liveRunnerSrc.indexOf('async function handlePartialCloseEvent(');
+    const reconcileEnd = liveLifecycleSrc.indexOf('export async function handleOpenEvent(');
     expect(reconcileEnd).toBeGreaterThan(reconcileStart);
-    const reconcileBlock = liveRunnerSrc.slice(reconcileStart, reconcileEnd);
+    const reconcileBlock = liveLifecycleSrc.slice(reconcileStart, reconcileEnd);
     expect(reconcileBlock).toContain('reconcileExecutedOpenState(');
     expect(reconcileBlock.indexOf('reconcileExecutedOpenState(')).toBeLessThan(reconcileBlock.indexOf('establishProtectiveStopLoss('));
 
@@ -174,9 +175,10 @@ describe('G1-F05 — canonical qty correction leaves risk/margin/entry-price bas
 // behavior, which no longer exists in the source.
 describe('G1-F14 — restart persistence: no SymbolState/position/order-id data survives a process restart, and POSITION_MISSING_INTERNALLY is never actively handled (CONFIRMED_DEFECT, FIXED — see g1rRestartRecoveryFix.test.ts)', () => {
   it('G1R FIX: liveRunner.ts now persists runner state atomically via liveStateSync.ts (writeLiveStateFileAtomic), not a raw writeFileSync of its own', () => {
-    expect(liveRunnerSrc).toContain('writeLiveStateFileAtomic');
-    expect(liveRunnerSrc).toContain('function persistLiveState(): boolean {');
+    expect(liveLifecycleSrc).toContain('writeLiveStateFileAtomic');
+    expect(liveLifecycleSrc).toContain('return function persistLiveState(): boolean {');
     expect(liveRunnerSrc).not.toMatch(/writeFileSync|fs\.writeFile|\.promises\.writeFile|fsPromises\.writeFile/);
+    expect(liveLifecycleSrc).not.toMatch(/writeFileSync|fs\.writeFile|\.promises\.writeFile|fsPromises\.writeFile/);
   });
 
   it('G1R FIX: runnerState is built from performStartupRestartRecovery()\'s output (persisted + fresh exchange read reconciled), not unconditionally re-initialized to INITIAL_SYMBOL_STATE', () => {

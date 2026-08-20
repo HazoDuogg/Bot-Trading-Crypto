@@ -10,11 +10,8 @@ import {
   cancelAlgoOrderIdempotent,
   reconcileExternalPositionClose,
   ReconcileGuard,
-  reconcileExecutedOpenState,
   performStartupRestartRecovery,
   readLiveStateFileSafe,
-  writeLiveStateFileAtomic,
-  LIVE_STATE_SCHEMA_VERSION,
   verifyProtectiveSlOrder,
   verifyProtectiveTpOrder,
   DEFAULT_POSITION_MODE,
@@ -28,24 +25,31 @@ import {
   runProtectiveOrderMonitorSweep,
   decideSideRecovery,
   buildDeterministicEntryClientOrderId,
-  submitAndClassifyMarketEntry,
-  establishProtectiveStopLoss,
-  isSlGeometryValidForFill,
-  readPositionRiskForSide,
-  quarantineRecordToRiskExposure,
-  type LiveStateFile,
   type AccountSyncState,
   type MissingProtectiveSlFailsafePolicy,
   type ProtectiveMonitorPositionInput,
   type FreshnessEvidence,
   type CoherentReconciliationSnapshotResult,
   type PendingEntryQuarantineRecord,
-  type EstablishProtectiveStopLossResult,
-  type ReconcileExecutedOpenStateResult,
-  type MissingSlRecoveryOutcome,
   type QuarantineExposureBasis,
 } from '../dist/live/liveStateSync.js';
-import { parseLiveRiskPerTradePct, computeRequestedRiskUsd } from '../dist/live/liveRiskConfig.js';
+import { parseLiveFixedRiskUsd } from '../dist/live/liveRiskConfig.js';
+import {
+  handleOpenEvent as lifecycleHandleOpenEvent,
+  handlePartialCloseEvent as lifecycleHandlePartialCloseEvent,
+  handleCloseEvent as lifecycleHandleCloseEvent,
+  createPersistLiveState,
+  createRecordPendingEntryQuarantine,
+  foldPendingEntryQuarantinesOnRestart,
+  applyAmbiguousOpenOutcome,
+  handleOpenEventIfFresh,
+  roundQty,
+  roundPrice,
+  type LiveOrderIds,
+  type OpenEventOutcome,
+  type LifecycleContext,
+  type RunnerStateAccess,
+} from '../dist/live/liveLifecycle.js';
 import {
   syncBalanceForTelegramEvent,
   parseExchangeBalanceSnapshot,
@@ -89,9 +93,6 @@ import { TelegramMessageQueue } from '../dist/telegram/messageQueue.js';
 import { SentEventTracker } from '../dist/telegram/dedupe.js';
 import {
   formatBotStartMessage,
-  formatFullCloseMessage,
-  formatPartialCloseMessage,
-  formatPositionOpenedMessage,
   formatRegimeChangeMessage,
   formatHtfContextChangeMessage,
   formatSafetyState5mChangeMessage,
@@ -125,13 +126,14 @@ const HTF_SAFETY_SPLIT_DIAGNOSTIC_ENABLED = process.env.HTF_SAFETY_SPLIT_DIAGNOS
 const SAFETY_STATE_5M_STABILIZATION_ENABLED = process.env.SAFETY_STATE_5M_STABILIZATION_ENABLED === 'true';
 const OOD_GUARD_EMA_RATIO_SLOW_THRESHOLD = 1.037776; // Bearish TRAIN-split P97.5, TICKET-122/123
 const OOD_GUARD_RISK_REDUCTION_MULTIPLIER = 0.3; // TICKET-122/123 Risk Reduction P97.5 variant
+const LIVE_FIXED_RISK_USD = parseLiveFixedRiskUsd(process.env.LIVE_FIXED_RISK_USD);
 
 // Official confirmed live config — TICKET-084/085's 8-flag baseline + risk-dollar-or-percent=15/
 const CONFIG: OrchestratorConfig = {
   entryRouterConfig: { ...DEFAULT_ENTRY_ROUTER_CONFIG, obSlBufferAtrMultiplier: 0.87, macroTrendFilterEnabled: true },
   tpPlan: 'PLAN_A',
   takerFeeRate: 0.0004,
-  riskDollarOrPercent: 15,
+  riskDollarOrPercent: LIVE_FIXED_RISK_USD,
   maxMarginCap: 37.5,
   leverage: 30,
   riskPoolMaxPct: 0.15,
@@ -166,8 +168,6 @@ const CONFIG: OrchestratorConfig = {
   momentumContextDecisionMatrixV2Enabled: true,
 };
 
-const LIVE_RISK_PER_TRADE_PCT = parseLiveRiskPerTradePct(process.env.LIVE_RISK_PER_TRADE_PCT, CONFIG.riskPoolMaxPct);
-
 const WINDOW_5M = 320;
 const WINDOW_15M = 325;
 const WINDOW_1H = 40;
@@ -175,47 +175,11 @@ const WINDOW_1M = 200;
 const WINDOW_1D = 40;
 const WINDOW_1H_MOMENTUM = 500;
 
-/**
- * TICKET-G1R Checkpoint B (G1-F05) — everything handleOpenEvent learned about the REAL fill, needed
- * by the caller to reconcile the just-opened ManagedPositionState against actual execution instead of
- * planned values. `null` in dryRun (nothing was actually executed, nothing to reconcile).
- */
-/** Per-open-position bookkeeping needed to keep the exchange's real algo orders in sync with the simulated ManagedPositionState. */
-interface LiveOrderIds {
-  slAlgoId: number | null; // null only in dryRun (no real algoId to track)
-  tpAlgoIds: number[]; // one per fixed-price TP tier (TP1/TP2/COUNTER_TREND_TP) still pending on the exchange
-}
-
-type OpenEventOutcome =
-  | { kind: 'DRY_RUN' }
-  | { kind: 'NOT_FILLED'; detail: string }
-  | { kind: 'AMBIGUOUS'; detail: string; clientOrderId: string; orderId: number | null; executedQty: number | null; avgPrice: unknown }
-  | {
-      kind: 'FILLED';
-      clientOrderId: string;
-      orderId: number | null;
-      executedQty: number;
-      avgPrice: unknown;
-      reconciled: ReconcileExecutedOpenStateResult;
-      geometryValid: boolean;
-      protection: EstablishProtectiveStopLossResult;
-      tpAlgoIds: number[];
-    };
-
 interface RunnerSymbolState {
   symbolState: SymbolState;
   lastProcessedCandleTimestamp: number | null;
   // keyed by entryTimestamp (unique per position within a symbol, same key style as PartialCloseEvent dedupe) — see dedupe note in the tick loop.
   orderIds: Map<number, LiveOrderIds>;
-}
-
-function roundQty(qty: number): number {
-  // KNOWN LIMITATION — see module doc comment: not validated against real LOT_SIZE per symbol.
-  return Math.round(qty * 1000) / 1000;
-}
-function roundPrice(price: number): number {
-  // KNOWN LIMITATION — see module doc comment: not validated against real PRICE_FILTER per symbol.
-  return Math.round(price * 100) / 100;
 }
 
 async function main(): Promise<void> {
@@ -248,7 +212,7 @@ async function main(): Promise<void> {
   });
   await executor.syncClock();
   await executor.loadExchangeInfo(SYMBOLS);
-  console.log('exchangeInfo (LOT_SIZE/PRICE_FILTER/MIN_NOTIONAL) đã tải cho 4 coin.');
+  console.log(`exchangeInfo (LOT_SIZE/PRICE_FILTER/MIN_NOTIONAL) đã tải cho ${SYMBOLS.length} coin.`);
   const reconcilerQuantityTolerance = computeQuantityTolerance(Math.max(...SYMBOLS.map((s) => executor.getSymbolFilters(s).stepSize)));
   // TICKET-G1R Checkpoint C — real per-symbol tolerance for the ownership-proof check in
   // performStartupRestartRecovery() below (unlike reconcilerQuantityTolerance above, which is
@@ -363,17 +327,14 @@ async function main(): Promise<void> {
 
   const runnerState: Record<string, RunnerSymbolState> = {};
   const entriesBlockedDueToRestartQuarantineBySymbol = new Set<string>();
-  const pendingEntryQuarantinesBySymbol: Record<string, PendingEntryQuarantineRecord[]> =
+  let pendingEntryQuarantinesBySymbol: Record<string, PendingEntryQuarantineRecord[]> =
     persistedLiveState.status === 'OK' ? { ...(persistedLiveState.file.pendingEntryQuarantines ?? {}) } : {};
-  const quarantinedUnknownExposures: UnknownExposureForRisk[] = [];
-  for (const [symbol, records] of Object.entries(pendingEntryQuarantinesBySymbol)) {
-    if (records.length === 0) continue;
+  const restartFold = foldPendingEntryQuarantinesOnRestart(pendingEntryQuarantinesBySymbol);
+  const quarantinedUnknownExposures: UnknownExposureForRisk[] = [...restartFold.quarantinedUnknownExposures];
+  for (const { symbol, recordCount } of restartFold.blockedSymbols) {
     entriesBlockedDueToRestartQuarantineBySymbol.add(symbol);
-    console.error(`[PENDING_ENTRY_QUARANTINE_RESTART] ${symbol}: ${records.length} AMBIGUOUS entry record(s) từ phiên trước chưa được giải quyết — chặn mở lệnh mới trên ${symbol} cho tới khi kiểm tra thủ công.`);
-    telegramQueue.enqueue(`⚠️ [PENDING_RECONCILIATION] ${symbol}: có ${records.length} lệnh MARKET AMBIGUOUS từ phiên trước chưa giải quyết — ĐÃ CHẶN mở lệnh mới trên ${symbol}.`);
-    for (const [idx, record] of records.entries()) {
-      quarantinedUnknownExposures.push(quarantineRecordToRiskExposure(record, idx));
-    }
+    console.error(`[PENDING_ENTRY_QUARANTINE_RESTART] ${symbol}: ${recordCount} AMBIGUOUS entry record(s) từ phiên trước chưa được giải quyết — chặn mở lệnh mới trên ${symbol} cho tới khi kiểm tra thủ công.`);
+    telegramQueue.enqueue(`⚠️ [PENDING_RECONCILIATION] ${symbol}: có ${recordCount} lệnh MARKET AMBIGUOUS từ phiên trước chưa giải quyết — ĐÃ CHẶN mở lệnh mới trên ${symbol}.`);
   }
   const restartRecoverySummaryLines: string[] = [];
   for (const outcome of restartRecovery.symbols) {
@@ -420,32 +381,18 @@ async function main(): Promise<void> {
 
   let livePersistFailureBlockingAdmission = false;
 
-  /** TICKET-G1R Checkpoint C — persists ALL 4 symbols' current SymbolState + orderIds in one atomic write. Never throws — a persist failure is logged loudly but must not crash the live loop (same "đã bắt, KHÔNG crash" convention as every other catch in this file). */
-  function persistLiveState(): boolean {
-    try {
-      const file: LiveStateFile = {
-        schemaVersion: LIVE_STATE_SCHEMA_VERSION,
-        savedAtMs: Date.now(),
-        // TICKET-G3R — regimeStateCandleTimestamp is the candle boundary the persisted regimeState
-        // belongs to; without it a restart cannot tell a current regime state from a stale one.
-        symbols: Object.fromEntries(
-          SYMBOLS.map((s) => [
-            s,
-            { symbolState: runnerState[s].symbolState, orderIds: Array.from(runnerState[s].orderIds.entries()), regimeStateCandleTimestamp: runnerState[s].lastProcessedCandleTimestamp },
-          ]),
-        ),
-        pendingEntryQuarantines: pendingEntryQuarantinesBySymbol,
-      };
-      writeLiveStateFileAtomic(LIVE_STATE_FILE_PATH, file);
-      livePersistFailureBlockingAdmission = false;
-      return true;
-    } catch (err) {
-      livePersistFailureBlockingAdmission = true;
-      console.error(`[LIVE_STATE_PERSIST_ERROR] ghi trạng thái thất bại (đã bắt, KHÔNG crash tiến trình): ${(err as Error).message}`);
-      telegramQueue.enqueue(`🚨🚨 [CRITICAL — GHI TRẠNG THÁI THẤT BẠI] ${(err as Error).message}\nĐÃ CHẶN mở lệnh mới TOÀN BỘ portfolio cho tới khi ghi lại thành công — các vị thế đang mở vẫn được quản lý bình thường.`);
-      return false;
-    }
-  }
+  const persistLiveState = createPersistLiveState({
+    filePath: LIVE_STATE_FILE_PATH,
+    symbols: SYMBOLS,
+    getSymbolStateForPersist: (s) => ({
+      symbolState: runnerState[s].symbolState,
+      orderIds: Array.from(runnerState[s].orderIds.entries()),
+      regimeStateCandleTimestamp: runnerState[s].lastProcessedCandleTimestamp,
+    }),
+    getPendingEntryQuarantinesBySymbol: () => pendingEntryQuarantinesBySymbol,
+    enqueueTelegram: (msg) => telegramQueue.enqueue(msg),
+    onPersistFailure: (failed) => { livePersistFailureBlockingAdmission = failed; },
+  });
   persistLiveState(); // immediately overwrite a missing/corrupt file with the just-recovered, trusted state
 
   function buildPendingEntryQuarantineRecord(input: {
@@ -473,15 +420,12 @@ async function main(): Promise<void> {
     return { ...input, detectedAtMs: Date.now() };
   }
 
-  function recordPendingEntryQuarantine(record: PendingEntryQuarantineRecord): boolean {
-    entriesBlockedDueToRestartQuarantineBySymbol.add(record.symbol);
-    pendingEntryQuarantinesBySymbol[record.symbol] = [...(pendingEntryQuarantinesBySymbol[record.symbol] ?? []), record];
-    const persisted = persistLiveState();
-    if (!persisted) {
-      console.error(`[QUARANTINE_PERSIST_FAILED] ${record.symbol} phase=${record.phase}: bản ghi quarantine đang ở trong bộ nhớ nhưng GHI FILE THẤT BẠI — chưa được lưu bền vững.`);
-    }
-    return persisted;
-  }
+  const recordPendingEntryQuarantine = createRecordPendingEntryQuarantine({
+    blockSymbolAdmission: (s) => { entriesBlockedDueToRestartQuarantineBySymbol.add(s); },
+    getPendingEntryQuarantinesBySymbol: () => pendingEntryQuarantinesBySymbol,
+    setPendingEntryQuarantinesBySymbol: (next) => { pendingEntryQuarantinesBySymbol = next; },
+    persistLiveState,
+  });
 
   // TICKET-G1R Final Closure item 3 — explicit exchange-sync admission state. Starts SYNCED: startup
   // only reaches this point after performStartupRestartRecovery()'s getPositionRisk() read already
@@ -906,261 +850,37 @@ async function main(): Promise<void> {
     return outcome.snapshot;
   }
 
-  async function handleOpenEvent(symbol: string, event: OpenTradeEvent, balanceAtOpen: number): Promise<OpenEventOutcome> {
-    const quantity = roundQty(event.marginRequired * CONFIG.leverage / event.entryPrice);
-    const traceId = stableTelemetryId('trace', symbol, event.entryTimestamp, event.side, event.setupType);
-    const candidateId = stableTelemetryId('candidate', traceId);
-    const decisionId = stableTelemetryId('decision', traceId);
-    const riskAdmissionId = stableTelemetryId('risk', traceId);
-    const common = { traceId, symbol, side: event.side, setupType: event.setupType, source: 'LIVE_RUNNER', candidateId, decisionId, riskAdmissionId } as const;
-    emitTelemetry({ ...common, eventType: 'CANDIDATE_CREATED', eventTimestampUtc: new Date(event.entryTimestamp).toISOString(), quality: { entryProposal: 'DERIVED', stopProposal: 'DERIVED', takeProfitProposal: 'DERIVED' }, data: { timeframe: '5m', candleOpenTimestamp: event.entryTimestamp, entryProposal: event.entryPrice, stopProposal: event.slPrice, takeProfitProposal: event.tpLevels, regime: event.regime, xgbScore: event.momentumScore ?? 'MISSING', t152SameSideGuardEnabled: true } });
-    emitTelemetry({ ...common, eventType: 'DECISION_MADE', quality: { decision: 'DERIVED' }, data: { decision: 'ALLOW', reasonCode: 'ORCHESTRATOR_OPEN_EVENT', openPositionCount: runnerState[symbol].symbolState.openPositions.length } });
-    emitTelemetry({ ...common, eventType: 'RISK_ADMISSION', quality: { balance: 'OBSERVED', requestedRisk: 'DERIVED', quantity: 'DERIVED' }, data: { admission: 'ALLOW', balance: balanceAtOpen, requestedRiskDollar: event.actualRiskDollar, requestedNotional: event.marginRequired * CONFIG.leverage, proposedQuantity: quantity, marginRequired: event.marginRequired, leverage: CONFIG.leverage, riskPoolPctBefore: event.riskPoolPctBefore, riskPoolPctAfter: event.riskPoolPctAfter, riskMultiplier: event.riskMultiplier } });
-    emitTelemetry({ ...common, eventType: 'MARKET_SNAPSHOT', quality: { bestBid: 'MISSING', bestAsk: 'MISSING', mid: 'MISSING', markPrice: 'MISSING', indexPrice: 'MISSING' }, data: { captureStatus: 'MISSING', reasonCode: 'NO_NON_BLOCKING_BOOK_TICKER_FEED', candleReferencePrice: event.entryPrice } });
-
-    if (dryRun) {
-      console.log(`[SẼ MỞ LỆNH] ${symbol} ${event.side} entry=${event.entryPrice} sl=${event.slPrice} qty=${quantity} setupType=${event.setupType}`);
-      willOpenCount++;
-      const exchangeBalance = await refreshBalanceForTelegram();
-      telegramQueue.enqueue(formatPositionOpenedMessage(event, { env: envLabel, accountBalanceAtOpen: balanceAtOpen, exchangeBalance }) + '\n\n[DRY-RUN]');
-      return { kind: 'DRY_RUN' };
-    }
-
-    const clientOrderId = buildDeterministicEntryClientOrderId(symbol, event.side, event.entryTimestamp);
-    const preSubmissionBaseline = await readPositionRiskForSide(executor, symbol, event.side);
-    if (preSubmissionBaseline === null) {
-      accountSyncState = 'ACCOUNT_STATE_UNKNOWN';
-      const detail = `Không đọc được position baseline trước MARKET cho ${symbol} ${event.side}; không gửi lệnh và chặn admission.`;
-      console.error(`[PRE_SUBMISSION_BASELINE_UNAVAILABLE] ${detail}`);
-      telegramQueue.enqueue(`🚨🚨 [CRITICAL — POSITION BASELINE UNKNOWN] ${detail}`);
-      return { kind: 'NOT_FILLED', detail };
-    }
-    const preSubmissionBaselineQtyAbs = preSubmissionBaseline.qtyAbs;
-    emitTelemetry({ ...common, clientOrderId, eventType: 'ORDER_SUBMIT_INTENT', quality: { requestedQuantity: 'DERIVED' }, data: { intentTimestampMs: Date.now(), orderRole: 'ENTRY', type: 'MARKET', reduceOnly: false, requestedQuantity: quantity } });
-    emitTelemetry({ ...common, clientOrderId, eventType: 'ORDER_SENT', quality: { localSendTimestamp: 'OBSERVED' }, data: { localSendTimestampMs: Date.now(), attempt: 1 } });
-
-    const classification = await submitAndClassifyMarketEntry({ executor, symbol, side: event.side, quantity, referencePrice: event.entryPrice, clientOrderId });
-
-    if (classification.outcome === 'CONFIRMED_NOT_FILLED') {
-      emitTelemetry({ ...common, clientOrderId, eventType: 'EXCHANGE_REJECT', quality: { error: 'OBSERVED' }, data: { localAckTimestampMs: Date.now(), sanitizedErrorCode: 'CONFIRMED_NOT_FILLED' } });
-      console.error(`[MARKET_ENTRY_NOT_FILLED] ${symbol} ${event.side}: ${classification.detail}`);
-      return { kind: 'NOT_FILLED', detail: classification.detail };
-    }
-    if (classification.outcome === 'AMBIGUOUS') {
-      emitTelemetry({ ...common, clientOrderId, eventType: 'EXCHANGE_REJECT', quality: { error: 'OBSERVED' }, data: { localAckTimestampMs: Date.now(), sanitizedErrorCode: 'AMBIGUOUS' } });
-      console.error(`[MARKET_ENTRY_AMBIGUOUS] ${symbol} ${event.side}: ${classification.detail}`);
-      return { kind: 'AMBIGUOUS', detail: classification.detail, clientOrderId, orderId: classification.orderId, executedQty: classification.executedQty, avgPrice: classification.avgPrice };
-    }
-
-    const canonicalQty = classification.executedQty as number;
-    const exchangeOrderIdStr = classification.orderId !== null ? String(classification.orderId) : 'UNKNOWN';
-    emitTelemetry({ ...common, clientOrderId, exchangeOrderId: exchangeOrderIdStr, eventType: 'EXCHANGE_ACK', quality: { exchangeOrderId: classification.orderId !== null ? 'OBSERVED' : 'MISSING', exchangeTimestamp: 'MISSING' }, data: { localAckTimestampMs: Date.now(), exchangeTimestampMs: 'MISSING', status: 'FILLED', executedQty: String(canonicalQty), averageFillPrice: classification.avgPrice ?? 'MISSING' } });
-    emitTelemetry({ ...common, clientOrderId, exchangeOrderId: exchangeOrderIdStr, fillId: stableTelemetryId('fill', classification.orderId ?? 0, Date.now()), eventType: 'FILL_COMPLETE', quality: { fillQuantity: 'OBSERVED', averageFillPrice: classification.avgPrice ? 'OBSERVED' : 'MISSING', commission: 'MISSING', funding: 'MISSING' }, data: { fillTimestampMs: Date.now(), localReceiveTimestampMs: Date.now(), fillQuantity: String(canonicalQty), averageFillPrice: classification.avgPrice ?? 'MISSING', commissionAmount: 'MISSING', commissionAsset: 'MISSING', makerTaker: 'MISSING', fundingStatus: 'MISSING', terminalStatus: 'FILLED' } });
-    console.log(`[CANONICAL_QTY] ${symbol} source=CONFIRMED_FILLED submittedQty=${quantity} canonicalQty=${canonicalQty}`);
-
-    try {
-      return await establishReconciledProtectedPosition({ symbol, event, balanceAtOpen, clientOrderId, canonicalQty, classificationOrderId: classification.orderId, classificationAvgPrice: classification.avgPrice, preSubmissionBaselineQtyAbs });
-    } catch (err) {
-      const recovery: MissingSlRecoveryOutcome = { status: 'EXHAUSTED_OPERATOR_REQUIRED', attemptsUsed: 0, detail: `xử lý sau-khớp-lệnh gặp lỗi không mong đợi (đã bắt): ${(err as Error).message}` };
-      const protection: EstablishProtectiveStopLossResult = { status: 'PROTECTION_DEGRADED', firstAttemptReason: `unexpected-post-fill-error: ${(err as Error).message}`, recovery };
-      return {
-        kind: 'FILLED',
-        clientOrderId,
-        orderId: classification.orderId,
-        executedQty: canonicalQty,
-        avgPrice: classification.avgPrice,
-        reconciled: { ok: false, reason: 'CANONICAL_QTY_INVALID' },
-        geometryValid: false,
-        protection,
-        tpAlgoIds: [],
-      };
-    }
+  const runnerStateAccess: RunnerStateAccess = {
+    getOpenPositionCount: (symbol) => runnerState[symbol].symbolState.openPositions.length,
+    setOrderIds: (symbol, entryTimestamp, ids) => { runnerState[symbol].orderIds.set(entryTimestamp, ids); },
+    getOrderIds: (symbol, entryTimestamp) => runnerState[symbol].orderIds.get(entryTimestamp),
+    deleteOrderIds: (symbol, entryTimestamp) => { runnerState[symbol].orderIds.delete(entryTimestamp); },
+    blockSymbolAdmission: (symbol) => { entriesBlockedDueToRestartQuarantineBySymbol.add(symbol); },
+  };
+  const lifecycleCtx: LifecycleContext = {
+    executor,
+    dryRun,
+    envLabel,
+    leverage: CONFIG.leverage,
+    quantityToleranceBySymbol,
+    missingProtectiveSlFailsafePolicy: MISSING_PROTECTIVE_SL_FAILSAFE_POLICY,
+    oodGuardEnabled: OOD_GUARD_ENABLED,
+    runnerState: runnerStateAccess,
+    emitTelemetry,
+    enqueueTelegram: (msg) => telegramQueue.enqueue(msg),
+    refreshBalanceForTelegram,
+    onAccountSyncUnknown: () => { accountSyncState = 'ACCOUNT_STATE_UNKNOWN'; },
+    onWillOpen: () => { willOpenCount++; },
+    persistLiveState,
+  };
+  function handleOpenEvent(symbol: string, event: OpenTradeEvent, balanceAtOpen: number): Promise<OpenEventOutcome> {
+    return lifecycleHandleOpenEvent(lifecycleCtx, symbol, event, balanceAtOpen);
   }
-
-  async function establishReconciledProtectedPosition(params: {
-    symbol: string;
-    event: OpenTradeEvent;
-    balanceAtOpen: number;
-    clientOrderId: string;
-    canonicalQty: number;
-    classificationOrderId: number | null;
-    classificationAvgPrice: unknown;
-    preSubmissionBaselineQtyAbs: number;
-  }): Promise<OpenEventOutcome> {
-    const { symbol, event, balanceAtOpen, clientOrderId, canonicalQty, classificationOrderId, classificationAvgPrice, preSubmissionBaselineQtyAbs } = params;
-    const postFillPositionRisk = await readPositionRiskForSide(executor, symbol, event.side);
-    const reconciled = reconcileExecutedOpenState({
-      initialSlPrice: event.slPrice,
-      canonicalQty,
-      canonicalQtySource: 'EXECUTED_QTY',
-      rawAvgPrice: classificationAvgPrice,
-      freshPositionRiskEntryPrice: postFillPositionRisk?.entryPrice ?? null,
-      freshPositionRiskQtyAbs: postFillPositionRisk !== null ? postFillPositionRisk.qtyAbs : null,
-      preSubmissionBaselineQtyAbs,
-      quantityTolerance: quantityToleranceBySymbol[symbol],
-      leverage: CONFIG.leverage,
-    });
-    const geometryValid = reconciled.ok && isSlGeometryValidForFill(event.side, reconciled.entryPrice, event.slPrice);
-
-    let protection: EstablishProtectiveStopLossResult;
-    const tpAlgoIds: number[] = [];
-    if (!reconciled.ok) {
-      const reason = `reconcile thất bại: ${reconciled.reason}`;
-      const recovery = await recoverMissingProtectiveSl({
-        executor,
-        symbol,
-        expectedSide: event.side,
-        expectedQty: canonicalQty,
-        quantityTolerance: quantityToleranceBySymbol[symbol],
-        slTriggerPrice: event.slPrice,
-        policy: MISSING_PROTECTIVE_SL_FAILSAFE_POLICY,
-        skipPlacementAttempts: true,
-      });
-      protection =
-        recovery.status === 'RECOVERED' || recovery.status === 'ALREADY_RECOVERED_ON_RESTART'
-          ? { status: 'PROTECTED', slAlgoId: recovery.slAlgoId, detail: `${reason} — nhưng phục hồi SL ngay lập tức thành công: ${recovery.detail}` }
-          : { status: 'PROTECTION_DEGRADED', firstAttemptReason: reason, recovery };
-    } else if (!geometryValid) {
-      const reason = `SL geometry không hợp lệ với giá khớp thực tế (entryPrice=${reconciled.entryPrice}, slPrice=${event.slPrice}, side=${event.side})`;
-      const recovery = await recoverMissingProtectiveSl({
-        executor,
-        symbol,
-        expectedSide: event.side,
-        expectedQty: canonicalQty,
-        quantityTolerance: quantityToleranceBySymbol[symbol],
-        slTriggerPrice: event.slPrice,
-        policy: MISSING_PROTECTIVE_SL_FAILSAFE_POLICY,
-        skipPlacementAttempts: true,
-      });
-      protection =
-        recovery.status === 'RECOVERED' || recovery.status === 'ALREADY_RECOVERED_ON_RESTART'
-          ? { status: 'PROTECTED', slAlgoId: recovery.slAlgoId, detail: `${reason} — nhưng phục hồi SL ngay lập tức thành công: ${recovery.detail}` }
-          : { status: 'PROTECTION_DEGRADED', firstAttemptReason: reason, recovery };
-    } else {
-      protection = await establishProtectiveStopLoss({
-        executor,
-        symbol,
-        side: event.side,
-        slPrice: roundPrice(event.slPrice),
-        quantity: canonicalQty,
-        quantityTolerance: quantityToleranceBySymbol[symbol],
-        policy: MISSING_PROTECTIVE_SL_FAILSAFE_POLICY,
-      });
-    }
-
-    if (protection.status === 'PROTECTED') {
-      if (reconciled.ok && geometryValid) {
-        for (const tp of event.tpLevels) {
-          if (tp.price === null) continue; // TP3_RUNNER — trailing-managed via SL moves only, never a fixed order
-          const tpQty = roundQty(canonicalQty * tp.closePercent);
-          if (tpQty <= 0) continue;
-          try {
-            const tpResult = await executor.placeTakeProfitMarket(symbol, event.side, roundPrice(tp.price), tpQty);
-            if ('algoId' in tpResult) tpAlgoIds.push(tpResult.algoId);
-          } catch (err) {
-            console.error(`[TP_PLACEMENT_ERROR] ${symbol} ${event.side} ${tp.label}: ${(err as Error).message} — SL đã bảo vệ vị thế (không nghiêm trọng bằng thiếu SL), chỉ cảnh báo.`);
-          }
-        }
-      }
-      runnerState[symbol].orderIds.set(event.entryTimestamp, { slAlgoId: protection.slAlgoId, tpAlgoIds });
-    } else {
-      runnerState[symbol].orderIds.set(event.entryTimestamp, { slAlgoId: null, tpAlgoIds: [] });
-    }
-
-    // TICKET-124 — real-trade-level guard visibility: with momentumDirectCorrelationRiskThreshold=999
-    // (never triggers, see CONFIG above), riskMultiplier<1 on a SHORT MOMENTUM_DIRECT open can only
-    // come from the OOD guard when OOD_GUARD_ENABLED — flag here so the Telegram record shows exactly
-    // which real trades had their size reduced by it, not just the shadow-eval counters.
-    const oodGuardApplied = OOD_GUARD_ENABLED && event.setupType === 'MOMENTUM_DIRECT' && event.side === 'SHORT' && event.riskMultiplier < 1;
-    if (oodGuardApplied) console.log(`[OOD_GUARD] ${symbol} SHORT MOMENTUM_DIRECT mở lệnh với size đã giảm (riskMultiplier=${event.riskMultiplier.toFixed(3)})`);
-    const exchangeBalance = await refreshBalanceForTelegram();
-    telegramQueue.enqueue(
-      formatPositionOpenedMessage(event, { env: envLabel, accountBalanceAtOpen: balanceAtOpen, exchangeBalance }) +
-      (protection.status !== 'PROTECTED' ? '\n\n🚨🚨 [SL CHƯA ĐƯỢC BẢO VỆ — xem cảnh báo CRITICAL riêng]' : '') +
-      (oodGuardApplied ? '\n[OOD Guard: size đã giảm theo Risk Reduction P97.5]' : ''),
-    );
-    return { kind: 'FILLED', clientOrderId, orderId: classificationOrderId, executedQty: canonicalQty, avgPrice: classificationAvgPrice, reconciled, geometryValid, protection, tpAlgoIds };
+  function handlePartialCloseEvent(symbol: string, event: PartialCloseEvent, entryTimestampOfPosition: number, remainingQuantity: number, owner: OpenPositionEntry | undefined): Promise<void> {
+    return lifecycleHandlePartialCloseEvent(lifecycleCtx, symbol, event, entryTimestampOfPosition, remainingQuantity, owner);
   }
-
-  async function handlePartialCloseEvent(symbol: string, event: PartialCloseEvent, entryTimestampOfPosition: number, remainingQuantity: number, owner: OpenPositionEntry | undefined): Promise<void> {
-    if (dryRun) {
-      console.log(`[SẼ CHỐT MỘT PHẦN] ${symbol} ${event.tier} newSl=${event.newSlPrice}`);
-    } else {
-      const ids = runnerState[symbol].orderIds.get(entryTimestampOfPosition);
-      if (ids?.slAlgoId != null && remainingQuantity > 0) {
-        try {
-          const newSl = await executor.updateStopOrder(symbol, ids.slAlgoId, event.side, roundPrice(event.newSlPrice), roundQty(remainingQuantity));
-          if ('algoId' in newSl) ids.slAlgoId = newSl.algoId;
-        } catch (err) {
-          console.error(`[SL_REPLACE_FAILED] ${symbol} ${event.side} tier=${event.tier}: ${(err as Error).message} — SL cũ đã hủy, đang KHÔNG có SL trên sàn. Thử phục hồi ngay lập tức.`);
-          const recovery = await recoverMissingProtectiveSl({
-            executor,
-            symbol,
-            expectedSide: event.side,
-            expectedQty: remainingQuantity,
-            quantityTolerance: quantityToleranceBySymbol[symbol],
-            slTriggerPrice: event.newSlPrice,
-            policy: MISSING_PROTECTIVE_SL_FAILSAFE_POLICY,
-          });
-          if (recovery.status === 'RECOVERED' || recovery.status === 'ALREADY_RECOVERED_ON_RESTART') {
-            ids.slAlgoId = recovery.slAlgoId;
-            if (owner) owner.meta.protectionStatus = 'PROTECTED';
-            console.log(`[SL_REPLACE_RECOVERED] ${symbol} ${event.side}: ${recovery.detail}`);
-            telegramQueue.enqueue(`✅ [SL PHỤC HỒI SAU THẤT BẠI THAY THẾ] ${symbol} ${event.side}: ${recovery.detail}`);
-          } else {
-            if (owner) owner.meta.protectionStatus = 'PROTECTION_DEGRADED';
-            entriesBlockedDueToRestartQuarantineBySymbol.add(symbol);
-            console.error(`[SL_REPLACE_RECOVERY_FAILED] ${symbol} ${event.side}: ${recovery.status} — ${recovery.detail} — ĐÃ quarantine ${symbol}, chặn mở lệnh mới.`);
-            telegramQueue.enqueue(`🚨🚨 [CRITICAL — SL THAY THẾ THẤT BẠI, PHỤC HỒI CŨNG THẤT BẠI] ${symbol} ${event.side}: ${recovery.status} — ${recovery.detail}\nĐÃ CHẶN mở lệnh mới trên ${symbol} — cần kiểm tra thủ công NGAY.`);
-            const persisted = persistLiveState();
-            if (!persisted) console.error(`[QUARANTINE_PERSIST_FAILED] ${symbol}: PROTECTION_DEGRADED (partial-close SL replace) đã ghi nhận trong bộ nhớ nhưng GHI FILE THẤT BẠI.`);
-          }
-        }
-      }
-    }
-    const exchangeBalance = await refreshBalanceForTelegram();
-    telegramQueue.enqueue(formatPartialCloseMessage(event, { env: envLabel, exchangeBalance }) + (dryRun ? '\n\n[DRY-RUN]' : ''));
-  }
-
-  async function handleCloseEvent(symbol: string, event: CloseTradeEvent): Promise<void> {
-    const closeTraceId = stableTelemetryId('trace', symbol, event.entryTimestamp, event.side, event.setupType);
-    emitTelemetry({ traceId: closeTraceId, symbol, side: event.side, setupType: event.setupType, positionId: stableTelemetryId('position', closeTraceId), eventType: 'TRADE_CLOSED', eventTimestampUtc: new Date(event.exitTimestamp).toISOString(), source: 'LIVE_RUNNER', quality: { pnl: 'MODELED', fees: 'MODELED', funding: 'MISSING', entryVwap: 'MISSING', exitVwap: 'MISSING' }, data: { exitReason: event.exitReason, modeledNetPnl: event.pnlUsd, referenceEntry: event.entryPrice, referenceExit: event.exitPrice, holdingDurationMs: event.exitTimestamp - event.entryTimestamp, observedFees: 'MISSING', funding: 'MISSING' } });
-    if (dryRun) {
-      console.log(`[SẼ ĐÓNG LỆNH] ${symbol} exitReason=${event.exitReason} pnlUsd=${event.pnlUsd.toFixed(2)}`);
-    } else {
-      const ids = runnerState[symbol].orderIds.get(event.entryTimestamp);
-      if (ids) {
-        // TICKET-151 P0-E — a -2011 ("Unknown order sent") when cancelling the OTHER (non-triggering)
-        // SL/TP algo order here is expected (Binance does NOT auto-cancel the sibling order once one
-        // side fills). Only treat it as terminal/safe-to-ignore AFTER a FRESH getPositionRisk() query
-        // confirms the position is actually flat right now — never inferred from the close event
-        // itself, per the ticket's explicit "chỉ xử lý như terminal khi position state đã được xác
-        // nhận an toàn" rule. A getPositionRisk() failure here keeps isConfirmedClosed=false (safer
-        // default — an unconfirmed -2011 stays a loud error rather than being silently swallowed).
-        let isConfirmedClosed = false;
-        try {
-          const posRisk = (await executor.getPositionRisk(symbol)) as Array<{ symbol?: string; positionAmt?: string }>;
-          const amt = Array.isArray(posRisk) ? Number(posRisk.find((p) => p.symbol === symbol)?.positionAmt ?? '0') : NaN;
-          isConfirmedClosed = Number.isFinite(amt) && Math.abs(amt) < 1e-9;
-        } catch (e) {
-          console.error(`[CLOSE_CONFIRM_ERROR] ${symbol}: không xác nhận được vị thế qua getPositionRisk() trước khi hủy SL/TP còn treo — coi mọi -2011 sau đây là lỗi thật (an toàn hơn): ${(e as Error).message}`);
-        }
-
-        if (ids.slAlgoId != null) {
-          const outcome = await cancelAlgoOrderIdempotent(executor, symbol, ids.slAlgoId, `handleCloseEvent(${symbol}) SL`, isConfirmedClosed);
-          if (outcome.status === 'ALREADY_TERMINAL') console.log(outcome.logLine);
-          else if (outcome.status === 'ERROR') console.error(`[CLEANUP] hủy SL lỗi: ${outcome.error.message}`);
-        }
-        for (const tpId of ids.tpAlgoIds) {
-          const outcome = await cancelAlgoOrderIdempotent(executor, symbol, tpId, `handleCloseEvent(${symbol}) TP`, isConfirmedClosed);
-          if (outcome.status === 'ALREADY_TERMINAL') console.log(outcome.logLine);
-          else if (outcome.status === 'ERROR') console.error(`[CLEANUP] hủy TP lỗi: ${outcome.error.message}`);
-        }
-        runnerState[symbol].orderIds.delete(event.entryTimestamp);
-      }
-    }
-    const exchangeBalance = await refreshBalanceForTelegram();
-    telegramQueue.enqueue(formatFullCloseMessage(event, { env: envLabel, exchangeBalance }) + (dryRun ? '\n\n[DRY-RUN]' : ''));
+  function handleCloseEvent(symbol: string, event: CloseTradeEvent): Promise<void> {
+    return lifecycleHandleCloseEvent(lifecycleCtx, symbol, event);
   }
 
   async function tick(): Promise<void> {
@@ -1359,7 +1079,7 @@ async function main(): Promise<void> {
 
         const previousRegime = rs.symbolState.regimeState.previousRegime;
         let lastComputedMetrics: { adx1h?: number; atrPercentile5m?: number } = {};
-        const tickConfig: OrchestratorConfig = { ...CONFIG, riskDollarOrPercent: computeRequestedRiskUsd(accountBalance, LIVE_RISK_PER_TRADE_PCT) };
+        const tickConfig: OrchestratorConfig = { ...CONFIG, riskDollarOrPercent: LIVE_FIXED_RISK_USD };
         const result = await processCandle(
           input,
           rs.symbolState,
@@ -1473,7 +1193,7 @@ async function main(): Promise<void> {
 
         for (const event of result.events) {
           if (event.type === 'OPEN') {
-            const outcome: OpenEventOutcome = await handleOpenEvent(symbol, event, accountBalance).catch((e) => {
+            const outcome: OpenEventOutcome = await handleOpenEventIfFresh(candleFreshnessVerdicts, () => handleOpenEvent(symbol, event, accountBalance)).catch((e) => {
               console.error(`[OPEN_HANDLER_ERROR] ${symbol}: ${(e as Error).message}`);
               return { kind: 'AMBIGUOUS', detail: `handleOpenEvent ném lỗi không mong đợi (đã bắt): ${(e as Error).message}`, clientOrderId: buildDeterministicEntryClientOrderId(symbol, event.side, event.entryTimestamp), orderId: null, executedQty: null, avgPrice: null } as OpenEventOutcome;
             });
@@ -1482,32 +1202,7 @@ async function main(): Promise<void> {
               result.symbolState = { ...result.symbolState, openPositions: result.symbolState.openPositions.filter((e) => e.meta.entryTimestamp !== event.entryTimestamp) };
               console.error(`[NO_PHANTOM_POSITION] ${symbol} entryTimestamp=${event.entryTimestamp}: lệnh MARKET xác nhận KHÔNG khớp — không tạo trạng thái vị thế nội bộ.`);
             } else if (outcome.kind === 'AMBIGUOUS') {
-              result.symbolState = { ...result.symbolState, openPositions: result.symbolState.openPositions.filter((e) => e.meta.entryTimestamp !== event.entryTimestamp) };
-              const record = buildPendingEntryQuarantineRecord({
-                symbol,
-                side: event.side,
-                phase: 'AMBIGUOUS_SUBMISSION',
-                clientOrderId: outcome.clientOrderId,
-                orderId: outcome.orderId,
-                executedQty: outcome.executedQty,
-                averageFillPrice: outcome.avgPrice,
-                plannedEntryPrice: event.entryPrice,
-                plannedSlPrice: event.slPrice,
-                reconciledEntryPrice: null,
-                reconciledPositionSize: null,
-                protectionOutcome: null,
-                actualRiskDollar: null,
-                marginRequired: null,
-                protectionStatus: null,
-                recoveryStatus: null,
-                recoveryDetail: null,
-                exposureBasis: outcome.executedQty !== null ? { side: event.side, qty: outcome.executedQty, entryPrice: null } : null,
-                entryTimestamp: event.entryTimestamp,
-                reason: outcome.detail,
-              });
-              recordPendingEntryQuarantine(record);
-              console.error(`[MARKET_ENTRY_AMBIGUOUS_QUARANTINE] ${symbol} entryTimestamp=${event.entryTimestamp}: ${outcome.detail} — ĐÃ quarantine ${symbol}, chặn mở lệnh mới.`);
-              telegramQueue.enqueue(`🚨🚨 [CRITICAL — LỆNH MARKET KHÔNG XÁC ĐỊNH] ${symbol} ${event.side}: ${outcome.detail}\nclientOrderId=${outcome.clientOrderId}\nĐÃ CHẶN mở lệnh mới trên ${symbol} — cần kiểm tra thủ công NGAY.`);
+              result.symbolState = applyAmbiguousOpenOutcome({ symbol, event, outcome, symbolState: result.symbolState, recordPendingEntryQuarantine, enqueueTelegram: (message) => telegramQueue.enqueue(message) });
             } else if (outcome.kind === 'FILLED') {
               const protectionOutcomeStr = outcome.protection.status === 'PROTECTED' ? `PROTECTED:slAlgoId=${outcome.protection.slAlgoId}` : `PROTECTION_DEGRADED:firstAttempt=${outcome.protection.firstAttemptReason} recovery=${outcome.protection.recovery.status}:${outcome.protection.recovery.detail}`;
               const openedEntry = result.symbolState.openPositions.find((e) => e.meta.entryTimestamp === event.entryTimestamp);

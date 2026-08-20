@@ -1,42 +1,39 @@
 import { describe, it, expect } from 'vitest';
-import { parseLiveRiskPerTradePct, computeRequestedRiskUsd } from './liveRiskConfig.js';
+import { LIVE_FIXED_RISK_USD_REQUIRED, parseLiveFixedRiskUsd } from './liveRiskConfig.js';
 
-describe('parseLiveRiskPerTradePct', () => {
-  it('accepts a valid value under riskPoolMaxPct', () => {
-    expect(parseLiveRiskPerTradePct('0.01', 0.15)).toBe(0.01);
+describe('parseLiveFixedRiskUsd', () => {
+  it('accepts exactly the production fixed risk', () => {
+    expect(parseLiveFixedRiskUsd('20')).toBe(LIVE_FIXED_RISK_USD_REQUIRED);
+  });
+
+  it('rejects every positive value other than the production fixed risk', () => {
+    for (const value of ['0.01', '15.5', '19.99', '20.01', '100']) {
+      expect(() => parseLiveFixedRiskUsd(value)).toThrow(/phải đúng bằng 20/);
+    }
   });
 
   it('throws when missing', () => {
-    expect(() => parseLiveRiskPerTradePct(undefined, 0.15)).toThrow(/thiếu biến môi trường/);
+    expect(() => parseLiveFixedRiskUsd(undefined)).toThrow(/thiếu biến môi trường/);
   });
 
   it('throws when empty string', () => {
-    expect(() => parseLiveRiskPerTradePct('', 0.15)).toThrow(/thiếu biến môi trường/);
+    expect(() => parseLiveFixedRiskUsd('')).toThrow(/thiếu biến môi trường/);
+  });
+
+  it('throws when whitespace-only', () => {
+    expect(() => parseLiveFixedRiskUsd('   ')).toThrow(/thiếu biến môi trường/);
   });
 
   it('throws when NaN/non-numeric', () => {
-    expect(() => parseLiveRiskPerTradePct('abc', 0.15)).toThrow(/không phải số hợp lệ/);
+    expect(() => parseLiveFixedRiskUsd('abc')).toThrow(/không phải số hợp lệ/);
+  });
+
+  it('throws when Infinity', () => {
+    expect(() => parseLiveFixedRiskUsd('Infinity')).toThrow(/không phải số hợp lệ/);
   });
 
   it('throws when <= 0', () => {
-    expect(() => parseLiveRiskPerTradePct('0', 0.15)).toThrow(/phải > 0/);
-    expect(() => parseLiveRiskPerTradePct('-0.01', 0.15)).toThrow(/phải > 0/);
-  });
-
-  it('throws when > riskPoolMaxPct', () => {
-    expect(() => parseLiveRiskPerTradePct('0.2', 0.15)).toThrow(/vượt quá riskPoolMaxPct/);
-  });
-
-  it('accepts exactly equal to riskPoolMaxPct', () => {
-    expect(parseLiveRiskPerTradePct('0.15', 0.15)).toBe(0.15);
-  });
-});
-
-describe('computeRequestedRiskUsd', () => {
-  it('computes risk USD correctly from several different balances', () => {
-    expect(computeRequestedRiskUsd(1000, 0.01)).toBeCloseTo(10, 9);
-    expect(computeRequestedRiskUsd(5432.17, 0.01)).toBeCloseTo(54.3217, 9);
-    expect(computeRequestedRiskUsd(200, 0.05)).toBeCloseTo(10, 9);
-    expect(computeRequestedRiskUsd(0, 0.01)).toBe(0);
+    expect(() => parseLiveFixedRiskUsd('0')).toThrow(/phải > 0/);
+    expect(() => parseLiveFixedRiskUsd('-20')).toThrow(/phải > 0/);
   });
 });

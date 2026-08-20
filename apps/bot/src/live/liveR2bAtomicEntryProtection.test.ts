@@ -19,6 +19,7 @@ import { OrderSubmissionError, type BinanceOrderExecutor, type OpenAlgoOrder } f
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const liveRunnerSrc = readFileSync(path.resolve(__dirname, '../../scripts/liveRunner.ts'), 'utf8').replace(/\r\n/g, '\n');
+const liveLifecycleSrc = readFileSync(path.resolve(__dirname, './liveLifecycle.ts'), 'utf8').replace(/\r\n/g, '\n');
 
 describe('quarantine restart risk evidence', () => {
   it('never treats a planned but unconfirmed SL as a finite risk boundary', () => {
@@ -536,22 +537,22 @@ describe('recoverMissingProtectiveSl — skipPlacementAttempts (wrong-side-geome
 });
 
 describe('liveRunner.ts wiring — TICKET-LIVE-R2BR', () => {
-  it('Checkpoint 1: LIVE_RISK_PER_TRADE_PCT is parsed via parseLiveRiskPerTradePct against CONFIG.riskPoolMaxPct before the tick loop', () => {
-    expect(liveRunnerSrc).toContain('parseLiveRiskPerTradePct(process.env.LIVE_RISK_PER_TRADE_PCT, CONFIG.riskPoolMaxPct)');
+  it('Checkpoint 1: LIVE_FIXED_RISK_USD is parsed via parseLiveFixedRiskUsd before the tick loop', () => {
+    expect(liveRunnerSrc).toContain('parseLiveFixedRiskUsd(process.env.LIVE_FIXED_RISK_USD)');
   });
   it('Checkpoint 2: LIVE maxConcurrentPositionsPerSymbol is 1 (one-way, at most one position per symbol total)', () => {
     expect(liveRunnerSrc).toContain('maxConcurrentPositionsPerSymbol: 1,');
     expect(liveRunnerSrc).not.toContain('maxConcurrentPositionsPerSymbol: 2,');
   });
   it('Checkpoint 3: handleOpenEvent uses submitAndClassifyMarketEntry (never a bare openMarketPosition + blind catch)', () => {
-    expect(liveRunnerSrc).toContain('const classification = await submitAndClassifyMarketEntry(');
+    expect(liveLifecycleSrc).toContain('const classification = await submitAndClassifyMarketEntry(');
   });
   it('Checkpoint 4: reconcileExecutedOpenState runs, and geometry is checked, BEFORE either establishProtectiveStopLoss or recoverMissingProtectiveSl is called', () => {
-    const fnStart = liveRunnerSrc.indexOf('async function establishReconciledProtectedPosition(');
-    const fnEnd = liveRunnerSrc.indexOf('async function handlePartialCloseEvent(');
+    const fnStart = liveLifecycleSrc.indexOf('async function establishReconciledProtectedPosition(');
+    const fnEnd = liveLifecycleSrc.indexOf('export async function handleOpenEvent(');
     expect(fnStart).toBeGreaterThan(-1);
     expect(fnEnd).toBeGreaterThan(fnStart);
-    const block = liveRunnerSrc.slice(fnStart, fnEnd);
+    const block = liveLifecycleSrc.slice(fnStart, fnEnd);
     const reconcileIdx = block.indexOf('reconcileExecutedOpenState(');
     const geometryIdx = block.indexOf('isSlGeometryValidForFill(');
     const slIdx = block.indexOf('establishProtectiveStopLoss(');
@@ -562,31 +563,31 @@ describe('liveRunner.ts wiring — TICKET-LIVE-R2BR', () => {
     expect(recoverIdx).toBeGreaterThan(geometryIdx);
   });
   it('Checkpoint 4: TP is only placed when both reconciliation succeeded and geometry is valid', () => {
-    const fnStart = liveRunnerSrc.indexOf('async function establishReconciledProtectedPosition(');
-    const fnEnd = liveRunnerSrc.indexOf('async function handlePartialCloseEvent(');
-    const block = liveRunnerSrc.slice(fnStart, fnEnd);
+    const fnStart = liveLifecycleSrc.indexOf('async function establishReconciledProtectedPosition(');
+    const fnEnd = liveLifecycleSrc.indexOf('export async function handleOpenEvent(');
+    const block = liveLifecycleSrc.slice(fnStart, fnEnd);
     expect(block).toContain('if (reconciled.ok && geometryValid) {');
-    expect(block).toContain('executor.placeTakeProfitMarket(');
+    expect(block).toContain('ctx.executor.placeTakeProfitMarket(');
   });
   it('Checkpoint 4: a reconciliation or geometry failure never leaves TP placed, and routes through the same recovery path as an SL-placement failure', () => {
-    const fnStart = liveRunnerSrc.indexOf('async function establishReconciledProtectedPosition(');
-    const fnEnd = liveRunnerSrc.indexOf('async function handlePartialCloseEvent(');
-    const block = liveRunnerSrc.slice(fnStart, fnEnd);
+    const fnStart = liveLifecycleSrc.indexOf('async function establishReconciledProtectedPosition(');
+    const fnEnd = liveLifecycleSrc.indexOf('export async function handleOpenEvent(');
+    const block = liveLifecycleSrc.slice(fnStart, fnEnd);
     expect(block).toContain('if (!reconciled.ok) {');
     expect(block).toContain('} else if (!geometryValid) {');
     expect(block).toContain('skipPlacementAttempts: true,');
     expect(block).toContain('await recoverMissingProtectiveSl(');
   });
   it('Checkpoint 5: the partial-close SL-replace call site invokes recoverMissingProtectiveSl synchronously on failure, checks persistLiveState()\'s return value', () => {
-    const start = liveRunnerSrc.indexOf('async function handlePartialCloseEvent');
-    const end = liveRunnerSrc.indexOf('async function handleCloseEvent');
+    const start = liveLifecycleSrc.indexOf('export async function handlePartialCloseEvent');
+    const end = liveLifecycleSrc.indexOf('export async function handleCloseEvent');
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
-    const block = liveRunnerSrc.slice(start, end);
+    const block = liveLifecycleSrc.slice(start, end);
     expect(block).toContain('catch (err) {');
     expect(block).toContain('await recoverMissingProtectiveSl(');
-    expect(block).toContain('entriesBlockedDueToRestartQuarantineBySymbol.add(symbol);');
-    expect(block).toContain('const persisted = persistLiveState();');
+    expect(block).toContain('ctx.runnerState.blockSymbolAdmission(symbol);');
+    expect(block).toContain('const persisted = ctx.persistLiveState();');
   });
   it('Item 5: the FILLED_UNPROTECTED quarantine record is built with actualRiskDollar/marginRequired/protectionStatus/recoveryStatus/recoveryDetail/exposureBasis populated from known evidence, not left null', () => {
     const phaseIdx = liveRunnerSrc.indexOf("phase: 'FILLED_UNPROTECTED',");
@@ -603,15 +604,16 @@ describe('liveRunner.ts wiring — TICKET-LIVE-R2BR', () => {
     expect(liveRunnerSrc).toContain('openPositions: result.symbolState.openPositions.filter((e) => e.meta.entryTimestamp !== event.entryTimestamp)');
   });
   it('Checkpoint 6: all 4 quarantine phases exist and every write site goes through recordPendingEntryQuarantine, which persists before continuing', () => {
-    expect(liveRunnerSrc).toContain("phase: 'AMBIGUOUS_SUBMISSION',");
+    expect(liveLifecycleSrc).toContain("phase: 'AMBIGUOUS_SUBMISSION',");
     expect(liveRunnerSrc).toContain("phase: 'FILLED_UNPROTECTED',");
     expect(liveRunnerSrc).toContain("phase: 'FILLED_INTERNAL_STATE_MISSING',");
     expect(liveRunnerSrc).toContain("phase: 'RECONCILIATION_FAILED',");
-    expect(liveRunnerSrc.match(/recordPendingEntryQuarantine\(record\);/g)?.length).toBe(4);
-    const fnIdx = liveRunnerSrc.indexOf('function recordPendingEntryQuarantine(record: PendingEntryQuarantineRecord): boolean {');
+    expect(liveRunnerSrc.match(/recordPendingEntryQuarantine\(record\);/g)?.length).toBe(3);
+    expect(liveLifecycleSrc).toContain('input.recordPendingEntryQuarantine({');
+    const fnIdx = liveLifecycleSrc.indexOf('return function recordPendingEntryQuarantine(record: PendingEntryQuarantineRecord): boolean {');
     expect(fnIdx).toBeGreaterThan(-1);
-    const fnBlock = liveRunnerSrc.slice(fnIdx, fnIdx + 500);
-    expect(fnBlock).toContain('const persisted = persistLiveState();');
+    const fnBlock = liveLifecycleSrc.slice(fnIdx, fnIdx + 500);
+    expect(fnBlock).toContain('const persisted = deps.persistLiveState();');
   });
   it('Checkpoint 6: a confirmed fill with no matching openedEntry quarantines immediately as FILLED_INTERNAL_STATE_MISSING and sends a CRITICAL Telegram alert, not just a log line', () => {
     const idx = liveRunnerSrc.indexOf('if (!openedEntry) {');
@@ -622,25 +624,25 @@ describe('liveRunner.ts wiring — TICKET-LIVE-R2BR', () => {
     expect(block).toContain('🚨🚨 [CRITICAL');
   });
   it('Checkpoint 6: restart recovery reads pendingEntryQuarantines and blocks new entries on any symbol still carrying one of ANY phase, without touching openPositions', () => {
-    const idx = liveRunnerSrc.indexOf('for (const [symbol, records] of Object.entries(pendingEntryQuarantinesBySymbol)) {');
+    const idx = liveLifecycleSrc.indexOf('for (const [symbol, records] of Object.entries(pendingEntryQuarantinesBySymbol)) {');
     expect(idx).toBeGreaterThan(-1);
-    const block = liveRunnerSrc.slice(idx, idx + 500);
-    expect(block).toContain('entriesBlockedDueToRestartQuarantineBySymbol.add(symbol);');
+    const block = liveLifecycleSrc.slice(idx, idx + 500);
+    expect(block).toContain('blockedSymbols.push({ symbol, recordCount: records.length });');
   });
-  it('Item 5: a persistLiveState() failure sets livePersistFailureBlockingAdmission and feeds the SAME portfolio-wide admission sentinel, plus sends a CRITICAL Telegram alert', () => {
-    const fnIdx = liveRunnerSrc.indexOf('function persistLiveState(): boolean {');
+  it('Item 5: a persistLiveState() failure sets onPersistFailure(true) and the caller feeds the SAME portfolio-wide admission sentinel, plus sends a CRITICAL Telegram alert', () => {
+    const fnIdx = liveLifecycleSrc.indexOf('return function persistLiveState(): boolean {');
     expect(fnIdx).toBeGreaterThan(-1);
-    const fnBlock = liveRunnerSrc.slice(fnIdx, fnIdx + 1300);
-    expect(fnBlock).toContain('livePersistFailureBlockingAdmission = true;');
+    const fnBlock = liveLifecycleSrc.slice(fnIdx, fnIdx + 1300);
+    expect(fnBlock).toContain('deps.onPersistFailure(true);');
     expect(fnBlock).toContain('🚨🚨 [CRITICAL');
     expect(liveRunnerSrc).toContain('livePersistFailureBlockingAdmission ||');
   });
   it('Item 6: the top-level catch around handleOpenEvent is a narrow last-resort backstop; post-fill errors are caught INSIDE handleOpenEvent and preserve known fill evidence instead of a generic empty-evidence AMBIGUOUS record', () => {
-    const tryIdx = liveRunnerSrc.indexOf('return await establishReconciledProtectedPosition(');
+    const tryIdx = liveLifecycleSrc.indexOf('return await establishReconciledProtectedPosition(');
     expect(tryIdx).toBeGreaterThan(-1);
-    const catchIdx = liveRunnerSrc.indexOf('} catch (err) {', tryIdx);
+    const catchIdx = liveLifecycleSrc.indexOf('} catch (err) {', tryIdx);
     expect(catchIdx).toBeGreaterThan(tryIdx);
-    const block = liveRunnerSrc.slice(catchIdx, catchIdx + 800);
+    const block = liveLifecycleSrc.slice(catchIdx, catchIdx + 800);
     expect(block).toContain('orderId: classification.orderId');
     expect(block).toContain('executedQty: canonicalQty');
     expect(block).toContain('avgPrice: classification.avgPrice');

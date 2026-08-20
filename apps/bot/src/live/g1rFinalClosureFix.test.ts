@@ -276,10 +276,8 @@ describe('Item 1 — partial/full PnL lifecycle: no double-count (verification, 
   it('Telegram balance display always sources the LIVE number from the exchange snapshot, never the modeled accountBalance, when exchangeBalance is passed (liveRunner.ts always passes it)', () => {
     const formattersSrc = fs.readFileSync(path.resolve(__dirname, '../telegram/messageFormatters.ts'), 'utf8');
     expect(formattersSrc).toContain("if (exchangeBalance === null) return `💼 Balance: pending exchange sync`;");
-    // liveRunner.ts always calls formatPositionOpenedMessage/formatPartialCloseMessage/formatFullCloseMessage
-    // with an explicit exchangeBalance (snapshot-or-null), never omitting the field (which would fall
-    // back to the legacy internal-number branch) — confirmed by call-site grep.
-    const callSites = [...liveRunnerSrc.matchAll(/format(PositionOpened|PartialClose|FullClose)Message\([^)]*exchangeBalance[^)]*\)/gs)];
+    const liveLifecycleSrc = fs.readFileSync(path.resolve(__dirname, './liveLifecycle.ts'), 'utf8');
+    const callSites = [...liveLifecycleSrc.matchAll(/format(PositionOpened|PartialClose|FullClose)Message\([^)]*exchangeBalance[^)]*\)/gs)];
     expect(callSites.length).toBeGreaterThanOrEqual(3);
   });
 });

@@ -17,8 +17,9 @@ describe('liveRunner.ts CONFIG — 4 tham số chính thức đã chốt (PM-con
   if (configMatch === null) throw new Error('liveRunnerConfig.test.ts: không tìm thấy block "const CONFIG: OrchestratorConfig = {...}" trong liveRunner.ts');
   const configBlock = configMatch[0];
 
-  it('riskDollarOrPercent=15 (PM quyết định đánh $15/lệnh)', () => {
-    expect(configBlock).toMatch(/riskDollarOrPercent:\s*15\b/);
+  it('riskDollarOrPercent uses the startup-validated fixed $20 value', () => {
+    expect(configBlock).toMatch(/riskDollarOrPercent:\s*LIVE_FIXED_RISK_USD\b/);
+    expect(source).toContain('const LIVE_FIXED_RISK_USD = parseLiveFixedRiskUsd(process.env.LIVE_FIXED_RISK_USD);');
   });
 
   it('maxMarginCap=37.5 (đúng tỷ lệ 15/5 × 12.5, cùng công thức TICKET-087/094)', () => {
