@@ -142,23 +142,27 @@ describe('G1-F05 — canonical qty correction leaves risk/margin/entry-price bas
   // and, on success, corrects positionSize/remainingPositionSize/entryPrice/r AND
   // meta.actualRiskDollar/marginRequired together from the same reconciled basis — no longer leaves
   // risk/margin/entryPrice at their planned values while only positionSize gets corrected.
-  it('G1R FIX: the OPEN-event correction block reconciles positionSize, entryPrice, r, actualRiskDollar AND marginRequired together (see g1rExecutedStateReconciliationFix.test.ts)', () => {
-    const startMarker = 'if (openFillInfo !== null) {';
-    const endMarker = 'POSITION_SIZE_CORRECTION_ERROR';
-    const start = liveRunnerSrc.indexOf(startMarker);
-    const end = liveRunnerSrc.indexOf(endMarker);
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    const block = liveRunnerSrc.slice(start, end);
-    expect(block).toContain('reconcileExecutedOpenState(');
-    expect(block).toContain('openedEntry.position.positionSize = reconciled.positionSize;');
-    expect(block).toContain('openedEntry.position.remainingPositionSize = reconciled.positionSize;');
-    expect(block).toContain('openedEntry.position.entryPrice = reconciled.entryPrice;');
-    expect(block).toContain('openedEntry.position.r = reconciled.r;');
-    expect(block).toContain('openedEntry.meta.actualRiskDollar = reconciled.actualRiskDollar;');
-    expect(block).toContain('openedEntry.meta.marginRequired = reconciled.marginRequired;');
-    // unreconcilable fill provenance blocks new entries on the symbol instead of guessing a value.
-    expect(block).toContain('entriesBlockedDueToUnreconciledFillBySymbol.add(symbol);');
+  it('G1R FIX: the OPEN-event correction reconciles positionSize, entryPrice, r, actualRiskDollar AND marginRequired together, computed BEFORE SL placement (see LIVE-R2BR item 4)', () => {
+    const reconcileStart = liveRunnerSrc.indexOf('async function establishReconciledProtectedPosition(');
+    expect(reconcileStart).toBeGreaterThan(-1);
+    const reconcileEnd = liveRunnerSrc.indexOf('async function handlePartialCloseEvent(');
+    expect(reconcileEnd).toBeGreaterThan(reconcileStart);
+    const reconcileBlock = liveRunnerSrc.slice(reconcileStart, reconcileEnd);
+    expect(reconcileBlock).toContain('reconcileExecutedOpenState(');
+    expect(reconcileBlock.indexOf('reconcileExecutedOpenState(')).toBeLessThan(reconcileBlock.indexOf('establishProtectiveStopLoss('));
+
+    const applyStart = liveRunnerSrc.indexOf("outcome.kind === 'FILLED'");
+    const applyEnd = liveRunnerSrc.indexOf("} else if (event.type === 'PARTIAL_CLOSE')");
+    expect(applyStart).toBeGreaterThan(-1);
+    expect(applyEnd).toBeGreaterThan(applyStart);
+    const applyBlock = liveRunnerSrc.slice(applyStart, applyEnd);
+    expect(applyBlock).toContain('openedEntry.position.positionSize = reconciled.positionSize;');
+    expect(applyBlock).toContain('openedEntry.position.remainingPositionSize = reconciled.positionSize;');
+    expect(applyBlock).toContain('openedEntry.position.entryPrice = reconciled.entryPrice;');
+    expect(applyBlock).toContain('openedEntry.position.r = reconciled.r;');
+    expect(applyBlock).toContain('openedEntry.meta.actualRiskDollar = reconciled.actualRiskDollar;');
+    expect(applyBlock).toContain('openedEntry.meta.marginRequired = reconciled.marginRequired;');
+    expect(applyBlock).toContain("phase: 'RECONCILIATION_FAILED',");
   });
 });
 
@@ -171,7 +175,7 @@ describe('G1-F05 — canonical qty correction leaves risk/margin/entry-price bas
 describe('G1-F14 — restart persistence: no SymbolState/position/order-id data survives a process restart, and POSITION_MISSING_INTERNALLY is never actively handled (CONFIRMED_DEFECT, FIXED — see g1rRestartRecoveryFix.test.ts)', () => {
   it('G1R FIX: liveRunner.ts now persists runner state atomically via liveStateSync.ts (writeLiveStateFileAtomic), not a raw writeFileSync of its own', () => {
     expect(liveRunnerSrc).toContain('writeLiveStateFileAtomic');
-    expect(liveRunnerSrc).toContain('function persistLiveState(): void {');
+    expect(liveRunnerSrc).toContain('function persistLiveState(): boolean {');
     expect(liveRunnerSrc).not.toMatch(/writeFileSync|fs\.writeFile|\.promises\.writeFile|fsPromises\.writeFile/);
   });
 

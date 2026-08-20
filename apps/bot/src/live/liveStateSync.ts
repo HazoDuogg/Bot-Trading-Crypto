@@ -17,8 +17,10 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { OrderSubmissionError } from './binanceOrderExecutor.js';
 import type { BinanceOrderExecutor, OpenAlgoOrder, PositionSide } from './binanceOrderExecutor.js';
 import type { OpenPositionEntry, SymbolState } from '../orchestrator/types.js';
+import type { UnknownExposureForRisk } from '../risk/currentRisk.js';
 
 // ---- P0-A: canonical executed quantity -------------------------------------------------------
 
@@ -82,20 +84,19 @@ export function resolveCanonicalOpenQty(params: {
 
 // ---- TICKET-G1R Checkpoint B: executed-state reconciliation (G1-F05) --------------------------
 
-/** Which price basis the reconciled `entryPrice` actually rests on — never call a fallback "observed". */
-export type EntryPriceBasis = 'OBSERVED_AVG_FILL' | 'PLANNED_FALLBACK';
+export type EntryPriceBasis = 'OBSERVED_AVG_FILL' | 'POSITION_RISK_ENTRY_PRICE';
+
+const ENTRY_PRICE_AGREEMENT_TOLERANCE_PCT = 0.005;
 
 export interface ReconcileExecutedOpenStateInput {
-  /** The pre-fill planned entry price (event.entryPrice) — used verbatim only as the PLANNED_FALLBACK basis. */
-  plannedEntryPrice: number;
-  /** The position's already-placed (on the real exchange) absolute SL price — frozen, never moved by this reconcile. */
   initialSlPrice: number;
-  /** Exchange-confirmed executed quantity (base asset) from resolveCanonicalOpenQty(). */
   canonicalQty: number;
-  /** Provenance of canonicalQty — SUBMITTED_QTY_FALLBACK means the qty itself is an unconfirmed guess, not a real exchange confirmation. */
   canonicalQtySource: QtySource;
-  /** `avgPrice` field (or equivalent) straight off the exchange fill response, unparsed — may be missing/'0'/non-numeric. */
   rawAvgPrice: unknown;
+  freshPositionRiskEntryPrice: unknown;
+  freshPositionRiskQtyAbs: number | null;
+  preSubmissionBaselineQtyAbs: number | null;
+  quantityTolerance: number;
   leverage: number;
 }
 
@@ -104,25 +105,16 @@ export type ReconcileExecutedOpenStateResult =
       ok: true;
       entryPrice: number;
       entryPriceBasis: EntryPriceBasis;
-      /** Recomputed 1R = |entryPrice - initialSlPrice| against the (possibly corrected) entryPrice — initialSlPrice itself never moves. */
       r: number;
-      /** Corrected notional = canonicalQty * entryPrice. */
       positionSize: number;
       actualRiskDollar: number;
       marginRequired: number;
     }
-  | { ok: false; reason: 'CANONICAL_QTY_UNCONFIRMED' | 'CANONICAL_QTY_INVALID' | 'ZERO_STOP_DISTANCE_AFTER_RECONCILE' };
+  | {
+      ok: false;
+      reason: 'CANONICAL_QTY_UNCONFIRMED' | 'CANONICAL_QTY_INVALID' | 'ZERO_STOP_DISTANCE_AFTER_RECONCILE' | 'ENTRY_PRICE_UNAVAILABLE' | 'ENTRY_PRICE_DISAGREEMENT' | 'QUANTITY_MISMATCH' | 'PRE_SUBMISSION_BASELINE_UNAVAILABLE' | 'POST_FILL_POSITION_UNAVAILABLE';
+    };
 
-/**
- * G1-F05 fix: derives entryPrice/actualRiskDollar/marginRequired/r from the ACTUAL executed fill
- * (canonicalQty + observed avg fill price when available), not the pre-fill planned values. TP/SL
- * absolute prices are never touched here — they're already resting as real orders on the exchange
- * at their planned prices by the time this runs, so they cannot be retroactively "corrected"; only
- * `r` (the distance from the corrected entry to that fixed stop) is recomputed so downstream trailing/
- * giveback-protection math stays consistent with the SAME entryPrice basis as actualRiskDollar/margin.
- * Returns `ok:false` (never fabricates a value) when the fill provenance itself can't be trusted:
- * canonicalQty is only the SUBMITTED_QTY_FALLBACK guess, or fill price makes the stop distance <= 0.
- */
 export function reconcileExecutedOpenState(input: ReconcileExecutedOpenStateInput): ReconcileExecutedOpenStateResult {
   if (input.canonicalQtySource === 'SUBMITTED_QTY_FALLBACK') {
     return { ok: false, reason: 'CANONICAL_QTY_UNCONFIRMED' };
@@ -130,10 +122,42 @@ export function reconcileExecutedOpenState(input: ReconcileExecutedOpenStateInpu
   if (!Number.isFinite(input.canonicalQty) || input.canonicalQty <= 0) {
     return { ok: false, reason: 'CANONICAL_QTY_INVALID' };
   }
+  if (input.preSubmissionBaselineQtyAbs === null || !Number.isFinite(input.preSubmissionBaselineQtyAbs) || input.preSubmissionBaselineQtyAbs < 0) {
+    return { ok: false, reason: 'PRE_SUBMISSION_BASELINE_UNAVAILABLE' };
+  }
+  if (input.freshPositionRiskQtyAbs === null || !Number.isFinite(input.freshPositionRiskQtyAbs) || input.freshPositionRiskQtyAbs < 0) {
+    return { ok: false, reason: 'POST_FILL_POSITION_UNAVAILABLE' };
+  }
+
   const parsedAvgPrice = Number(input.rawAvgPrice);
-  const hasObservedAvgPrice = Number.isFinite(parsedAvgPrice) && parsedAvgPrice > 0;
-  const entryPrice = hasObservedAvgPrice ? parsedAvgPrice : input.plannedEntryPrice;
-  const entryPriceBasis: EntryPriceBasis = hasObservedAvgPrice ? 'OBSERVED_AVG_FILL' : 'PLANNED_FALLBACK';
+  const hasAvgPrice = Number.isFinite(parsedAvgPrice) && parsedAvgPrice > 0;
+  const parsedPositionEntryPrice = Number(input.freshPositionRiskEntryPrice);
+  const hasPositionEntryPrice = Number.isFinite(parsedPositionEntryPrice) && parsedPositionEntryPrice > 0;
+
+  let entryPrice: number;
+  let entryPriceBasis: EntryPriceBasis;
+  if (hasAvgPrice && hasPositionEntryPrice) {
+    const relDiff = Math.abs(parsedAvgPrice - parsedPositionEntryPrice) / parsedPositionEntryPrice;
+    if (relDiff > ENTRY_PRICE_AGREEMENT_TOLERANCE_PCT) {
+      return { ok: false, reason: 'ENTRY_PRICE_DISAGREEMENT' };
+    }
+    entryPrice = parsedAvgPrice;
+    entryPriceBasis = 'OBSERVED_AVG_FILL';
+  } else if (hasAvgPrice) {
+    entryPrice = parsedAvgPrice;
+    entryPriceBasis = 'OBSERVED_AVG_FILL';
+  } else if (hasPositionEntryPrice) {
+    entryPrice = parsedPositionEntryPrice;
+    entryPriceBasis = 'POSITION_RISK_ENTRY_PRICE';
+  } else {
+    return { ok: false, reason: 'ENTRY_PRICE_UNAVAILABLE' };
+  }
+
+  const expectedTotalQtyAbs = input.preSubmissionBaselineQtyAbs + input.canonicalQty;
+  const qtyDiff = Math.abs(input.freshPositionRiskQtyAbs - expectedTotalQtyAbs);
+  if (qtyDiff > input.quantityTolerance) {
+    return { ok: false, reason: 'QUANTITY_MISMATCH' };
+  }
 
   const r = Math.abs(entryPrice - input.initialSlPrice);
   if (r <= 0) {
@@ -145,6 +169,34 @@ export function reconcileExecutedOpenState(input: ReconcileExecutedOpenStateInpu
   const marginRequired = positionSize / input.leverage;
 
   return { ok: true, entryPrice, entryPriceBasis, r, positionSize, actualRiskDollar, marginRequired };
+}
+
+export interface PositionRiskSideEvidence {
+  qtyAbs: number;
+  entryPrice: unknown;
+}
+
+export async function readPositionRiskForSide(executor: Pick<BinanceOrderExecutor, 'getPositionRisk'>, symbol: string, side: PositionSide): Promise<PositionRiskSideEvidence | null> {
+  try {
+    const raw = await executor.getPositionRisk(symbol);
+    const entries = raw as Array<{ symbol?: string; positionAmt?: string; entryPrice?: string }> | null;
+    if (!Array.isArray(entries)) return null;
+    const found = entries.find((e) => e.symbol === symbol);
+    if (!found) return { qtyAbs: 0, entryPrice: null };
+    const amt = Number(found.positionAmt);
+    if (!Number.isFinite(amt)) return null;
+    const matchesSide = side === 'LONG' ? amt > 0 : amt < 0;
+    return matchesSide ? { qtyAbs: Math.abs(amt), entryPrice: found.entryPrice } : { qtyAbs: 0, entryPrice: null };
+  } catch {
+    return null;
+  }
+}
+
+export function isSlGeometryValidForFill(side: PositionSide, entryPrice: number, slPrice: number): boolean {
+  if (!Number.isFinite(entryPrice) || entryPrice <= 0 || !Number.isFinite(slPrice) || slPrice <= 0 || entryPrice === slPrice) {
+    return false;
+  }
+  return side === 'LONG' ? slPrice < entryPrice : slPrice > entryPrice;
 }
 
 // ---- P0-B: step-size-aware tolerance + RECONCILE_QTY_SYNC ------------------------------------
@@ -505,10 +557,47 @@ export interface PersistedSymbolRecord {
   regimeStateCandleTimestamp?: number | null;
 }
 
+export type PendingEntryQuarantinePhase = 'AMBIGUOUS_SUBMISSION' | 'FILLED_UNPROTECTED' | 'FILLED_INTERNAL_STATE_MISSING' | 'RECONCILIATION_FAILED';
+
+export interface QuarantineExposureBasis {
+  side: PositionSide;
+  qty: number | null;
+  entryPrice: number | null;
+}
+
+export interface PendingEntryQuarantineRecord {
+  symbol: string;
+  side: PositionSide;
+  phase: PendingEntryQuarantinePhase;
+  clientOrderId: string;
+  orderId: number | null;
+  executedQty: number | null;
+  averageFillPrice: unknown;
+  plannedEntryPrice: number | null;
+  plannedSlPrice: number | null;
+  reconciledEntryPrice: number | null;
+  reconciledPositionSize: number | null;
+  protectionOutcome: string | null;
+  actualRiskDollar: number | null;
+  marginRequired: number | null;
+  protectionStatus: string | null;
+  recoveryStatus: string | null;
+  recoveryDetail: string | null;
+  exposureBasis: QuarantineExposureBasis | null;
+  entryTimestamp: number;
+  reason: string;
+  detectedAtMs: number;
+}
+
+export function quarantineRecordToRiskExposure(record: PendingEntryQuarantineRecord, index: number): UnknownExposureForRisk {
+  return { id: `${record.symbol}:${record.phase}:PENDING_ENTRY_QUARANTINE:${index}`, basis: null };
+}
+
 export interface LiveStateFile {
   schemaVersion: number;
   savedAtMs: number;
   symbols: Record<string, PersistedSymbolRecord>;
+  pendingEntryQuarantines?: Record<string, PendingEntryQuarantineRecord[]>;
 }
 
 /**
@@ -867,51 +956,6 @@ export function verifyProtectiveSlOrder(params: {
   return { status: 'VERIFIED', detail: `${label}=${params.persistedSlAlgoId} khớp symbol/side/positionSide/type/qty/triggerPrice/reduceOnly trong dung sai` };
 }
 
-// ---- TICKET-G1R Final Closure item 4: in-run retry for entriesBlockedDueToUnreconciledFillBySymbol
-//
-// Checkpoint B's unreconciled-fill block (G1-F05) was permanent-until-restart by design. This adds
-// an EVIDENCE-BASED retry path: re-derive quantity/entryPrice/r/risk/margin from a FRESH
-// getPositionRisk() read (which reports the exchange's own confirmed average entry price for the
-// position, `entryPrice` field — a stronger source than the original order fill's `avgPrice`, not
-// weaker) instead of the original (untrusted) order response. Never a timeout — only called when
-// the caller explicitly attempts a new read; only clears the block when ALL of qty/entryPrice/r/
-// risk/margin are successfully re-derived from that read (never partially).
-
-export type RetryReconcileUnreconciledFillReason = 'POSITION_NOT_FOUND_OR_WRONG_SIDE' | 'ENTRY_PRICE_INVALID' | 'ZERO_STOP_DISTANCE_AFTER_RETRY';
-
-export type RetryReconcileUnreconciledFillResult =
-  | { ok: true; qty: number; entryPrice: number; r: number; positionSize: number; actualRiskDollar: number; marginRequired: number }
-  | { ok: false; reason: RetryReconcileUnreconciledFillReason };
-
-export function retryReconcileUnreconciledFillFromPositionRisk(input: {
-  expectedSide: PositionSide;
-  initialSlPrice: number;
-  leverage: number;
-  /** Signed `positionAmt` straight off a fresh getPositionRisk() read (positive = net long, negative = net short). */
-  freshPositionAmt: number;
-  /** Raw `entryPrice` field off the same fresh getPositionRisk() entry, unparsed. */
-  freshEntryPrice: unknown;
-}): RetryReconcileUnreconciledFillResult {
-  const amt = input.freshPositionAmt;
-  const sideMatches = input.expectedSide === 'LONG' ? amt > 0 : amt < 0;
-  if (!Number.isFinite(amt) || !sideMatches) {
-    return { ok: false, reason: 'POSITION_NOT_FOUND_OR_WRONG_SIDE' };
-  }
-  const qty = Math.abs(amt);
-  const entryPrice = Number(input.freshEntryPrice);
-  if (!Number.isFinite(entryPrice) || entryPrice <= 0) {
-    return { ok: false, reason: 'ENTRY_PRICE_INVALID' };
-  }
-  const r = Math.abs(entryPrice - input.initialSlPrice);
-  if (r <= 0) {
-    return { ok: false, reason: 'ZERO_STOP_DISTANCE_AFTER_RETRY' };
-  }
-  const positionSize = qty * entryPrice;
-  const actualRiskDollar = positionSize * (r / entryPrice);
-  const marginRequired = positionSize / input.leverage;
-  return { ok: true, qty, entryPrice, r, positionSize, actualRiskDollar, marginRequired };
-}
-
 // ---- TICKET-G1R Final Closure item 3: explicit exchange-sync admission state -------------------
 
 /**
@@ -1180,18 +1224,21 @@ export async function recoverMissingProtectiveSl(params: {
   slTriggerPrice: number;
   policy: MissingProtectiveSlFailsafePolicy;
   maxAttempts?: number;
+  skipPlacementAttempts?: boolean;
 }): Promise<MissingSlRecoveryOutcome> {
   const maxAttempts = params.maxAttempts ?? MISSING_SL_RECOVERY_MAX_ATTEMPTS;
 
   // Step 1 — restart-safe idempotency: don't place a duplicate if a prior (possibly pre-restart) attempt already succeeded.
-  const preExisting = await params.executor.getOpenAlgoOrders(params.symbol);
-  const already = findExistingCandidateSlOrder({ expectedSide: params.expectedSide, expectedQty: params.expectedQty, quantityTolerance: params.quantityTolerance, openAlgoOrders: preExisting });
-  if (already) {
-    return { status: 'ALREADY_RECOVERED_ON_RESTART', slAlgoId: already.algoId, detail: `Tìm thấy SL algoId=${already.algoId} đã tồn tại trên sàn khớp side/qty kỳ vọng — không đặt thêm (chống trùng qua restart).` };
+  if (!params.skipPlacementAttempts) {
+    const preExisting = await params.executor.getOpenAlgoOrders(params.symbol);
+    const already = findExistingCandidateSlOrder({ expectedSide: params.expectedSide, expectedQty: params.expectedQty, quantityTolerance: params.quantityTolerance, openAlgoOrders: preExisting });
+    if (already) {
+      return { status: 'ALREADY_RECOVERED_ON_RESTART', slAlgoId: already.algoId, detail: `Tìm thấy SL algoId=${already.algoId} đã tồn tại trên sàn khớp side/qty kỳ vọng — không đặt thêm (chống trùng qua restart).` };
+    }
   }
 
   // Step 2 — bounded place+verify attempts.
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  for (let attempt = 1; attempt <= (params.skipPlacementAttempts ? 0 : maxAttempts); attempt++) {
     try {
       const placed = await params.executor.placeStopMarket(params.symbol, params.expectedSide, params.slTriggerPrice, params.expectedQty);
       if ('dryRun' in placed) {
@@ -1224,30 +1271,30 @@ export async function recoverMissingProtectiveSl(params: {
   }
 
   // Step 3 — exhausted; apply policy.
+  const attemptsUsedFinal = params.skipPlacementAttempts ? 0 : maxAttempts;
+  const attemptsUsedLabel = params.skipPlacementAttempts ? 'không thử đặt lại SL (bỏ qua vì slTriggerPrice đã biết là sai phía)' : `Hết ${maxAttempts} lần thử đặt+xác minh lại SL`;
   if (params.policy === 'OPERATOR_REQUIRED') {
-    return { status: 'EXHAUSTED_OPERATOR_REQUIRED', attemptsUsed: maxAttempts, detail: `Hết ${maxAttempts} lần thử đặt+xác minh lại SL — KHÔNG tự đóng vị thế (policy=OPERATOR_REQUIRED). Cần người can thiệp thủ công NGAY.` };
+    return { status: 'EXHAUSTED_OPERATOR_REQUIRED', attemptsUsed: attemptsUsedFinal, detail: `${attemptsUsedLabel} — KHÔNG tự đóng vị thế (policy=OPERATOR_REQUIRED). Cần người can thiệp thủ công NGAY.` };
   }
   try {
     await params.executor.closePositionMarket(params.symbol, params.expectedSide, params.expectedQty);
   } catch (err) {
     return {
       status: 'EXHAUSTED_EMERGENCY_CLOSE_FAILED',
-      attemptsUsed: maxAttempts,
-      detail: `Hết ${maxAttempts} lần thử đặt+xác minh lại SL, VÀ market close khẩn cấp CŨNG THẤT BẠI (lệnh bị từ chối/lỗi mạng) — vị thế đang naked, cần người can thiệp thủ công NGAY LẬP TỨC.`,
+      attemptsUsed: attemptsUsedFinal,
+      detail: `${attemptsUsedLabel}, VÀ market close khẩn cấp CŨNG THẤT BẠI (lệnh bị từ chối/lỗi mạng) — vị thế đang naked, cần người can thiệp thủ công NGAY LẬP TỨC.`,
       closeError: (err as Error).message,
       residualBaseQty: null,
     };
   }
-  // TICKET-G1R-A "Final Safety Hotfix" item 2 — the close ORDER succeeding is not proof of a closed
-  // POSITION (partial fill, race condition). MUST re-read getPositionRisk() before declaring victory.
   const verify = await verifyPositionFullyClosedViaExchange(params.executor, params.symbol, params.quantityTolerance);
   if (verify.confirmedZero) {
-    return { status: 'EXHAUSTED_EMERGENCY_CLOSED', attemptsUsed: maxAttempts, detail: `Hết ${maxAttempts} lần thử đặt+xác minh lại SL — đã đóng NGAY vị thế bằng market order (policy=EMERGENCY_CLOSE), XÁC MINH LẠI qua getPositionRisk() cho thấy qty còn lại=0 (trong dung sai) để loại rủi ro naked position.` };
+    return { status: 'EXHAUSTED_EMERGENCY_CLOSED', attemptsUsed: attemptsUsedFinal, detail: `${attemptsUsedLabel} — đã đóng NGAY vị thế bằng market order (policy=EMERGENCY_CLOSE), XÁC MINH LẠI qua getPositionRisk() cho thấy qty còn lại=0 (trong dung sai) để loại rủi ro naked position.` };
   }
   if (verify.readError) {
     return {
       status: 'EXHAUSTED_EMERGENCY_CLOSE_FAILED',
-      attemptsUsed: maxAttempts,
+      attemptsUsed: attemptsUsedFinal,
       detail: `Market close đã gửi nhưng KHÔNG xác minh được kết quả (đọc lại getPositionRisk() lỗi: ${verify.readError}) — KHÔNG được coi là đã đóng, vị thế có thể vẫn còn naked, cần người can thiệp thủ công NGAY LẬP TỨC.`,
       closeError: verify.readError,
       residualBaseQty: null,
@@ -1255,7 +1302,7 @@ export async function recoverMissingProtectiveSl(params: {
   }
   return {
     status: 'EXHAUSTED_EMERGENCY_CLOSE_FAILED',
-    attemptsUsed: maxAttempts,
+    attemptsUsed: attemptsUsedFinal,
     detail: `Market close đã gửi nhưng sàn XÁC NHẬN còn dư qty=${verify.residualBaseQty} (vượt dung sai ${params.quantityTolerance}, có thể là khớp lệnh một phần) — vị thế VẪN còn expose, cần người can thiệp thủ công NGAY LẬP TỨC.`,
     closeError: `residual qty ${verify.residualBaseQty} sau market close, vượt dung sai ${params.quantityTolerance}`,
     residualBaseQty: verify.residualBaseQty,
@@ -1614,4 +1661,228 @@ export interface FreshnessEvidence {
 export function isFreshnessEvidenceStale(evidence: FreshnessEvidence | null, nowMs: number): boolean {
   if (evidence === null) return true; // never captured yet — fail closed, not "assume fresh".
   return nowMs - evidence.capturedAtMs > evidence.maxAgeMs;
+}
+
+export type MarketEntryOutcome = 'CONFIRMED_FILLED' | 'CONFIRMED_NOT_FILLED' | 'AMBIGUOUS';
+
+export function buildDeterministicEntryClientOrderId(symbol: string, side: PositionSide, entryTimestamp: number): string {
+  return `r2b-${symbol}-${side === 'LONG' ? 'L' : 'S'}-${entryTimestamp}`;
+}
+
+export function classifySubmissionError(err: Error): { kind: 'CONFIRMED_NOT_SUBMITTED' | 'DELIVERY_UNKNOWN'; detail: string } {
+  if (err instanceof OrderSubmissionError) {
+    return { kind: err.deliveryStatus, detail: err.message };
+  }
+  return { kind: 'DELIVERY_UNKNOWN', detail: err.message };
+}
+
+export type MarketSubmissionAttempt =
+  | { kind: 'CONFIRMED_SUBMITTED'; orderId: number; status: string; executedQty: unknown; avgPrice: unknown }
+  | { kind: 'CONFIRMED_NOT_SUBMITTED'; detail: string }
+  | { kind: 'DELIVERY_UNKNOWN'; detail: string };
+
+export type FillDeterminationResult = 'FILLED' | 'NOT_FILLED' | 'INCONCLUSIVE';
+
+const TERMINAL_NOT_FILLED_STATUSES = ['REJECTED', 'CANCELED', 'EXPIRED'];
+
+export function determineFillFromStatus(status: string, executedQtyRaw: unknown): FillDeterminationResult {
+  const qty = Number(executedQtyRaw);
+  const validQty = Number.isFinite(qty) && qty >= 0;
+  if (!validQty) return 'INCONCLUSIVE';
+  if ((status === 'FILLED' || status === 'PARTIALLY_FILLED') && qty > 0) return 'FILLED';
+  if (TERMINAL_NOT_FILLED_STATUSES.includes(status) && qty === 0) return 'NOT_FILLED';
+  return 'INCONCLUSIVE';
+}
+
+export type OrderLookupResult =
+  | { status: 'FOUND'; orderId: number; orderStatus: string; executedQty: unknown; avgPrice: unknown }
+  | { status: 'NOT_FOUND' }
+  | { status: 'LOOKUP_ERROR'; detail: string };
+
+export type PositionRiskLookupResult = { status: 'CONFIRMED_EXPOSURE'; qty: number } | { status: 'CONFIRMED_NO_EXPOSURE' } | { status: 'LOOKUP_ERROR'; detail: string };
+
+export interface MarketEntryCorroboration {
+  orderLookup: OrderLookupResult;
+  positionRisk: PositionRiskLookupResult;
+}
+
+export interface MarketEntryOutcomeResult {
+  outcome: MarketEntryOutcome;
+  detail: string;
+  executedQty: number | null;
+  avgPrice: unknown;
+  orderId: number | null;
+}
+
+export function classifyMarketEntryOutcome(attempt: MarketSubmissionAttempt, corroboration: MarketEntryCorroboration | null): MarketEntryOutcomeResult {
+  if (attempt.kind === 'CONFIRMED_NOT_SUBMITTED') {
+    return { outcome: 'CONFIRMED_NOT_FILLED', detail: `lệnh CHƯA từng được gửi tới sàn (xác nhận): ${attempt.detail}`, executedQty: 0, avgPrice: null, orderId: null };
+  }
+
+  if (attempt.kind === 'CONFIRMED_SUBMITTED') {
+    const det = determineFillFromStatus(attempt.status, attempt.executedQty);
+    if (det === 'FILLED') {
+      const qty = Number(attempt.executedQty);
+      return { outcome: 'CONFIRMED_FILLED', detail: `phản hồi trực tiếp từ sàn xác nhận status=${attempt.status} executedQty=${qty}`, executedQty: qty, avgPrice: attempt.avgPrice, orderId: attempt.orderId };
+    }
+    if (det === 'NOT_FILLED') {
+      return { outcome: 'CONFIRMED_NOT_FILLED', detail: `phản hồi trực tiếp từ sàn: status=${attempt.status} là terminal và executedQty=0`, executedQty: 0, avgPrice: null, orderId: attempt.orderId };
+    }
+  }
+
+  if (corroboration === null) {
+    const attemptDetail = attempt.kind === 'CONFIRMED_SUBMITTED' ? `status=${attempt.status} chưa terminal, executedQty=${JSON.stringify(attempt.executedQty)}` : attempt.detail;
+    const knownQty = attempt.kind === 'CONFIRMED_SUBMITTED' ? Number(attempt.executedQty) : NaN;
+    return {
+      outcome: 'AMBIGUOUS',
+      detail: `bằng chứng gửi lệnh không đủ để phân loại (${attemptDetail}) và chưa có kết quả tra cứu bổ sung`,
+      executedQty: attempt.kind === 'CONFIRMED_SUBMITTED' && Number.isFinite(knownQty) ? knownQty : null,
+      avgPrice: attempt.kind === 'CONFIRMED_SUBMITTED' ? attempt.avgPrice : null,
+      orderId: attempt.kind === 'CONFIRMED_SUBMITTED' ? attempt.orderId : null,
+    };
+  }
+
+  const { orderLookup, positionRisk } = corroboration;
+  const orderLookupDet: FillDeterminationResult = orderLookup.status === 'FOUND' ? determineFillFromStatus(orderLookup.orderStatus, orderLookup.executedQty) : 'INCONCLUSIVE';
+  const orderLookupTerminal = orderLookup.status === 'FOUND' && orderLookupDet !== 'INCONCLUSIVE';
+  const positionRiskDet: FillDeterminationResult = positionRisk.status === 'CONFIRMED_EXPOSURE' ? 'FILLED' : positionRisk.status === 'CONFIRMED_NO_EXPOSURE' ? 'NOT_FILLED' : 'INCONCLUSIVE';
+  const positionRiskTerminal = positionRisk.status !== 'LOOKUP_ERROR';
+
+  if (orderLookupTerminal && positionRiskTerminal && orderLookupDet === positionRiskDet && orderLookup.status === 'FOUND') {
+    if (orderLookupDet === 'FILLED') {
+      const qty = Number(orderLookup.executedQty);
+      return {
+        outcome: 'CONFIRMED_FILLED',
+        detail: `tra cứu lại (clientOrderId + getPositionRisk) đồng thuận ĐÃ KHỚP: orderStatus=${orderLookup.orderStatus}, executedQty=${qty}, positionRisk xác nhận exposure`,
+        executedQty: qty,
+        avgPrice: orderLookup.avgPrice,
+        orderId: orderLookup.orderId,
+      };
+    }
+    return {
+      outcome: 'CONFIRMED_NOT_FILLED',
+      detail: `tra cứu lại (clientOrderId + getPositionRisk) đồng thuận KHÔNG khớp: orderStatus=${orderLookup.orderStatus}, positionRisk xác nhận không có exposure`,
+      executedQty: 0,
+      avgPrice: null,
+      orderId: orderLookup.orderId,
+    };
+  }
+
+  const knownFromOrderLookupQty = orderLookup.status === 'FOUND' ? Number(orderLookup.executedQty) : NaN;
+  return {
+    outcome: 'AMBIGUOUS',
+    detail: `bằng chứng tra cứu không đủ hoặc mâu thuẫn (không polling thêm): orderLookup=${JSON.stringify(orderLookup)}, positionRisk=${JSON.stringify(positionRisk)}`,
+    executedQty: orderLookup.status === 'FOUND' && Number.isFinite(knownFromOrderLookupQty) ? knownFromOrderLookupQty : null,
+    avgPrice: orderLookup.status === 'FOUND' ? orderLookup.avgPrice : null,
+    orderId: orderLookup.status === 'FOUND' ? orderLookup.orderId : null,
+  };
+}
+
+async function lookupOrderByClientOrderId(executor: Pick<BinanceOrderExecutor, 'getOrderByClientOrderId'>, symbol: string, clientOrderId: string): Promise<OrderLookupResult> {
+  try {
+    const found = await executor.getOrderByClientOrderId(symbol, clientOrderId);
+    if (found === null) return { status: 'NOT_FOUND' };
+    return { status: 'FOUND', orderId: found.orderId, orderStatus: found.status, executedQty: found.executedQty, avgPrice: found.avgPrice };
+  } catch (err) {
+    return { status: 'LOOKUP_ERROR', detail: (err as Error).message };
+  }
+}
+
+async function lookupPositionRiskExposure(executor: Pick<BinanceOrderExecutor, 'getPositionRisk'>, symbol: string, side: PositionSide): Promise<PositionRiskLookupResult> {
+  try {
+    const raw = await executor.getPositionRisk(symbol);
+    const entries = raw as Array<{ symbol?: string; positionAmt?: string }> | null;
+    if (!Array.isArray(entries)) return { status: 'LOOKUP_ERROR', detail: `getPositionRisk trả về không phải mảng: ${JSON.stringify(raw)}` };
+    const amt = Number(entries.find((e) => e.symbol === symbol)?.positionAmt ?? '0');
+    if (!Number.isFinite(amt)) return { status: 'LOOKUP_ERROR', detail: `positionAmt không phải số hữu hạn: ${JSON.stringify(entries)}` };
+    const matchesSide = side === 'LONG' ? amt > 0 : amt < 0;
+    return matchesSide ? { status: 'CONFIRMED_EXPOSURE', qty: Math.abs(amt) } : { status: 'CONFIRMED_NO_EXPOSURE' };
+  } catch (err) {
+    return { status: 'LOOKUP_ERROR', detail: (err as Error).message };
+  }
+}
+
+export async function submitAndClassifyMarketEntry(params: {
+  executor: Pick<BinanceOrderExecutor, 'openMarketPosition' | 'getOrderByClientOrderId' | 'getPositionRisk'>;
+  symbol: string;
+  side: PositionSide;
+  quantity: number;
+  referencePrice: number;
+  clientOrderId: string;
+}): Promise<MarketEntryOutcomeResult> {
+  let attempt: MarketSubmissionAttempt;
+  try {
+    const result = await params.executor.openMarketPosition(params.symbol, params.side, params.quantity, params.referencePrice, params.clientOrderId);
+    if ('dryRun' in result) {
+      return { outcome: 'CONFIRMED_NOT_FILLED', detail: 'dryRun — không có lệnh thật nào được gửi', executedQty: 0, avgPrice: null, orderId: null };
+    }
+    const raw = result.raw as { executedQty?: string | number; avgPrice?: unknown };
+    attempt = { kind: 'CONFIRMED_SUBMITTED', orderId: result.orderId, status: result.status, executedQty: raw.executedQty, avgPrice: raw.avgPrice };
+  } catch (err) {
+    const classified = classifySubmissionError(err as Error);
+    attempt = { kind: classified.kind, detail: classified.detail };
+  }
+
+  const needsCorroboration = attempt.kind === 'DELIVERY_UNKNOWN' || (attempt.kind === 'CONFIRMED_SUBMITTED' && determineFillFromStatus(attempt.status, attempt.executedQty) === 'INCONCLUSIVE');
+  if (!needsCorroboration) {
+    return classifyMarketEntryOutcome(attempt, null);
+  }
+
+  const orderLookup = await lookupOrderByClientOrderId(params.executor, params.symbol, params.clientOrderId);
+  const positionRisk = await lookupPositionRiskExposure(params.executor, params.symbol, params.side);
+  return classifyMarketEntryOutcome(attempt, { orderLookup, positionRisk });
+}
+
+export type EstablishProtectiveStopLossResult =
+  | { status: 'PROTECTED'; slAlgoId: number; detail: string }
+  | { status: 'PROTECTION_DEGRADED'; firstAttemptReason: string; recovery: MissingSlRecoveryOutcome };
+
+export async function establishProtectiveStopLoss(params: {
+  executor: Pick<BinanceOrderExecutor, 'placeStopMarket' | 'getOpenAlgoOrders' | 'closePositionMarket' | 'getPositionRisk'>;
+  symbol: string;
+  side: PositionSide;
+  slPrice: number;
+  quantity: number;
+  quantityTolerance: number;
+  policy: MissingProtectiveSlFailsafePolicy;
+}): Promise<EstablishProtectiveStopLossResult> {
+  let firstAttemptReason: string;
+  try {
+    const placed = await params.executor.placeStopMarket(params.symbol, params.side, params.slPrice, params.quantity);
+    if ('dryRun' in placed) {
+      return { status: 'PROTECTED', slAlgoId: -1, detail: 'dryRun — lệnh SL mô phỏng (log only), không có algoId thật để xác minh.' };
+    }
+    const freshOrders = await params.executor.getOpenAlgoOrders(params.symbol);
+    const verification = verifyProtectiveSlOrder({
+      persistedSlAlgoId: placed.algoId,
+      expectedSide: params.side,
+      expectedQty: params.quantity,
+      quantityTolerance: params.quantityTolerance,
+      openAlgoOrders: freshOrders,
+      expectedSymbol: params.symbol,
+      expectedTriggerPrice: params.slPrice,
+      positionMode: DEFAULT_POSITION_MODE,
+      expectedOrderTypes: PROTECTIVE_SL_ORDER_TYPES,
+    });
+    if (verification.status === 'VERIFIED') {
+      return { status: 'PROTECTED', slAlgoId: placed.algoId, detail: `Đặt SL thành công, xác minh lại từ sàn OK (algoId=${placed.algoId}).` };
+    }
+    firstAttemptReason = `verify:${verification.status}:${verification.detail}`;
+  } catch (err) {
+    firstAttemptReason = `place:${(err as Error).message}`;
+  }
+
+  const recovery = await recoverMissingProtectiveSl({
+    executor: params.executor,
+    symbol: params.symbol,
+    expectedSide: params.side,
+    expectedQty: params.quantity,
+    quantityTolerance: params.quantityTolerance,
+    slTriggerPrice: params.slPrice,
+    policy: params.policy,
+  });
+  if (recovery.status === 'RECOVERED' || recovery.status === 'ALREADY_RECOVERED_ON_RESTART') {
+    return { status: 'PROTECTED', slAlgoId: recovery.slAlgoId, detail: `SL ban đầu thất bại (${firstAttemptReason}) nhưng phục hồi ngay lập tức thành công: ${recovery.detail}` };
+  }
+  return { status: 'PROTECTION_DEGRADED', firstAttemptReason, recovery };
 }

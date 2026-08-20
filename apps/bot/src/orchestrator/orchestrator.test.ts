@@ -1261,6 +1261,32 @@ describe('processCandle — same-side duplicate-position guard (TICKET-152)', ()
     expect(result.symbolState.openPositions).toHaveLength(2);
   });
 
+  it('TICKET-LIVE-R2B Checkpoint 2: maxConcurrentPositionsPerSymbol=1 (the LIVE one-way cap) — 1 LONG open + SHORT candidate -> BLOCK (opposite side, never nets/flips)', async () => {
+    const existingPos = openPosition(farAwayLongInput);
+    const state = stateWith({ position: existingPos });
+    const fixture = fullOpenFlowFixtureShort();
+    const config: OrchestratorConfig = { ...baseConfig, maxConcurrentPositionsPerSymbol: 1, riskPoolMaxPct: 0.5 };
+
+    const result = await processCandle(baseInput({ ...fixture, allOpenPositionsRisk: [{ id: 'BTCUSDT', actualRiskDollar: 10 }] }), state, config);
+
+    expect(result.events.some((e) => e.type === 'OPEN')).toBe(false);
+    expect(result.symbolState.openPositions).toHaveLength(1);
+    expect(result.symbolState.openPositions[0].position.side).toBe('LONG');
+  });
+
+  it('TICKET-LIVE-R2B Checkpoint 2: maxConcurrentPositionsPerSymbol=1 — 1 SHORT open + LONG candidate -> BLOCK (mirrored)', async () => {
+    const existingPos = openPosition(farAwayShortInput);
+    const state = stateWith({ position: existingPos });
+    const fixture = fullOpenFlowFixtureLong();
+    const config: OrchestratorConfig = { ...baseConfig, maxConcurrentPositionsPerSymbol: 1, riskPoolMaxPct: 0.5 };
+
+    const result = await processCandle(baseInput({ ...fixture, allOpenPositionsRisk: [{ id: 'BTCUSDT', actualRiskDollar: 10 }] }), state, config);
+
+    expect(result.events.some((e) => e.type === 'OPEN')).toBe(false);
+    expect(result.symbolState.openPositions).toHaveLength(1);
+    expect(result.symbolState.openPositions[0].position.side).toBe('SHORT');
+  });
+
   it('2 same-side (LONG) positions already open (leftover pre-fix state) + a 3rd LONG candidate -> BLOCK', async () => {
     const posA = openPosition(farAwayLongInput);
     const posB = openPosition({ ...farAwayLongInput, entryPrice: 60, slPrice: 59 });

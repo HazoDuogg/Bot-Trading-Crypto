@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { BinanceOrderExecutor, initializeLeverageForSymbols } from './binanceOrderExecutor.js';
+import { BinanceOrderExecutor, initializeLeverageForSymbols, OrderSubmissionError } from './binanceOrderExecutor.js';
 
 const CREDS = { apiKey: 'test-key', apiSecret: 'test-secret', baseUrl: 'https://testnet.example' };
 const TEST_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
@@ -255,6 +255,79 @@ describe('BinanceOrderExecutor — live mode (dryRun=false)', () => {
     expect((init.headers as Record<string, string>)['X-MBX-APIKEY']).toBe('test-key');
   });
 
+  it('openMarketPosition rejected with a clean 4xx (parseable JSON error body) throws OrderSubmissionError with deliveryStatus=CONFIRMED_NOT_SUBMITTED', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(exchangeInfoResponse()).mockResolvedValue(jsonResponse(400, { code: -2019, msg: 'Margin is insufficient.' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await loadIdentityFilters(exec, fetchFn);
+    let caught: unknown;
+    try {
+      await exec.openMarketPosition('BTCUSDT', 'LONG', 0.01, 50000);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(OrderSubmissionError);
+    expect((caught as OrderSubmissionError).deliveryStatus).toBe('CONFIRMED_NOT_SUBMITTED');
+    expect((caught as OrderSubmissionError).httpStatus).toBe(400);
+  });
+
+  it('openMarketPosition rejected with an HTTP 5xx throws OrderSubmissionError with deliveryStatus=DELIVERY_UNKNOWN, never CONFIRMED_NOT_SUBMITTED', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(exchangeInfoResponse()).mockResolvedValue(jsonResponse(500, '<html>Internal Server Error</html>'));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await loadIdentityFilters(exec, fetchFn);
+    let caught: unknown;
+    try {
+      await exec.openMarketPosition('BTCUSDT', 'LONG', 0.01, 50000);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(OrderSubmissionError);
+    expect((caught as OrderSubmissionError).deliveryStatus).toBe('DELIVERY_UNKNOWN');
+    expect((caught as OrderSubmissionError).httpStatus).toBe(500);
+  });
+
+  it('openMarketPosition rejected with a 4xx whose body is not parseable JSON throws OrderSubmissionError with deliveryStatus=DELIVERY_UNKNOWN', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(exchangeInfoResponse())
+      .mockResolvedValue({ ok: false, status: 418, statusText: 'x', headers: { get: () => null }, json: async () => ({}), text: async () => 'not json at all' } as unknown as Response);
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await loadIdentityFilters(exec, fetchFn);
+    let caught: unknown;
+    try {
+      await exec.openMarketPosition('BTCUSDT', 'LONG', 0.01, 50000);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(OrderSubmissionError);
+    expect((caught as OrderSubmissionError).deliveryStatus).toBe('DELIVERY_UNKNOWN');
+  });
+
+  it('a pre-send validation failure (below minQty) throws OrderSubmissionError with deliveryStatus=CONFIRMED_NOT_SUBMITTED without ever calling fetchFn for the order', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(
+      jsonResponse(200, {
+        symbols: TEST_SYMBOLS.map((symbol) => ({
+          symbol,
+          filters: [
+            { filterType: 'LOT_SIZE', stepSize: '0.001', minQty: '1', maxQty: '9000000' },
+            { filterType: 'PRICE_FILTER', tickSize: '0.01', minPrice: '0', maxPrice: '9000000' },
+            { filterType: 'MIN_NOTIONAL', notional: '0' },
+          ],
+        })),
+      }),
+    );
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await loadIdentityFilters(exec, fetchFn);
+    let caught: unknown;
+    try {
+      await exec.openMarketPosition('BTCUSDT', 'LONG', 0.0001, 50000);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(OrderSubmissionError);
+    expect((caught as OrderSubmissionError).deliveryStatus).toBe('CONFIRMED_NOT_SUBMITTED');
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
   it('placeStopMarket for a SHORT position uses side=BUY + reduceOnly=true, via /fapi/v1/algoOrder (TICKET-077 1.3 — bắt buộc từ 09/12/2025)', async () => {
     const fetchFn = vi.fn().mockResolvedValueOnce(exchangeInfoResponse()).mockResolvedValue(jsonResponse(200, { algoId: 7, algoStatus: 'NEW' }));
     const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
@@ -348,30 +421,17 @@ describe('BinanceOrderExecutor — live mode (dryRun=false)', () => {
     expect(onOrderFailure).toHaveBeenCalledTimes(1);
   });
 
-  it('retries a mutating call on a pre-response network error, bounded', async () => {
-    const fetchFn = vi
-      .fn()
-      .mockResolvedValueOnce(exchangeInfoResponse())
-      .mockRejectedValueOnce(new TypeError('fetch failed'))
-      .mockRejectedValueOnce(new TypeError('fetch failed'))
-      .mockResolvedValueOnce(jsonResponse(200, { orderId: 1, status: 'FILLED' }));
-    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
-    await loadIdentityFilters(exec, fetchFn);
-    const result = await exec.openMarketPosition('BTCUSDT', 'LONG', 0.01, 50000);
-    expect(result).toMatchObject({ orderId: 1 });
-    expect(fetchFn).toHaveBeenCalledTimes(3);
-  });
-
-  it('gives up after MAX_MUTATING_RETRIES consecutive pre-response network errors, and calls onOrderFailure', async () => {
+  it('a TypeError (pre-response network error) on openMarketPosition results in exactly 1 fetch call, no retry', async () => {
     const fetchFn = vi.fn().mockResolvedValueOnce(exchangeInfoResponse()).mockRejectedValue(new TypeError('fetch failed'));
     const onOrderFailure = vi.fn();
     const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn, onOrderFailure });
     await loadIdentityFilters(exec, fetchFn);
     await expect(exec.openMarketPosition('BTCUSDT', 'LONG', 0.01, 50000)).rejects.toThrow(/lỗi mạng/);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
     expect(onOrderFailure).toHaveBeenCalledTimes(1);
   });
 
-  it('treats a timeout (AbortError) as ambiguous status and does NOT retry', async () => {
+  it('a timeout (AbortError) on openMarketPosition results in exactly 1 fetch call, no retry', async () => {
     const abortErr = new Error('The operation was aborted');
     abortErr.name = 'AbortError';
     const fetchFn = vi.fn().mockResolvedValueOnce(exchangeInfoResponse()).mockRejectedValue(abortErr);
@@ -379,7 +439,93 @@ describe('BinanceOrderExecutor — live mode (dryRun=false)', () => {
     const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn, onOrderFailure });
     await loadIdentityFilters(exec, fetchFn);
     await expect(exec.openMarketPosition('BTCUSDT', 'LONG', 0.01, 50000)).rejects.toThrow(/TIMEOUT.*KHÔNG XÁC ĐỊNH/);
-    expect(fetchFn).toHaveBeenCalledTimes(1); // no retry on ambiguous timeout
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('a connection-reset-style error (ECONNRESET) on openMarketPosition results in exactly 1 fetch call, no retry', async () => {
+    const resetErr = new Error('socket hang up ECONNRESET');
+    const fetchFn = vi.fn().mockResolvedValueOnce(exchangeInfoResponse()).mockRejectedValue(resetErr);
+    const onOrderFailure = vi.fn();
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn, onOrderFailure });
+    await loadIdentityFilters(exec, fetchFn);
+    await expect(exec.openMarketPosition('BTCUSDT', 'LONG', 0.01, 50000)).rejects.toThrow(/lỗi mạng/);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('an HTTP 5xx response on openMarketPosition results in exactly 1 fetch call, no retry, classified DELIVERY_UNKNOWN', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(exchangeInfoResponse()).mockResolvedValue(jsonResponse(500, { code: -1000, msg: 'server error' }));
+    const onOrderFailure = vi.fn();
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn, onOrderFailure });
+    await loadIdentityFilters(exec, fetchFn);
+    let caught: unknown;
+    try {
+      await exec.openMarketPosition('BTCUSDT', 'LONG', 0.01, 50000);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(OrderSubmissionError);
+    expect((caught as OrderSubmissionError).deliveryStatus).toBe('DELIVERY_UNKNOWN');
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('a generic unknown thrown error on openMarketPosition results in exactly 1 fetch call, no retry', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(exchangeInfoResponse()).mockRejectedValue(new Error('something odd'));
+    const onOrderFailure = vi.fn();
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn, onOrderFailure });
+    await loadIdentityFilters(exec, fetchFn);
+    await expect(exec.openMarketPosition('BTCUSDT', 'LONG', 0.01, 50000)).rejects.toThrow(/lỗi mạng/);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('a TypeError on placeStopMarket results in exactly 1 fetch call, no retry', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(exchangeInfoResponse()).mockRejectedValue(new TypeError('fetch failed'));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await loadIdentityFilters(exec, fetchFn);
+    await expect(exec.placeStopMarket('BTCUSDT', 'LONG', 49000, 0.01)).rejects.toThrow(OrderSubmissionError);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('an allowlisted terminal-rejection 4xx code classifies CONFIRMED_NOT_SUBMITTED', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(exchangeInfoResponse()).mockResolvedValue(jsonResponse(400, { code: -2019, msg: 'Margin is insufficient' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await loadIdentityFilters(exec, fetchFn);
+    let caught: unknown;
+    try {
+      await exec.openMarketPosition('BTCUSDT', 'LONG', 0.01, 50000);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(OrderSubmissionError);
+    expect((caught as OrderSubmissionError).deliveryStatus).toBe('CONFIRMED_NOT_SUBMITTED');
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('an unknown/non-allowlisted 4xx code classifies DELIVERY_UNKNOWN, not CONFIRMED_NOT_SUBMITTED', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(exchangeInfoResponse()).mockResolvedValue(jsonResponse(400, { code: -2010, msg: 'insufficient balance' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await loadIdentityFilters(exec, fetchFn);
+    let caught: unknown;
+    try {
+      await exec.openMarketPosition('BTCUSDT', 'LONG', 0.01, 50000);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(OrderSubmissionError);
+    expect((caught as OrderSubmissionError).deliveryStatus).toBe('DELIVERY_UNKNOWN');
+  });
+
+  it('a malformed/unparseable 4xx error body classifies DELIVERY_UNKNOWN', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(exchangeInfoResponse()).mockResolvedValue({ ok: false, status: 400, statusText: 'Bad Request', text: async () => 'not json at all', headers: { get: () => null } });
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await loadIdentityFilters(exec, fetchFn);
+    let caught: unknown;
+    try {
+      await exec.openMarketPosition('BTCUSDT', 'LONG', 0.01, 50000);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(OrderSubmissionError);
+    expect((caught as OrderSubmissionError).deliveryStatus).toBe('DELIVERY_UNKNOWN');
   });
 
   it('updateStopOrder cancels the old algo order (via cancelAlgoOrder/algoId) then places a new one', async () => {
@@ -592,4 +738,45 @@ describe('BinanceOrderExecutor — TICKET-099 Phần A: real LOT_SIZE/PRICE_FILT
     const [url] = fetchFn.mock.calls[0];
     expect(url).toContain('quantity=0'); // rounds down to 0 (below stepSize granularity) but does not throw
   });
+});
+
+describe('BinanceOrderExecutor — TICKET-LIVE-R2B: newClientOrderId + getOrderByClientOrderId', () => {
+  it('openMarketPosition threads newClientOrderId into the signed request when supplied', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(exchangeInfoResponse()).mockResolvedValue(jsonResponse(200, { orderId: 1, status: 'FILLED', executedQty: '0.01' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await loadIdentityFilters(exec, fetchFn);
+    await exec.openMarketPosition('BTCUSDT', 'LONG', 0.01, 50000, 'r2b-BTCUSDT-L-123');
+    const [url] = fetchFn.mock.calls[0];
+    expect(url).toContain('newClientOrderId=r2b-BTCUSDT-L-123');
+  });
+
+  it('openMarketPosition omits newClientOrderId entirely when not supplied', async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(exchangeInfoResponse()).mockResolvedValue(jsonResponse(200, { orderId: 1, status: 'FILLED' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await loadIdentityFilters(exec, fetchFn);
+    await exec.openMarketPosition('BTCUSDT', 'LONG', 0.01, 50000);
+    const [url] = fetchFn.mock.calls[0];
+    expect(url).not.toContain('newClientOrderId');
+  });
+
+  it('getOrderByClientOrderId returns the parsed order on a normal 200 response', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(200, { orderId: 99, status: 'FILLED', executedQty: '0.5', avgPrice: '123.45' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    const result = await exec.getOrderByClientOrderId('BTCUSDT', 'r2b-BTCUSDT-L-123');
+    expect(result).toMatchObject({ orderId: 99, status: 'FILLED', executedQty: '0.5', avgPrice: '123.45' });
+    const [url] = fetchFn.mock.calls[0];
+    expect(url).toContain('origClientOrderId=r2b-BTCUSDT-L-123');
+  });
+
+  it('getOrderByClientOrderId returns null on a confirmed -2013 "order does not exist" response — never throws', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(400, { code: -2013, msg: 'Order does not exist.' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await expect(exec.getOrderByClientOrderId('BTCUSDT', 'r2b-BTCUSDT-L-999')).resolves.toBeNull();
+  });
+
+  it('getOrderByClientOrderId throws on any other HTTP failure (never confused with -2013)', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(400, { code: -1102, msg: 'Mandatory parameter missing' }));
+    const exec = new BinanceOrderExecutor({ credentials: CREDS, dryRun: false, fetchFn });
+    await expect(exec.getOrderByClientOrderId('BTCUSDT', 'r2b-BTCUSDT-L-999')).rejects.toThrow(/HTTP 400/);
+  }, 20_000);
 });

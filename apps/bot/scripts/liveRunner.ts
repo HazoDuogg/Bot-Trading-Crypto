@@ -6,7 +6,6 @@ import { assessCandleFreshnessForSymbol, hasAnyStaleRequiredTimeframe } from '..
 import { BinanceOrderExecutor, initializeLeverageForSymbols, type PositionSide } from '../dist/live/binanceOrderExecutor.js';
 import { StateReconciler, resolveAccountBalanceAfterReconcile, type InternalStateSnapshot } from '../dist/live/stateReconciler.js';
 import {
-  resolveCanonicalOpenQty,
   computeQuantityTolerance,
   cancelAlgoOrderIdempotent,
   reconcileExternalPositionClose,
@@ -20,7 +19,6 @@ import {
   verifyProtectiveTpOrder,
   DEFAULT_POSITION_MODE,
   PROTECTIVE_SL_ORDER_TYPES,
-  retryReconcileUnreconciledFillFromPositionRisk,
   recoverMissingProtectiveSl,
   DEFAULT_MISSING_PROTECTIVE_SL_FAILSAFE_POLICY,
   checkMergedPositionAllocation,
@@ -29,14 +27,25 @@ import {
   captureCoherentReconciliationSnapshotWithRetry,
   runProtectiveOrderMonitorSweep,
   decideSideRecovery,
-  type QtySource,
+  buildDeterministicEntryClientOrderId,
+  submitAndClassifyMarketEntry,
+  establishProtectiveStopLoss,
+  isSlGeometryValidForFill,
+  readPositionRiskForSide,
+  quarantineRecordToRiskExposure,
   type LiveStateFile,
   type AccountSyncState,
   type MissingProtectiveSlFailsafePolicy,
   type ProtectiveMonitorPositionInput,
   type FreshnessEvidence,
   type CoherentReconciliationSnapshotResult,
+  type PendingEntryQuarantineRecord,
+  type EstablishProtectiveStopLossResult,
+  type ReconcileExecutedOpenStateResult,
+  type MissingSlRecoveryOutcome,
+  type QuarantineExposureBasis,
 } from '../dist/live/liveStateSync.js';
+import { parseLiveRiskPerTradePct, computeRequestedRiskUsd } from '../dist/live/liveRiskConfig.js';
 import {
   syncBalanceForTelegramEvent,
   parseExchangeBalanceSnapshot,
@@ -130,7 +139,7 @@ const CONFIG: OrchestratorConfig = {
   momentumFilterConfig: DEFAULT_MOMENTUM_FILTER_CONFIG,
   neutralTransitionGateConfig: DEFAULT_NEUTRAL_TRANSITION_GATE_CONFIG,
   planAutoSelectionConfig: { ...DEFAULT_PLAN_AUTO_SELECTION_CONFIG, planAutoSelectionEnabled: true },
-  maxConcurrentPositionsPerSymbol: 2,
+  maxConcurrentPositionsPerSymbol: 1,
   momentumDirectEnabled: true,
   momentumDirectThreshold: 0.5,
   momentumDirectMaxAtrPercentile: 100,
@@ -157,6 +166,8 @@ const CONFIG: OrchestratorConfig = {
   momentumContextDecisionMatrixV2Enabled: true,
 };
 
+const LIVE_RISK_PER_TRADE_PCT = parseLiveRiskPerTradePct(process.env.LIVE_RISK_PER_TRADE_PCT, CONFIG.riskPoolMaxPct);
+
 const WINDOW_5M = 320;
 const WINDOW_15M = 325;
 const WINDOW_1H = 40;
@@ -169,17 +180,27 @@ const WINDOW_1H_MOMENTUM = 500;
  * by the caller to reconcile the just-opened ManagedPositionState against actual execution instead of
  * planned values. `null` in dryRun (nothing was actually executed, nothing to reconcile).
  */
-interface OpenFillInfo {
-  canonicalQty: number;
-  qtySource: QtySource;
-  rawAvgPrice: unknown;
-}
-
 /** Per-open-position bookkeeping needed to keep the exchange's real algo orders in sync with the simulated ManagedPositionState. */
 interface LiveOrderIds {
   slAlgoId: number | null; // null only in dryRun (no real algoId to track)
   tpAlgoIds: number[]; // one per fixed-price TP tier (TP1/TP2/COUNTER_TREND_TP) still pending on the exchange
 }
+
+type OpenEventOutcome =
+  | { kind: 'DRY_RUN' }
+  | { kind: 'NOT_FILLED'; detail: string }
+  | { kind: 'AMBIGUOUS'; detail: string; clientOrderId: string; orderId: number | null; executedQty: number | null; avgPrice: unknown }
+  | {
+      kind: 'FILLED';
+      clientOrderId: string;
+      orderId: number | null;
+      executedQty: number;
+      avgPrice: unknown;
+      reconciled: ReconcileExecutedOpenStateResult;
+      geometryValid: boolean;
+      protection: EstablishProtectiveStopLossResult;
+      tpAlgoIds: number[];
+    };
 
 interface RunnerSymbolState {
   symbolState: SymbolState;
@@ -341,19 +362,19 @@ async function main(): Promise<void> {
   }
 
   const runnerState: Record<string, RunnerSymbolState> = {};
-  // TICKET-G1R Checkpoint C — symbols quarantined at startup (PENDING_RECONCILIATION): checked in the
-  // tick loop below (same "freeze this symbol, never auto-resolve" pattern as reconcileGuard/
-  // entriesBlockedDueToUnreconciledFillBySymbol) and ALSO grown at runtime whenever the periodic
-  // stateReconciler later observes POSITION_MISSING_INTERNALLY (see reconciler.onMismatch below) —
-  // permanent for the life of this process either way, same rationale as the other permanent blocks.
   const entriesBlockedDueToRestartQuarantineBySymbol = new Set<string>();
-  // TICKET-G1R Checkpoint D (G1-F04) — conservative risk-ledger entries for every QUARANTINED side
-  // found at startup: NEVER risk=0 just because local state doesn't cover it. When the persisted file
-  // (loaded above, before decideSideRecovery/recoverSymbolState ran) still has a last-known-good
-  // position for that symbol+side, its entry/SL/qty is used as a conservative basis (last-known state,
-  // per the ticket's own suggested fallback). When there's no persisted record at all (a pure
-  // exchange-only ghost position), `basis: null` — genuinely unquantifiable, never guessed at.
+  const pendingEntryQuarantinesBySymbol: Record<string, PendingEntryQuarantineRecord[]> =
+    persistedLiveState.status === 'OK' ? { ...(persistedLiveState.file.pendingEntryQuarantines ?? {}) } : {};
   const quarantinedUnknownExposures: UnknownExposureForRisk[] = [];
+  for (const [symbol, records] of Object.entries(pendingEntryQuarantinesBySymbol)) {
+    if (records.length === 0) continue;
+    entriesBlockedDueToRestartQuarantineBySymbol.add(symbol);
+    console.error(`[PENDING_ENTRY_QUARANTINE_RESTART] ${symbol}: ${records.length} AMBIGUOUS entry record(s) từ phiên trước chưa được giải quyết — chặn mở lệnh mới trên ${symbol} cho tới khi kiểm tra thủ công.`);
+    telegramQueue.enqueue(`⚠️ [PENDING_RECONCILIATION] ${symbol}: có ${records.length} lệnh MARKET AMBIGUOUS từ phiên trước chưa giải quyết — ĐÃ CHẶN mở lệnh mới trên ${symbol}.`);
+    for (const [idx, record] of records.entries()) {
+      quarantinedUnknownExposures.push(quarantineRecordToRiskExposure(record, idx));
+    }
+  }
   const restartRecoverySummaryLines: string[] = [];
   for (const outcome of restartRecovery.symbols) {
     runnerState[outcome.symbol] = { symbolState: outcome.symbolState, lastProcessedCandleTimestamp: null, orderIds: new Map(outcome.orderIds) };
@@ -397,8 +418,10 @@ async function main(): Promise<void> {
     );
   }
 
+  let livePersistFailureBlockingAdmission = false;
+
   /** TICKET-G1R Checkpoint C — persists ALL 4 symbols' current SymbolState + orderIds in one atomic write. Never throws — a persist failure is logged loudly but must not crash the live loop (same "đã bắt, KHÔNG crash" convention as every other catch in this file). */
-  function persistLiveState(): void {
+  function persistLiveState(): boolean {
     try {
       const file: LiveStateFile = {
         schemaVersion: LIVE_STATE_SCHEMA_VERSION,
@@ -411,13 +434,54 @@ async function main(): Promise<void> {
             { symbolState: runnerState[s].symbolState, orderIds: Array.from(runnerState[s].orderIds.entries()), regimeStateCandleTimestamp: runnerState[s].lastProcessedCandleTimestamp },
           ]),
         ),
+        pendingEntryQuarantines: pendingEntryQuarantinesBySymbol,
       };
       writeLiveStateFileAtomic(LIVE_STATE_FILE_PATH, file);
+      livePersistFailureBlockingAdmission = false;
+      return true;
     } catch (err) {
+      livePersistFailureBlockingAdmission = true;
       console.error(`[LIVE_STATE_PERSIST_ERROR] ghi trạng thái thất bại (đã bắt, KHÔNG crash tiến trình): ${(err as Error).message}`);
+      telegramQueue.enqueue(`🚨🚨 [CRITICAL — GHI TRẠNG THÁI THẤT BẠI] ${(err as Error).message}\nĐÃ CHẶN mở lệnh mới TOÀN BỘ portfolio cho tới khi ghi lại thành công — các vị thế đang mở vẫn được quản lý bình thường.`);
+      return false;
     }
   }
   persistLiveState(); // immediately overwrite a missing/corrupt file with the just-recovered, trusted state
+
+  function buildPendingEntryQuarantineRecord(input: {
+    symbol: string;
+    side: PositionSide;
+    phase: PendingEntryQuarantineRecord['phase'];
+    clientOrderId: string;
+    orderId: number | null;
+    executedQty: number | null;
+    averageFillPrice: unknown;
+    plannedEntryPrice: number;
+    plannedSlPrice: number;
+    entryTimestamp: number;
+    reason: string;
+    reconciledEntryPrice: number | null;
+    reconciledPositionSize: number | null;
+    protectionOutcome: string | null;
+    actualRiskDollar: number | null;
+    marginRequired: number | null;
+    protectionStatus: string | null;
+    recoveryStatus: string | null;
+    recoveryDetail: string | null;
+    exposureBasis: QuarantineExposureBasis | null;
+  }): PendingEntryQuarantineRecord {
+    return { ...input, detectedAtMs: Date.now() };
+  }
+
+  function recordPendingEntryQuarantine(record: PendingEntryQuarantineRecord): boolean {
+    entriesBlockedDueToRestartQuarantineBySymbol.add(record.symbol);
+    pendingEntryQuarantinesBySymbol[record.symbol] = [...(pendingEntryQuarantinesBySymbol[record.symbol] ?? []), record];
+    const persisted = persistLiveState();
+    if (!persisted) {
+      console.error(`[QUARANTINE_PERSIST_FAILED] ${record.symbol} phase=${record.phase}: bản ghi quarantine đang ở trong bộ nhớ nhưng GHI FILE THẤT BẠI — chưa được lưu bền vững.`);
+    }
+    return persisted;
+  }
 
   // TICKET-G1R Final Closure item 3 — explicit exchange-sync admission state. Starts SYNCED: startup
   // only reaches this point after performStartupRestartRecovery()'s getPositionRisk() read already
@@ -750,20 +814,6 @@ async function main(): Promise<void> {
   // in the same tick (was: unconditional `accountBalance = result.accountBalance`).
   let exchangeBalanceRefreshedThisTick = false;
 
-  // TICKET-G1R Checkpoint B (G1-F05) — a symbol lands here when a just-opened position's real fill
-  // could not be reconciled with confidence (unconfirmed canonicalQty, or fill price implying a
-  // <=0 stop distance). Per-symbol (not account-wide, unlike balance divergence) and permanent for
-  // the life of this process — an unreconciled LIVE position's true risk/margin is unknown, so this
-  // requires a human to check the real exchange state before this symbol trades again; there is no
-  // safe automatic recovery condition to clear it on (contrast with balance divergence, which clears
-  // itself once a fresh read comes back within tolerance).
-  const entriesBlockedDueToUnreconciledFillBySymbol = new Set<string>();
-  // TICKET-G1R Final Closure item 4 — minimal context needed to retry a blocked symbol's
-  // reconciliation (which specific position, which side) without a restart. Populated alongside
-  // entriesBlockedDueToUnreconciledFillBySymbol.add() below, removed once retried successfully or
-  // once the position itself is confirmed gone.
-  const unreconciledFillContextBySymbol = new Map<string, { entryTimestamp: number; side: PositionSide }>();
-
   let regimeChangeCount = 0;
   let willOpenCount = 0;
   let tickErrorCount = 0;
@@ -856,86 +906,7 @@ async function main(): Promise<void> {
     return outcome.snapshot;
   }
 
-  /**
-   * TICKET-G1R Final Closure item 4 — attempts to clear `entriesBlockedDueToUnreconciledFillBySymbol`
-   * for `symbol` via ONE fresh `getPositionRisk()` read (never a timer). Returns true only when
-   * quantity, entryPrice, r, actualRiskDollar AND marginRequired were ALL successfully re-derived
-   * from that read (see retryReconcileUnreconciledFillFromPositionRisk's doc comment) — a partial
-   * success (e.g. position found but side ambiguous) leaves the block in place. Safe to call every
-   * tick this symbol is blocked: read-only, no mutating call, idempotent on failure.
-   */
-  async function retryUnreconciledFillBlock(symbol: string): Promise<boolean> {
-    const ctx = unreconciledFillContextBySymbol.get(symbol);
-    if (!ctx) return false; // no context recorded — cannot safely retry, stays blocked
-    let posRisk: unknown;
-    try {
-      posRisk = await executor.getPositionRisk(symbol);
-    } catch (err) {
-      console.warn(`[UNRECONCILED_FILL_RETRY_READ_ERROR] ${symbol}: getPositionRisk() lỗi khi thử đối soát lại — vẫn CHẶN: ${(err as Error).message}`);
-      return false;
-    }
-    const arr = Array.isArray(posRisk) ? (posRisk as Array<{ symbol?: string; positionAmt?: string; entryPrice?: string }>) : null;
-    const found = arr?.find((p) => p.symbol === symbol);
-    if (!found) {
-      console.warn(`[UNRECONCILED_FILL_RETRY] ${symbol}: getPositionRisk() không có entry cho symbol này — vẫn CHẶN.`);
-      return false;
-    }
-    const entry = runnerState[symbol].symbolState.openPositions.find((e) => e.meta.entryTimestamp === ctx.entryTimestamp);
-    if (!entry) {
-      console.warn(`[UNRECONCILED_FILL_RETRY] ${symbol}: không tìm thấy vị thế entryTimestamp=${ctx.entryTimestamp} nội bộ để áp giá trị đối soát lại — vẫn CHẶN (an toàn hơn là bỏ chặn không có đích áp dụng).`);
-      return false;
-    }
-    const result = retryReconcileUnreconciledFillFromPositionRisk({
-      expectedSide: ctx.side,
-      initialSlPrice: entry.position.initialSlPrice,
-      leverage: CONFIG.leverage,
-      freshPositionAmt: Number(found.positionAmt),
-      freshEntryPrice: found.entryPrice,
-    });
-    if (!result.ok) {
-      console.warn(`[UNRECONCILED_FILL_RETRY_FAILED] ${symbol}: reason=${result.reason} — vẫn CHẶN, sẽ thử lại tick sau.`);
-      return false;
-    }
-    entry.position.positionSize = result.positionSize;
-    entry.position.remainingPositionSize = result.positionSize;
-    entry.position.entryPrice = result.entryPrice;
-    entry.position.r = result.r;
-    entry.meta.actualRiskDollar = result.actualRiskDollar;
-    entry.meta.marginRequired = result.marginRequired;
-    entriesBlockedDueToUnreconciledFillBySymbol.delete(symbol);
-    unreconciledFillContextBySymbol.delete(symbol);
-    console.log(
-      `[UNRECONCILED_FILL_RETRY_SUCCESS] ${symbol}: đối soát lại thành công qua fresh getPositionRisk() — đã bỏ CHẶN. qty=${result.qty} entryPrice=${result.entryPrice} risk=${result.actualRiskDollar.toFixed(4)} margin=${result.marginRequired.toFixed(4)}`,
-    );
-    telegramQueue.enqueue(`✅ [ĐỐI SOÁT LẠI THÀNH CÔNG] ${symbol}: đã khớp lại quantity/entry/margin/risk qua fresh exchange read — đã bỏ chặn mở lệnh mới trên ${symbol}.`);
-    return true;
-  }
-
-  /** Places the SL + fixed-price TP algo orders for a freshly-opened position, mirroring scripts/testOrderLifecycleTestnet.ts's exact pattern. Real calls only when !dryRun. */
-  async function placeInitialOrders(symbol: string, side: PositionSide, event: OpenTradeEvent, quantity: number): Promise<LiveOrderIds> {
-    const slResult = await executor.placeStopMarket(symbol, side, roundPrice(event.slPrice), quantity);
-    const slAlgoId = 'algoId' in slResult ? slResult.algoId : null;
-
-    const tpAlgoIds: number[] = [];
-    for (const tp of event.tpLevels) {
-      if (tp.price === null) continue; // TP3_RUNNER — trailing-managed via SL moves only, never a fixed order
-      const tpQty = roundQty(quantity * tp.closePercent);
-      if (tpQty <= 0) continue;
-      const tpResult = await executor.placeTakeProfitMarket(symbol, side, roundPrice(tp.price), tpQty);
-      if ('algoId' in tpResult) tpAlgoIds.push(tpResult.algoId);
-    }
-    return { slAlgoId, tpAlgoIds };
-  }
-
-  /**
-   * TICKET-151 P0-A — returns the CANONICAL executed base-asset quantity when a real order was
-   * placed (null in dryRun, where there's nothing to confirm). This used to be silently discarded
-   * — `quantity` (the pre-normalization calculated value) was used for SL/TP sizing AND is what
-   * ended up in the internal simulated position's size, while the exchange had actually filled the
-   * real stepSize-rounded amount. The caller (tick()) uses the returned qty to correct the just-
-   * opened ManagedPositionState's positionSize/remainingPositionSize to match reality.
-   */
-  async function handleOpenEvent(symbol: string, event: OpenTradeEvent, balanceAtOpen: number): Promise<OpenFillInfo | null> {
+  async function handleOpenEvent(symbol: string, event: OpenTradeEvent, balanceAtOpen: number): Promise<OpenEventOutcome> {
     const quantity = roundQty(event.marginRequired * CONFIG.leverage / event.entryPrice);
     const traceId = stableTelemetryId('trace', symbol, event.entryTimestamp, event.side, event.setupType);
     const candidateId = stableTelemetryId('candidate', traceId);
@@ -946,62 +917,156 @@ async function main(): Promise<void> {
     emitTelemetry({ ...common, eventType: 'DECISION_MADE', quality: { decision: 'DERIVED' }, data: { decision: 'ALLOW', reasonCode: 'ORCHESTRATOR_OPEN_EVENT', openPositionCount: runnerState[symbol].symbolState.openPositions.length } });
     emitTelemetry({ ...common, eventType: 'RISK_ADMISSION', quality: { balance: 'OBSERVED', requestedRisk: 'DERIVED', quantity: 'DERIVED' }, data: { admission: 'ALLOW', balance: balanceAtOpen, requestedRiskDollar: event.actualRiskDollar, requestedNotional: event.marginRequired * CONFIG.leverage, proposedQuantity: quantity, marginRequired: event.marginRequired, leverage: CONFIG.leverage, riskPoolPctBefore: event.riskPoolPctBefore, riskPoolPctAfter: event.riskPoolPctAfter, riskMultiplier: event.riskMultiplier } });
     emitTelemetry({ ...common, eventType: 'MARKET_SNAPSHOT', quality: { bestBid: 'MISSING', bestAsk: 'MISSING', mid: 'MISSING', markPrice: 'MISSING', indexPrice: 'MISSING' }, data: { captureStatus: 'MISSING', reasonCode: 'NO_NON_BLOCKING_BOOK_TICKER_FEED', candleReferencePrice: event.entryPrice } });
-    let canonicalQty: number | null = null;
-    let openFillInfo: OpenFillInfo | null = null; // TICKET-G1R Checkpoint B: real fill provenance for the caller's post-fill reconcile
+
     if (dryRun) {
       console.log(`[SẼ MỞ LỆNH] ${symbol} ${event.side} entry=${event.entryPrice} sl=${event.slPrice} qty=${quantity} setupType=${event.setupType}`);
       willOpenCount++;
+      const exchangeBalance = await refreshBalanceForTelegram();
+      telegramQueue.enqueue(formatPositionOpenedMessage(event, { env: envLabel, accountBalanceAtOpen: balanceAtOpen, exchangeBalance }) + '\n\n[DRY-RUN]');
+      return { kind: 'DRY_RUN' };
+    }
+
+    const clientOrderId = buildDeterministicEntryClientOrderId(symbol, event.side, event.entryTimestamp);
+    const preSubmissionBaseline = await readPositionRiskForSide(executor, symbol, event.side);
+    if (preSubmissionBaseline === null) {
+      accountSyncState = 'ACCOUNT_STATE_UNKNOWN';
+      const detail = `Không đọc được position baseline trước MARKET cho ${symbol} ${event.side}; không gửi lệnh và chặn admission.`;
+      console.error(`[PRE_SUBMISSION_BASELINE_UNAVAILABLE] ${detail}`);
+      telegramQueue.enqueue(`🚨🚨 [CRITICAL — POSITION BASELINE UNKNOWN] ${detail}`);
+      return { kind: 'NOT_FILLED', detail };
+    }
+    const preSubmissionBaselineQtyAbs = preSubmissionBaseline.qtyAbs;
+    emitTelemetry({ ...common, clientOrderId, eventType: 'ORDER_SUBMIT_INTENT', quality: { requestedQuantity: 'DERIVED' }, data: { intentTimestampMs: Date.now(), orderRole: 'ENTRY', type: 'MARKET', reduceOnly: false, requestedQuantity: quantity } });
+    emitTelemetry({ ...common, clientOrderId, eventType: 'ORDER_SENT', quality: { localSendTimestamp: 'OBSERVED' }, data: { localSendTimestampMs: Date.now(), attempt: 1 } });
+
+    const classification = await submitAndClassifyMarketEntry({ executor, symbol, side: event.side, quantity, referencePrice: event.entryPrice, clientOrderId });
+
+    if (classification.outcome === 'CONFIRMED_NOT_FILLED') {
+      emitTelemetry({ ...common, clientOrderId, eventType: 'EXCHANGE_REJECT', quality: { error: 'OBSERVED' }, data: { localAckTimestampMs: Date.now(), sanitizedErrorCode: 'CONFIRMED_NOT_FILLED' } });
+      console.error(`[MARKET_ENTRY_NOT_FILLED] ${symbol} ${event.side}: ${classification.detail}`);
+      return { kind: 'NOT_FILLED', detail: classification.detail };
+    }
+    if (classification.outcome === 'AMBIGUOUS') {
+      emitTelemetry({ ...common, clientOrderId, eventType: 'EXCHANGE_REJECT', quality: { error: 'OBSERVED' }, data: { localAckTimestampMs: Date.now(), sanitizedErrorCode: 'AMBIGUOUS' } });
+      console.error(`[MARKET_ENTRY_AMBIGUOUS] ${symbol} ${event.side}: ${classification.detail}`);
+      return { kind: 'AMBIGUOUS', detail: classification.detail, clientOrderId, orderId: classification.orderId, executedQty: classification.executedQty, avgPrice: classification.avgPrice };
+    }
+
+    const canonicalQty = classification.executedQty as number;
+    const exchangeOrderIdStr = classification.orderId !== null ? String(classification.orderId) : 'UNKNOWN';
+    emitTelemetry({ ...common, clientOrderId, exchangeOrderId: exchangeOrderIdStr, eventType: 'EXCHANGE_ACK', quality: { exchangeOrderId: classification.orderId !== null ? 'OBSERVED' : 'MISSING', exchangeTimestamp: 'MISSING' }, data: { localAckTimestampMs: Date.now(), exchangeTimestampMs: 'MISSING', status: 'FILLED', executedQty: String(canonicalQty), averageFillPrice: classification.avgPrice ?? 'MISSING' } });
+    emitTelemetry({ ...common, clientOrderId, exchangeOrderId: exchangeOrderIdStr, fillId: stableTelemetryId('fill', classification.orderId ?? 0, Date.now()), eventType: 'FILL_COMPLETE', quality: { fillQuantity: 'OBSERVED', averageFillPrice: classification.avgPrice ? 'OBSERVED' : 'MISSING', commission: 'MISSING', funding: 'MISSING' }, data: { fillTimestampMs: Date.now(), localReceiveTimestampMs: Date.now(), fillQuantity: String(canonicalQty), averageFillPrice: classification.avgPrice ?? 'MISSING', commissionAmount: 'MISSING', commissionAsset: 'MISSING', makerTaker: 'MISSING', fundingStatus: 'MISSING', terminalStatus: 'FILLED' } });
+    console.log(`[CANONICAL_QTY] ${symbol} source=CONFIRMED_FILLED submittedQty=${quantity} canonicalQty=${canonicalQty}`);
+
+    try {
+      return await establishReconciledProtectedPosition({ symbol, event, balanceAtOpen, clientOrderId, canonicalQty, classificationOrderId: classification.orderId, classificationAvgPrice: classification.avgPrice, preSubmissionBaselineQtyAbs });
+    } catch (err) {
+      const recovery: MissingSlRecoveryOutcome = { status: 'EXHAUSTED_OPERATOR_REQUIRED', attemptsUsed: 0, detail: `xử lý sau-khớp-lệnh gặp lỗi không mong đợi (đã bắt): ${(err as Error).message}` };
+      const protection: EstablishProtectiveStopLossResult = { status: 'PROTECTION_DEGRADED', firstAttemptReason: `unexpected-post-fill-error: ${(err as Error).message}`, recovery };
+      return {
+        kind: 'FILLED',
+        clientOrderId,
+        orderId: classification.orderId,
+        executedQty: canonicalQty,
+        avgPrice: classification.avgPrice,
+        reconciled: { ok: false, reason: 'CANONICAL_QTY_INVALID' },
+        geometryValid: false,
+        protection,
+        tpAlgoIds: [],
+      };
+    }
+  }
+
+  async function establishReconciledProtectedPosition(params: {
+    symbol: string;
+    event: OpenTradeEvent;
+    balanceAtOpen: number;
+    clientOrderId: string;
+    canonicalQty: number;
+    classificationOrderId: number | null;
+    classificationAvgPrice: unknown;
+    preSubmissionBaselineQtyAbs: number;
+  }): Promise<OpenEventOutcome> {
+    const { symbol, event, balanceAtOpen, clientOrderId, canonicalQty, classificationOrderId, classificationAvgPrice, preSubmissionBaselineQtyAbs } = params;
+    const postFillPositionRisk = await readPositionRiskForSide(executor, symbol, event.side);
+    const reconciled = reconcileExecutedOpenState({
+      initialSlPrice: event.slPrice,
+      canonicalQty,
+      canonicalQtySource: 'EXECUTED_QTY',
+      rawAvgPrice: classificationAvgPrice,
+      freshPositionRiskEntryPrice: postFillPositionRisk?.entryPrice ?? null,
+      freshPositionRiskQtyAbs: postFillPositionRisk !== null ? postFillPositionRisk.qtyAbs : null,
+      preSubmissionBaselineQtyAbs,
+      quantityTolerance: quantityToleranceBySymbol[symbol],
+      leverage: CONFIG.leverage,
+    });
+    const geometryValid = reconciled.ok && isSlGeometryValidForFill(event.side, reconciled.entryPrice, event.slPrice);
+
+    let protection: EstablishProtectiveStopLossResult;
+    const tpAlgoIds: number[] = [];
+    if (!reconciled.ok) {
+      const reason = `reconcile thất bại: ${reconciled.reason}`;
+      const recovery = await recoverMissingProtectiveSl({
+        executor,
+        symbol,
+        expectedSide: event.side,
+        expectedQty: canonicalQty,
+        quantityTolerance: quantityToleranceBySymbol[symbol],
+        slTriggerPrice: event.slPrice,
+        policy: MISSING_PROTECTIVE_SL_FAILSAFE_POLICY,
+        skipPlacementAttempts: true,
+      });
+      protection =
+        recovery.status === 'RECOVERED' || recovery.status === 'ALREADY_RECOVERED_ON_RESTART'
+          ? { status: 'PROTECTED', slAlgoId: recovery.slAlgoId, detail: `${reason} — nhưng phục hồi SL ngay lập tức thành công: ${recovery.detail}` }
+          : { status: 'PROTECTION_DEGRADED', firstAttemptReason: reason, recovery };
+    } else if (!geometryValid) {
+      const reason = `SL geometry không hợp lệ với giá khớp thực tế (entryPrice=${reconciled.entryPrice}, slPrice=${event.slPrice}, side=${event.side})`;
+      const recovery = await recoverMissingProtectiveSl({
+        executor,
+        symbol,
+        expectedSide: event.side,
+        expectedQty: canonicalQty,
+        quantityTolerance: quantityToleranceBySymbol[symbol],
+        slTriggerPrice: event.slPrice,
+        policy: MISSING_PROTECTIVE_SL_FAILSAFE_POLICY,
+        skipPlacementAttempts: true,
+      });
+      protection =
+        recovery.status === 'RECOVERED' || recovery.status === 'ALREADY_RECOVERED_ON_RESTART'
+          ? { status: 'PROTECTED', slAlgoId: recovery.slAlgoId, detail: `${reason} — nhưng phục hồi SL ngay lập tức thành công: ${recovery.detail}` }
+          : { status: 'PROTECTION_DEGRADED', firstAttemptReason: reason, recovery };
     } else {
-      const clientOrderId = stableTelemetryId('clientOrder', traceId, 'ENTRY');
-      emitTelemetry({ ...common, clientOrderId, eventType: 'ORDER_SUBMIT_INTENT', quality: { requestedQuantity: 'DERIVED' }, data: { intentTimestampMs: Date.now(), orderRole: 'ENTRY', type: 'MARKET', reduceOnly: false, requestedQuantity: quantity } });
-      emitTelemetry({ ...common, clientOrderId, eventType: 'ORDER_SENT', quality: { localSendTimestamp: 'OBSERVED' }, data: { localSendTimestampMs: Date.now(), attempt: 1 } });
-      let openResult;
-      try {
-        openResult = await executor.openMarketPosition(symbol, event.side, quantity, event.entryPrice);
-      } catch (err) {
-        emitTelemetry({ ...common, clientOrderId, eventType: 'EXCHANGE_REJECT', quality: { error: 'OBSERVED' }, data: { localAckTimestampMs: Date.now(), sanitizedErrorCode: (err as Error).name } });
-        throw err;
-      }
-      if (!('orderId' in openResult)) throw new Error(`liveRunner: openMarketPosition trả về DryRunResult dù dryRun=false — không nên xảy ra`);
+      protection = await establishProtectiveStopLoss({
+        executor,
+        symbol,
+        side: event.side,
+        slPrice: roundPrice(event.slPrice),
+        quantity: canonicalQty,
+        quantityTolerance: quantityToleranceBySymbol[symbol],
+        policy: MISSING_PROTECTIVE_SL_FAILSAFE_POLICY,
+      });
+    }
 
-      const telemetryRaw = openResult.raw as { updateTime?: number; transactTime?: number; executedQty?: string; avgPrice?: string; status?: string };
-      emitTelemetry({ ...common, clientOrderId, exchangeOrderId: String(openResult.orderId), eventType: 'EXCHANGE_ACK', quality: { exchangeOrderId: 'OBSERVED', exchangeTimestamp: telemetryRaw.updateTime || telemetryRaw.transactTime ? 'OBSERVED' : 'MISSING' }, data: { localAckTimestampMs: Date.now(), exchangeTimestampMs: telemetryRaw.updateTime ?? telemetryRaw.transactTime ?? 'MISSING', status: openResult.status, executedQty: telemetryRaw.executedQty ?? 'MISSING', averageFillPrice: telemetryRaw.avgPrice ?? 'MISSING' } });
-      if (Number(telemetryRaw.executedQty) > 0) emitTelemetry({ ...common, clientOrderId, exchangeOrderId: String(openResult.orderId), fillId: stableTelemetryId('fill', openResult.orderId, telemetryRaw.updateTime ?? Date.now()), eventType: telemetryRaw.status === 'FILLED' ? 'FILL_COMPLETE' : 'FILL_PARTIAL', quality: { fillQuantity: 'OBSERVED', averageFillPrice: telemetryRaw.avgPrice ? 'OBSERVED' : 'MISSING', commission: 'MISSING', funding: 'MISSING' }, data: { fillTimestampMs: telemetryRaw.updateTime ?? telemetryRaw.transactTime ?? 'MISSING', localReceiveTimestampMs: Date.now(), fillQuantity: telemetryRaw.executedQty, averageFillPrice: telemetryRaw.avgPrice ?? 'MISSING', commissionAmount: 'MISSING', commissionAsset: 'MISSING', makerTaker: 'MISSING', fundingStatus: 'MISSING', terminalStatus: telemetryRaw.status ?? openResult.status } });
-
-      // TICKET-151 P0-A priority order: executedQty from the fill response first; only fall back
-      // to a fresh getPositionRisk() read when executedQty is missing/unusable — never fall back
-      // silently to the pre-normalization `quantity` (that IS the incident this fixes).
-      let positionRiskAmt: number | null = null;
-      const rawExecutedQty = Number((openResult.raw as { executedQty?: string | number } | undefined)?.executedQty);
-      if (!Number.isFinite(rawExecutedQty) || rawExecutedQty <= 0) {
-        try {
-          const posRisk = (await executor.getPositionRisk(symbol)) as Array<{ symbol?: string; positionAmt?: string }>;
-          const found = Array.isArray(posRisk) ? posRisk.find((p) => p.symbol === symbol) : undefined;
-          positionRiskAmt = found ? Number(found.positionAmt) : null;
-        } catch (e) {
-          console.error(`[CANONICAL_QTY_FALLBACK_ERROR] ${symbol}: getPositionRisk() fallback lỗi, sẽ dùng submittedQty (đã round stepSize) làm phương án cuối: ${(e as Error).message}`);
+    if (protection.status === 'PROTECTED') {
+      if (reconciled.ok && geometryValid) {
+        for (const tp of event.tpLevels) {
+          if (tp.price === null) continue; // TP3_RUNNER — trailing-managed via SL moves only, never a fixed order
+          const tpQty = roundQty(canonicalQty * tp.closePercent);
+          if (tpQty <= 0) continue;
+          try {
+            const tpResult = await executor.placeTakeProfitMarket(symbol, event.side, roundPrice(tp.price), tpQty);
+            if ('algoId' in tpResult) tpAlgoIds.push(tpResult.algoId);
+          } catch (err) {
+            console.error(`[TP_PLACEMENT_ERROR] ${symbol} ${event.side} ${tp.label}: ${(err as Error).message} — SL đã bảo vệ vị thế (không nghiêm trọng bằng thiếu SL), chỉ cảnh báo.`);
+          }
         }
       }
-      // TICKET-151B — Binance one-way mode merges same-symbol/same-side positions into ONE
-      // positionAmt, so with maxConcurrentPositionsPerSymbol>=2 a positionRiskAmt fallback for the
-      // 2nd+ position on this side must subtract the OTHER already-open same-side positions' known
-      // qty to recover just THIS order's incremental fill — runnerState[symbol].symbolState here is
-      // still the pre-this-candle state (reassigned to result.symbolState only after this events loop
-      // finishes), so it correctly reflects "already open BEFORE this new position".
-      const existingSameSideQtyBaseAsset = runnerState[symbol].symbolState.openPositions
-        .filter((e) => e.position.side === event.side)
-        .reduce((sum, e) => sum + e.position.remainingPositionSize / e.position.entryPrice, 0);
-      const canonical = resolveCanonicalOpenQty({ submittedQty: quantity, orderRaw: openResult.raw, positionRiskAmt, existingSameSideQtyBaseAsset });
-      canonicalQty = canonical.qty;
-      console.log(`[CANONICAL_QTY] ${symbol} source=${canonical.source} submittedQty=${quantity} canonicalQty=${canonical.qty}`);
-      if (canonical.source === 'SUBMITTED_QTY_FALLBACK') {
-        console.warn(`[CANONICAL_QTY_WARNING] ${symbol}: không xác nhận được executedQty/positionAmt thật từ sàn — dùng submittedQty làm phương án cuối, CẦN kiểm tra thủ công.`);
-      }
-      openFillInfo = { canonicalQty: canonical.qty, qtySource: canonical.source, rawAvgPrice: (openResult.raw as { avgPrice?: unknown } | undefined)?.avgPrice };
-
-      const orderIds = await placeInitialOrders(symbol, event.side, event, canonicalQty);
-      runnerState[symbol].orderIds.set(event.entryTimestamp, orderIds);
+      runnerState[symbol].orderIds.set(event.entryTimestamp, { slAlgoId: protection.slAlgoId, tpAlgoIds });
+    } else {
+      runnerState[symbol].orderIds.set(event.entryTimestamp, { slAlgoId: null, tpAlgoIds: [] });
     }
+
     // TICKET-124 — real-trade-level guard visibility: with momentumDirectCorrelationRiskThreshold=999
     // (never triggers, see CONFIG above), riskMultiplier<1 on a SHORT MOMENTUM_DIRECT open can only
     // come from the OOD guard when OOD_GUARD_ENABLED — flag here so the Telegram record shows exactly
@@ -1011,20 +1076,46 @@ async function main(): Promise<void> {
     const exchangeBalance = await refreshBalanceForTelegram();
     telegramQueue.enqueue(
       formatPositionOpenedMessage(event, { env: envLabel, accountBalanceAtOpen: balanceAtOpen, exchangeBalance }) +
-      (dryRun ? '\n\n[DRY-RUN]' : '') +
+      (protection.status !== 'PROTECTED' ? '\n\n🚨🚨 [SL CHƯA ĐƯỢC BẢO VỆ — xem cảnh báo CRITICAL riêng]' : '') +
       (oodGuardApplied ? '\n[OOD Guard: size đã giảm theo Risk Reduction P97.5]' : ''),
     );
-    return openFillInfo;
+    return { kind: 'FILLED', clientOrderId, orderId: classificationOrderId, executedQty: canonicalQty, avgPrice: classificationAvgPrice, reconciled, geometryValid, protection, tpAlgoIds };
   }
 
-  async function handlePartialCloseEvent(symbol: string, event: PartialCloseEvent, entryTimestampOfPosition: number, remainingQuantity: number): Promise<void> {
+  async function handlePartialCloseEvent(symbol: string, event: PartialCloseEvent, entryTimestampOfPosition: number, remainingQuantity: number, owner: OpenPositionEntry | undefined): Promise<void> {
     if (dryRun) {
       console.log(`[SẼ CHỐT MỘT PHẦN] ${symbol} ${event.tier} newSl=${event.newSlPrice}`);
     } else {
       const ids = runnerState[symbol].orderIds.get(entryTimestampOfPosition);
       if (ids?.slAlgoId != null && remainingQuantity > 0) {
-        const newSl = await executor.updateStopOrder(symbol, ids.slAlgoId, event.side, roundPrice(event.newSlPrice), roundQty(remainingQuantity));
-        if ('algoId' in newSl) ids.slAlgoId = newSl.algoId;
+        try {
+          const newSl = await executor.updateStopOrder(symbol, ids.slAlgoId, event.side, roundPrice(event.newSlPrice), roundQty(remainingQuantity));
+          if ('algoId' in newSl) ids.slAlgoId = newSl.algoId;
+        } catch (err) {
+          console.error(`[SL_REPLACE_FAILED] ${symbol} ${event.side} tier=${event.tier}: ${(err as Error).message} — SL cũ đã hủy, đang KHÔNG có SL trên sàn. Thử phục hồi ngay lập tức.`);
+          const recovery = await recoverMissingProtectiveSl({
+            executor,
+            symbol,
+            expectedSide: event.side,
+            expectedQty: remainingQuantity,
+            quantityTolerance: quantityToleranceBySymbol[symbol],
+            slTriggerPrice: event.newSlPrice,
+            policy: MISSING_PROTECTIVE_SL_FAILSAFE_POLICY,
+          });
+          if (recovery.status === 'RECOVERED' || recovery.status === 'ALREADY_RECOVERED_ON_RESTART') {
+            ids.slAlgoId = recovery.slAlgoId;
+            if (owner) owner.meta.protectionStatus = 'PROTECTED';
+            console.log(`[SL_REPLACE_RECOVERED] ${symbol} ${event.side}: ${recovery.detail}`);
+            telegramQueue.enqueue(`✅ [SL PHỤC HỒI SAU THẤT BẠI THAY THẾ] ${symbol} ${event.side}: ${recovery.detail}`);
+          } else {
+            if (owner) owner.meta.protectionStatus = 'PROTECTION_DEGRADED';
+            entriesBlockedDueToRestartQuarantineBySymbol.add(symbol);
+            console.error(`[SL_REPLACE_RECOVERY_FAILED] ${symbol} ${event.side}: ${recovery.status} — ${recovery.detail} — ĐÃ quarantine ${symbol}, chặn mở lệnh mới.`);
+            telegramQueue.enqueue(`🚨🚨 [CRITICAL — SL THAY THẾ THẤT BẠI, PHỤC HỒI CŨNG THẤT BẠI] ${symbol} ${event.side}: ${recovery.status} — ${recovery.detail}\nĐÃ CHẶN mở lệnh mới trên ${symbol} — cần kiểm tra thủ công NGAY.`);
+            const persisted = persistLiveState();
+            if (!persisted) console.error(`[QUARANTINE_PERSIST_FAILED] ${symbol}: PROTECTION_DEGRADED (partial-close SL replace) đã ghi nhận trong bộ nhớ nhưng GHI FILE THẤT BẠI.`);
+          }
+        }
       }
     }
     const exchangeBalance = await refreshBalanceForTelegram();
@@ -1136,11 +1227,11 @@ async function main(): Promise<void> {
       // g1rFinalInternalClosureFix scan a fixed 600-char window from the `const` below to prove no
       // condition was silently dropped, and an inline comment would push conditions out of it.)
       const hasUnquantifiableExposureBlockingAdmission =
-        entriesBlockedDueToUnreconciledFillBySymbol.size > 0 ||
         entriesBlockedDueToRestartQuarantineBySymbol.size > 0 ||
         symbolsWithUnavailableRegimeState.size > 0 ||
         accountSyncState === 'ACCOUNT_STATE_UNKNOWN' ||
         hasAnyProtectionDegradedPosition() ||
+        livePersistFailureBlockingAdmission ||
         // item 1 — the THREE balance conditions, not just freshness: parsed+applied
         // (`accountBalanceKnown`), and still fresh. `accountBalanceKnown` is the explicit
         // "UNKNOWN until a real exchange read" sentinel; it can never be satisfied by a default.
@@ -1169,20 +1260,6 @@ async function main(): Promise<void> {
         if (reconcileGuard.isReconciling(symbol)) {
           console.warn(`[RECONCILE_FREEZE] ${symbol}: đang đối soát vị thế đóng ngoài — bỏ qua tick này cho symbol này.`);
           continue;
-        }
-        // TICKET-G1R Checkpoint B (G1-F05) — same blunt-but-safe per-symbol freeze pattern as the two
-        // guards above: an unreconciled fill means this symbol's open position's true risk/margin
-        // basis is unknown, so no further mutation (new entries, trailing, partial/close handling) is
-        // safe here either until a human confirms real exchange state — see the Set's declaration.
-        if (entriesBlockedDueToUnreconciledFillBySymbol.has(symbol)) {
-          // TICKET-G1R Final Closure item 4 — try to clear this WITHOUT a restart via one fresh
-          // evidence-based read before giving up on this tick; still blocks and skips the tick on
-          // failure, same as before this item was added.
-          const cleared = await retryUnreconciledFillBlock(symbol);
-          if (!cleared) {
-            console.warn(`[ENTRY_BLOCKED_UNRECONCILED_FILL] ${symbol}: bỏ qua tick — fill trước đó chưa đối soát được, cần kiểm tra thủ công trước khi giao dịch lại trên symbol này.`);
-            continue;
-          }
         }
         // TICKET-G1R Checkpoint C — same permanent per-symbol freeze pattern as the guard above, for
         // a position/qty on the exchange that never proved ownership (at startup or discovered later
@@ -1282,10 +1359,11 @@ async function main(): Promise<void> {
 
         const previousRegime = rs.symbolState.regimeState.previousRegime;
         let lastComputedMetrics: { adx1h?: number; atrPercentile5m?: number } = {};
+        const tickConfig: OrchestratorConfig = { ...CONFIG, riskDollarOrPercent: computeRequestedRiskUsd(accountBalance, LIVE_RISK_PER_TRADE_PCT) };
         const result = await processCandle(
           input,
           rs.symbolState,
-          CONFIG,
+          tickConfig,
           undefined,
           undefined,
           undefined,
@@ -1395,68 +1473,162 @@ async function main(): Promise<void> {
 
         for (const event of result.events) {
           if (event.type === 'OPEN') {
-            const openFillInfo = await handleOpenEvent(symbol, event, accountBalance).catch((e) => {
+            const outcome: OpenEventOutcome = await handleOpenEvent(symbol, event, accountBalance).catch((e) => {
               console.error(`[OPEN_HANDLER_ERROR] ${symbol}: ${(e as Error).message}`);
-              return null;
+              return { kind: 'AMBIGUOUS', detail: `handleOpenEvent ném lỗi không mong đợi (đã bắt): ${(e as Error).message}`, clientOrderId: buildDeterministicEntryClientOrderId(symbol, event.side, event.entryTimestamp), orderId: null, executedQty: null, avgPrice: null } as OpenEventOutcome;
             });
-            // TICKET-151 P0-A / TICKET-G1R Checkpoint B (G1-F05) — reconcile the JUST-created
-            // ManagedPositionState against the REAL fill (matched by entryTimestamp, unique per
-            // position within a symbol — same key convention as runnerState[symbol].orderIds). NOT a
-            // change to slTpManager.ts's sizing FORMULA or to TP/SL absolute prices (already resting
-            // real orders by now) — only this one position's positionSize/remainingPositionSize/
-            // entryPrice/r and its paired meta.actualRiskDollar/marginRequired are corrected from the
-            // executed fill, exactly analogous to how resolveAccountBalanceAfterReconcile() already
-            // overrides accountBalance from a confirmed exchange value elsewhere in this file.
-            if (openFillInfo !== null) {
+
+            if (outcome.kind === 'NOT_FILLED') {
+              result.symbolState = { ...result.symbolState, openPositions: result.symbolState.openPositions.filter((e) => e.meta.entryTimestamp !== event.entryTimestamp) };
+              console.error(`[NO_PHANTOM_POSITION] ${symbol} entryTimestamp=${event.entryTimestamp}: lệnh MARKET xác nhận KHÔNG khớp — không tạo trạng thái vị thế nội bộ.`);
+            } else if (outcome.kind === 'AMBIGUOUS') {
+              result.symbolState = { ...result.symbolState, openPositions: result.symbolState.openPositions.filter((e) => e.meta.entryTimestamp !== event.entryTimestamp) };
+              const record = buildPendingEntryQuarantineRecord({
+                symbol,
+                side: event.side,
+                phase: 'AMBIGUOUS_SUBMISSION',
+                clientOrderId: outcome.clientOrderId,
+                orderId: outcome.orderId,
+                executedQty: outcome.executedQty,
+                averageFillPrice: outcome.avgPrice,
+                plannedEntryPrice: event.entryPrice,
+                plannedSlPrice: event.slPrice,
+                reconciledEntryPrice: null,
+                reconciledPositionSize: null,
+                protectionOutcome: null,
+                actualRiskDollar: null,
+                marginRequired: null,
+                protectionStatus: null,
+                recoveryStatus: null,
+                recoveryDetail: null,
+                exposureBasis: outcome.executedQty !== null ? { side: event.side, qty: outcome.executedQty, entryPrice: null } : null,
+                entryTimestamp: event.entryTimestamp,
+                reason: outcome.detail,
+              });
+              recordPendingEntryQuarantine(record);
+              console.error(`[MARKET_ENTRY_AMBIGUOUS_QUARANTINE] ${symbol} entryTimestamp=${event.entryTimestamp}: ${outcome.detail} — ĐÃ quarantine ${symbol}, chặn mở lệnh mới.`);
+              telegramQueue.enqueue(`🚨🚨 [CRITICAL — LỆNH MARKET KHÔNG XÁC ĐỊNH] ${symbol} ${event.side}: ${outcome.detail}\nclientOrderId=${outcome.clientOrderId}\nĐÃ CHẶN mở lệnh mới trên ${symbol} — cần kiểm tra thủ công NGAY.`);
+            } else if (outcome.kind === 'FILLED') {
+              const protectionOutcomeStr = outcome.protection.status === 'PROTECTED' ? `PROTECTED:slAlgoId=${outcome.protection.slAlgoId}` : `PROTECTION_DEGRADED:firstAttempt=${outcome.protection.firstAttemptReason} recovery=${outcome.protection.recovery.status}:${outcome.protection.recovery.detail}`;
               const openedEntry = result.symbolState.openPositions.find((e) => e.meta.entryTimestamp === event.entryTimestamp);
-              if (openedEntry) {
-                const reconciled = reconcileExecutedOpenState({
-                  plannedEntryPrice: openedEntry.position.entryPrice,
-                  initialSlPrice: openedEntry.position.initialSlPrice,
-                  canonicalQty: openFillInfo.canonicalQty,
-                  canonicalQtySource: openFillInfo.qtySource,
-                  rawAvgPrice: openFillInfo.rawAvgPrice,
-                  leverage: CONFIG.leverage,
+              if (!openedEntry) {
+                result.symbolState = { ...result.symbolState, openPositions: result.symbolState.openPositions.filter((e) => e.meta.entryTimestamp !== event.entryTimestamp) };
+                const record = buildPendingEntryQuarantineRecord({
+                  symbol,
+                  side: event.side,
+                  phase: 'FILLED_INTERNAL_STATE_MISSING',
+                  clientOrderId: outcome.clientOrderId,
+                  orderId: outcome.orderId,
+                  executedQty: outcome.executedQty,
+                  averageFillPrice: outcome.avgPrice,
+                  plannedEntryPrice: event.entryPrice,
+                  plannedSlPrice: event.slPrice,
+                  reconciledEntryPrice: outcome.reconciled.ok ? outcome.reconciled.entryPrice : null,
+                  reconciledPositionSize: outcome.reconciled.ok ? outcome.reconciled.positionSize : null,
+                  protectionOutcome: protectionOutcomeStr,
+                  actualRiskDollar: outcome.reconciled.ok ? outcome.reconciled.actualRiskDollar : null,
+                  marginRequired: outcome.reconciled.ok ? outcome.reconciled.marginRequired : null,
+                  protectionStatus: outcome.protection.status,
+                  recoveryStatus: outcome.protection.status === 'PROTECTION_DEGRADED' ? outcome.protection.recovery.status : null,
+                  recoveryDetail: outcome.protection.status === 'PROTECTION_DEGRADED' ? outcome.protection.recovery.detail : null,
+                  exposureBasis: outcome.executedQty !== null ? { side: event.side, qty: outcome.executedQty, entryPrice: outcome.reconciled.ok ? outcome.reconciled.entryPrice : null } : null,
+                  entryTimestamp: event.entryTimestamp,
+                  reason: `lệnh MARKET đã khớp thật trên sàn nhưng KHÔNG tìm thấy openPositions entry nội bộ tương ứng (entryTimestamp=${event.entryTimestamp})`,
                 });
-                if (reconciled.ok) {
-                  if (Math.abs(reconciled.positionSize - openedEntry.position.positionSize) > 1e-9) {
-                    console.log(
-                      `[POSITION_SIZE_CORRECTED] ${symbol} entryTimestamp=${event.entryTimestamp}: positionSize ${openedEntry.position.positionSize.toFixed(6)} → ${reconciled.positionSize.toFixed(6)} (canonicalQty=${openFillInfo.canonicalQty})`,
-                    );
-                  }
+                recordPendingEntryQuarantine(record);
+                console.error(`[FILLED_INTERNAL_STATE_MISSING] ${symbol} entryTimestamp=${event.entryTimestamp}: vị thế đã khớp thật trên sàn nhưng mất trạng thái nội bộ — ĐÃ quarantine ${symbol}, chặn mở lệnh mới.`);
+                telegramQueue.enqueue(`🚨🚨 [CRITICAL — VỊ THẾ KHỚP THẬT NHƯNG MẤT TRẠNG THÁI NỘI BỘ] ${symbol} ${event.side} entryTimestamp=${event.entryTimestamp}\nĐÃ CHẶN mở lệnh mới trên ${symbol} — cần kiểm tra thủ công NGAY.`);
+              } else if (!outcome.reconciled.ok || !outcome.geometryValid) {
+                const reason = !outcome.reconciled.ok ? `reconcile thất bại: ${outcome.reconciled.reason}` : `SL geometry không hợp lệ với giá khớp thực tế`;
+                openedEntry.meta.protectionStatus = 'PROTECTION_DEGRADED';
+                result.symbolState = { ...result.symbolState, openPositions: result.symbolState.openPositions.filter((e) => e.meta.entryTimestamp !== event.entryTimestamp) };
+                runnerState[symbol].orderIds.delete(event.entryTimestamp);
+                const record = buildPendingEntryQuarantineRecord({
+                  symbol,
+                  side: event.side,
+                  phase: 'RECONCILIATION_FAILED',
+                  clientOrderId: outcome.clientOrderId,
+                  orderId: outcome.orderId,
+                  executedQty: outcome.executedQty,
+                  averageFillPrice: outcome.avgPrice,
+                  plannedEntryPrice: event.entryPrice,
+                  plannedSlPrice: event.slPrice,
+                  reconciledEntryPrice: outcome.reconciled.ok ? outcome.reconciled.entryPrice : null,
+                  reconciledPositionSize: outcome.reconciled.ok ? outcome.reconciled.positionSize : null,
+                  protectionOutcome: protectionOutcomeStr,
+                  actualRiskDollar: outcome.reconciled.ok ? outcome.reconciled.actualRiskDollar : null,
+                  marginRequired: outcome.reconciled.ok ? outcome.reconciled.marginRequired : null,
+                  protectionStatus: outcome.protection.status,
+                  recoveryStatus: outcome.protection.status === 'PROTECTION_DEGRADED' ? outcome.protection.recovery.status : null,
+                  recoveryDetail: outcome.protection.status === 'PROTECTION_DEGRADED' ? outcome.protection.recovery.detail : null,
+                  exposureBasis: outcome.executedQty !== null ? { side: event.side, qty: outcome.executedQty, entryPrice: outcome.reconciled.ok ? outcome.reconciled.entryPrice : null } : null,
+                  entryTimestamp: event.entryTimestamp,
+                  reason,
+                });
+                recordPendingEntryQuarantine(record);
+                console.error(`[RECONCILIATION_FAILED_QUARANTINE] ${symbol} entryTimestamp=${event.entryTimestamp}: ${reason} — ĐÃ quarantine ${symbol}, chặn mở lệnh mới.`);
+                telegramQueue.enqueue(`🚨🚨 [CRITICAL — ĐỐI SOÁT/GEOMETRY SL THẤT BẠI] ${symbol} ${event.side} entryTimestamp=${event.entryTimestamp}: ${reason}\nĐÃ CHẶN mở lệnh mới trên ${symbol} — cần kiểm tra thủ công NGAY.`);
+              } else {
+                const reconciled = outcome.reconciled;
+                if (Math.abs(reconciled.positionSize - openedEntry.position.positionSize) > 1e-9) {
                   console.log(
-                    `[ENTRY_STATE_RECONCILED] ${symbol} entryTimestamp=${event.entryTimestamp}: entryPriceBasis=${reconciled.entryPriceBasis} entryPrice=${openedEntry.position.entryPrice.toFixed(6)}→${reconciled.entryPrice.toFixed(6)} actualRiskDollar=${openedEntry.meta.actualRiskDollar.toFixed(4)}→${reconciled.actualRiskDollar.toFixed(4)} marginRequired=${openedEntry.meta.marginRequired.toFixed(4)}→${reconciled.marginRequired.toFixed(4)}`,
-                  );
-                  openedEntry.position.positionSize = reconciled.positionSize;
-                  openedEntry.position.remainingPositionSize = reconciled.positionSize;
-                  openedEntry.position.entryPrice = reconciled.entryPrice;
-                  openedEntry.position.r = reconciled.r;
-                  openedEntry.meta.actualRiskDollar = reconciled.actualRiskDollar;
-                  openedEntry.meta.marginRequired = reconciled.marginRequired;
-                } else {
-                  // G1-F05 fix: fill provenance not trustworthy enough to reconcile (unconfirmed qty or
-                  // a fill price that would make the stop distance <= 0) — never fabricate a corrected
-                  // value. Leave positionSize/entryPrice/risk/margin at their PLANNED basis (internally
-                  // consistent with each other, just not reconciled with reality) and block new entries
-                  // on this symbol until a human checks the real exchange state.
-                  entriesBlockedDueToUnreconciledFillBySymbol.add(symbol);
-                  unreconciledFillContextBySymbol.set(symbol, { entryTimestamp: event.entryTimestamp, side: event.side });
-                  console.error(
-                    `[EXECUTED_STATE_RECONCILE_BLOCKED] ${symbol} entryTimestamp=${event.entryTimestamp}: reason=${reconciled.reason} — không đối soát được positionSize/entryPrice/risk/margin từ fill thật, giữ nguyên giá trị planned và CHẶN mở lệnh mới trên ${symbol} — CẦN kiểm tra thủ công.`,
-                  );
-                  telegramQueue.enqueue(
-                    `⛔ [ĐỐI SOÁT LỆNH THẤT BẠI] ${symbol} entryTimestamp=${event.entryTimestamp}\nLý do: ${reconciled.reason}\nĐã CHẶN mở lệnh mới trên ${symbol} — cần kiểm tra thủ công vị thế vừa mở.`,
+                    `[POSITION_SIZE_CORRECTED] ${symbol} entryTimestamp=${event.entryTimestamp}: positionSize ${openedEntry.position.positionSize.toFixed(6)} → ${reconciled.positionSize.toFixed(6)} (canonicalQty=${outcome.executedQty})`,
                   );
                 }
-              } else {
-                console.error(`[POSITION_SIZE_CORRECTION_ERROR] ${symbol}: không tìm thấy openPositions entry vừa mở (entryTimestamp=${event.entryTimestamp}) để áp canonicalQty — CẦN kiểm tra thủ công.`);
+                console.log(
+                  `[ENTRY_STATE_RECONCILED] ${symbol} entryTimestamp=${event.entryTimestamp}: entryPriceBasis=${reconciled.entryPriceBasis} entryPrice=${openedEntry.position.entryPrice.toFixed(6)}→${reconciled.entryPrice.toFixed(6)} actualRiskDollar=${openedEntry.meta.actualRiskDollar.toFixed(4)}→${reconciled.actualRiskDollar.toFixed(4)} marginRequired=${openedEntry.meta.marginRequired.toFixed(4)}→${reconciled.marginRequired.toFixed(4)}`,
+                );
+                openedEntry.position.positionSize = reconciled.positionSize;
+                openedEntry.position.remainingPositionSize = reconciled.positionSize;
+                openedEntry.position.entryPrice = reconciled.entryPrice;
+                openedEntry.position.r = reconciled.r;
+                openedEntry.meta.actualRiskDollar = reconciled.actualRiskDollar;
+                openedEntry.meta.marginRequired = reconciled.marginRequired;
+
+                if (outcome.protection.status !== 'PROTECTED') {
+                  openedEntry.meta.protectionStatus = 'PROTECTION_DEGRADED';
+                  result.symbolState = { ...result.symbolState, openPositions: result.symbolState.openPositions.filter((e) => e.meta.entryTimestamp !== event.entryTimestamp) };
+                  runnerState[symbol].orderIds.delete(event.entryTimestamp);
+                  const recoveryDetail = `firstAttempt=${outcome.protection.firstAttemptReason} recovery=${outcome.protection.recovery.status}:${outcome.protection.recovery.detail}`;
+                  console.error(`[PROTECTIVE_SL_ESTABLISH_FAILED] ${symbol} ${event.side} entryTimestamp=${event.entryTimestamp}: ${recoveryDetail} — ĐÃ quarantine ${symbol}, chặn mở lệnh mới.`);
+                  telegramQueue.enqueue(`🚨🚨 [CRITICAL — SL KHÔNG THIẾT LẬP ĐƯỢC] ${symbol} ${event.side}: ${recoveryDetail}\nĐÃ CHẶN mở lệnh mới trên ${symbol} — cần kiểm tra thủ công NGAY.`);
+                  quarantinedUnknownExposures.push({
+                    id: `${symbol}:${event.side}:${event.entryTimestamp}:PROTECTIVE_SL_ESTABLISH_FAILED`,
+                    basis: { side: event.side, entryPrice: openedEntry.position.entryPrice, currentSlPrice: openedEntry.position.currentSlPrice, remainingPositionSize: openedEntry.position.remainingPositionSize },
+                  });
+                  const record = buildPendingEntryQuarantineRecord({
+                    symbol,
+                    side: event.side,
+                    phase: 'FILLED_UNPROTECTED',
+                    clientOrderId: outcome.clientOrderId,
+                    orderId: outcome.orderId,
+                    executedQty: outcome.executedQty,
+                    averageFillPrice: outcome.avgPrice,
+                    plannedEntryPrice: event.entryPrice,
+                    plannedSlPrice: event.slPrice,
+                    reconciledEntryPrice: reconciled.entryPrice,
+                    reconciledPositionSize: reconciled.positionSize,
+                    protectionOutcome: `PROTECTION_DEGRADED:${recoveryDetail}`,
+                    actualRiskDollar: reconciled.actualRiskDollar,
+                    marginRequired: reconciled.marginRequired,
+                    protectionStatus: outcome.protection.status,
+                    recoveryStatus: outcome.protection.status === 'PROTECTION_DEGRADED' ? outcome.protection.recovery.status : null,
+                    recoveryDetail: outcome.protection.status === 'PROTECTION_DEGRADED' ? outcome.protection.recovery.detail : null,
+                    exposureBasis: { side: event.side, qty: outcome.executedQty, entryPrice: reconciled.entryPrice },
+                    entryTimestamp: event.entryTimestamp,
+                    reason: recoveryDetail,
+                  });
+                  recordPendingEntryQuarantine(record);
+                } else {
+                  openedEntry.meta.protectionStatus = 'PROTECTED';
+                }
               }
             }
           } else if (event.type === 'PARTIAL_CLOSE') {
             // Find the still-open position this partial fill belongs to (same symbol+side, only one such position expected per TICKET-056's 2-slot design when a partial just fired on it).
             const owner = result.symbolState.openPositions.find((e) => e.position.side === event.side);
             const remainingQuantity = owner ? owner.position.remainingPositionSize / owner.position.entryPrice : 0;
-            await handlePartialCloseEvent(symbol, event, owner?.meta.entryTimestamp ?? -1, remainingQuantity).catch((e) => console.error(`[PARTIAL_HANDLER_ERROR] ${symbol}: ${(e as Error).message}`));
+            await handlePartialCloseEvent(symbol, event, owner?.meta.entryTimestamp ?? -1, remainingQuantity, owner).catch((e) => console.error(`[PARTIAL_HANDLER_ERROR] ${symbol}: ${(e as Error).message}`));
           } else if (event.type === 'CLOSE') {
             await handleCloseEvent(symbol, event).catch((e) => console.error(`[CLOSE_HANDLER_ERROR] ${symbol}: ${(e as Error).message}`));
             // TICKET-152 — this position closing may have just ended a "blocking episode": if no

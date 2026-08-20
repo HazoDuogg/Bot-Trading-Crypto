@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BinanceOrderExecutor } from './binanceOrderExecutor.js';
-import { verifyProtectiveSlOrder, retryReconcileUnreconciledFillFromPositionRisk } from './liveStateSync.js';
+import { verifyProtectiveSlOrder } from './liveStateSync.js';
 import { computeCurrentPositionRisk } from '../risk/currentRisk.js';
 import { openPosition, onTp1Hit, onTp2Hit, onSlHit, computeTierNetPnl, computeRealizedPnl, type SlTpManagerInput } from '../risk/slTpManager.js';
 
@@ -171,7 +171,6 @@ describe('Item 3 — AccountSyncState wiring in liveRunner.ts', () => {
     const idx = liveRunnerSrc.indexOf('const hasUnquantifiableExposureBlockingAdmission =');
     expect(idx).toBeGreaterThan(-1);
     const decl = liveRunnerSrc.slice(idx, idx + 600);
-    expect(decl).toContain('entriesBlockedDueToUnreconciledFillBySymbol.size > 0');
     expect(decl).toContain('entriesBlockedDueToRestartQuarantineBySymbol.size > 0');
     expect(decl).toContain("accountSyncState === 'ACCOUNT_STATE_UNKNOWN'");
   });
@@ -204,70 +203,6 @@ describe('Item 3 — AccountSyncState wiring in liveRunner.ts', () => {
 });
 
 // ==== Item 4 — in-run retry for unreconciled-fill block ====
-
-describe('Item 4 — retryReconcileUnreconciledFillFromPositionRisk()', () => {
-  it('succeeds and re-derives qty/entryPrice/r/risk/margin when the fresh positionAmt matches the expected side', () => {
-    const result = retryReconcileUnreconciledFillFromPositionRisk({ expectedSide: 'LONG', initialSlPrice: 98, leverage: 10, freshPositionAmt: 10, freshEntryPrice: '100' });
-    expect(result).toEqual({ ok: true, qty: 10, entryPrice: 100, r: 2, positionSize: 1000, actualRiskDollar: 20, marginRequired: 100 });
-  });
-
-  it('fails (POSITION_NOT_FOUND_OR_WRONG_SIDE) when the fresh positionAmt sign does not match the expected side', () => {
-    const result = retryReconcileUnreconciledFillFromPositionRisk({ expectedSide: 'LONG', initialSlPrice: 98, leverage: 10, freshPositionAmt: -10, freshEntryPrice: '100' });
-    expect(result).toEqual({ ok: false, reason: 'POSITION_NOT_FOUND_OR_WRONG_SIDE' });
-  });
-
-  it('fails (POSITION_NOT_FOUND_OR_WRONG_SIDE) when the fresh positionAmt is zero (position confirmed gone)', () => {
-    const result = retryReconcileUnreconciledFillFromPositionRisk({ expectedSide: 'LONG', initialSlPrice: 98, leverage: 10, freshPositionAmt: 0, freshEntryPrice: '100' });
-    expect(result.ok).toBe(false);
-  });
-
-  it('fails (ENTRY_PRICE_INVALID) when the fresh entryPrice is missing/zero/non-numeric', () => {
-    expect(retryReconcileUnreconciledFillFromPositionRisk({ expectedSide: 'LONG', initialSlPrice: 98, leverage: 10, freshPositionAmt: 10, freshEntryPrice: '0' })).toEqual({ ok: false, reason: 'ENTRY_PRICE_INVALID' });
-    expect(retryReconcileUnreconciledFillFromPositionRisk({ expectedSide: 'LONG', initialSlPrice: 98, leverage: 10, freshPositionAmt: 10, freshEntryPrice: undefined })).toEqual({ ok: false, reason: 'ENTRY_PRICE_INVALID' });
-  });
-
-  it('fails (ZERO_STOP_DISTANCE_AFTER_RETRY) when the fresh entryPrice collapses the stop distance to <= 0', () => {
-    const result = retryReconcileUnreconciledFillFromPositionRisk({ expectedSide: 'LONG', initialSlPrice: 98, leverage: 10, freshPositionAmt: 10, freshEntryPrice: '98' });
-    expect(result).toEqual({ ok: false, reason: 'ZERO_STOP_DISTANCE_AFTER_RETRY' });
-  });
-
-  it('works symmetrically for SHORT', () => {
-    const result = retryReconcileUnreconciledFillFromPositionRisk({ expectedSide: 'SHORT', initialSlPrice: 102, leverage: 10, freshPositionAmt: -5, freshEntryPrice: '100' });
-    expect(result).toEqual({ ok: true, qty: 5, entryPrice: 100, r: 2, positionSize: 500, actualRiskDollar: 10, marginRequired: 50 });
-  });
-});
-
-describe('Item 4 — liveRunner.ts wiring: in-run retry, no timeout-based auto-clear', () => {
-  it('the unreconciled-fill tick-loop guard attempts retryUnreconciledFillBlock() BEFORE giving up on the tick', () => {
-    const guardIdx = liveRunnerSrc.indexOf('if (entriesBlockedDueToUnreconciledFillBySymbol.has(symbol)) {');
-    const retryCallIdx = liveRunnerSrc.indexOf('const cleared = await retryUnreconciledFillBlock(symbol);', guardIdx);
-    expect(guardIdx).toBeGreaterThan(-1);
-    expect(retryCallIdx).toBeGreaterThan(guardIdx);
-    expect(retryCallIdx - guardIdx).toBeLessThan(500);
-  });
-
-  it('retryUnreconciledFillBlock() only clears the block when ALL of qty/entryPrice/r/risk/margin are re-derived (result.ok), never partially', () => {
-    const fnIdx = liveRunnerSrc.indexOf('async function retryUnreconciledFillBlock(symbol: string): Promise<boolean> {');
-    const fnBody = liveRunnerSrc.slice(fnIdx, liveRunnerSrc.indexOf('\n  }\n', fnIdx));
-    expect(fnBody).toContain('if (!result.ok) {');
-    expect(fnBody).toContain('entriesBlockedDueToUnreconciledFillBySymbol.delete(symbol);');
-    // the delete() only happens after the !result.ok early-return, i.e. only on full success
-    expect(fnBody.indexOf('if (!result.ok) {')).toBeLessThan(fnBody.indexOf('entriesBlockedDueToUnreconciledFillBySymbol.delete(symbol);'));
-  });
-
-  it('never uses setTimeout/a timer to clear the block — only a fresh executor.getPositionRisk() read', () => {
-    const fnIdx = liveRunnerSrc.indexOf('async function retryUnreconciledFillBlock(symbol: string): Promise<boolean> {');
-    // TICKET-G1R-A "Final Safety Hotfix" — bounded to a fixed-size window (this file uses CRLF line
-    // endings, so the previous `indexOf('\n  }\n', fnIdx)` LF-only search never actually matched and
-    // silently fell back to slicing almost the entire REST of the file — harmless before this round
-    // because nothing later in the file said "setTimeout", but item 3's new shutdown-wait loop now
-    // legitimately introduces that literal string much further down. A fixed window scoped to this
-    // one function's real size (well under 1200 chars) is the correct, non-fragile fix.
-    const fnBody = liveRunnerSrc.slice(fnIdx, fnIdx + 1200);
-    expect(fnBody).not.toMatch(/setTimeout/);
-    expect(fnBody).toContain('await executor.getPositionRisk(symbol);');
-  });
-});
 
 // ==== Item 1 — partial/full PnL lifecycle: no double-count, verified (existing design, not modified) ====
 

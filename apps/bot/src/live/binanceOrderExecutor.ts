@@ -13,8 +13,6 @@
  *   - Mutating requests (place/cancel/replace order) are NEVER auto-retried once a response was
  *     received from Binance, even an error response — the caller must decide (a 400 might mean "bad
  *     params", but blindly retrying a MARKET order on an ambiguous failure risks a double fill).
- *     Only a network error that happened BEFORE any response was received (DNS/connection failure —
- *     the request never reached Binance) is safe to retry, bounded to MAX_MUTATING_RETRIES.
  *     A timeout is treated as UNKNOWN status, not retried — surfaced to the caller with an explicit
  *     warning to check getPositionRisk()/open orders before trying again.
  */
@@ -45,6 +43,23 @@ export interface OrderResult {
   status: string;
   raw: unknown;
 }
+
+export type SubmissionDeliveryStatus = 'CONFIRMED_NOT_SUBMITTED' | 'DELIVERY_UNKNOWN';
+
+export class OrderSubmissionError extends Error {
+  readonly deliveryStatus: SubmissionDeliveryStatus;
+  readonly httpStatus: number | null;
+  constructor(message: string, deliveryStatus: SubmissionDeliveryStatus, httpStatus: number | null = null) {
+    super(message);
+    this.name = 'OrderSubmissionError';
+    this.deliveryStatus = deliveryStatus;
+    this.httpStatus = httpStatus;
+  }
+}
+
+export const BINANCE_CONFIRMED_TERMINAL_REJECTION_CODES: ReadonlySet<number> = new Set<number>([
+  -1013, -1100, -1102, -1111, -1121, -2019, -2027, -4003, -4005, -4013, -4164,
+]);
 
 /**
  * TICKET-077 1.3 — Binance bắt buộc (hiệu lực 09/12/2025, xác nhận qua error -4120
@@ -227,7 +242,6 @@ function decimalsFromFilterString(value: string): number {
 
 const DEFAULT_RECV_WINDOW_MS = 5000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
-const MAX_MUTATING_RETRIES = 3; // only for pre-response network failures, see module doc
 const MAX_READ_RETRIES = 5; // 1s,2s,4s,8s,16s backoff on 429/network error, same policy as fetchOhlcv.ts
 // TICKET-077 1.2 follow-up: ground-truthed from GET /fapi/v1/exchangeInfo's `rateLimits` array
 // (ORDERS type) — a SEPARATE budget from REQUEST_WEIGHT (tracked in liveCandleFeed.ts). Order
@@ -251,11 +265,6 @@ function buildQueryString(params: Record<string, string | number | boolean>): st
   return Object.entries(params)
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
     .join('&');
-}
-
-/** True when the error happened before any HTTP response was received (DNS/connection failure — request never reached Binance). Node's fetch throws a plain TypeError for these; anything else (including AbortError from our own timeout) is treated as ambiguous, not safe to retry. */
-function isPreResponseNetworkError(err: unknown): boolean {
-  return err instanceof TypeError;
 }
 
 export class BinanceOrderExecutor {
@@ -364,19 +373,14 @@ export class BinanceOrderExecutor {
     throw lastError;
   }
 
-  /**
-   * Signed mutating request (order place/cancel). NEVER retried once a response is received.
-   * Only retries a pre-response network failure (request never reached Binance), bounded.
-   * Throws with a clear message on every failure path — the caller (and onOrderFailure) always
-   * finds out; nothing is swallowed.
-   */
   private async signedMutate(method: 'POST' | 'DELETE', path: string, params: Record<string, string | number | boolean>, context: string): Promise<unknown> {
     // TICKET-077 1.2 follow-up: checked BEFORE sending, using the ORDERS usage observed from the
     // PREVIOUS mutating call — refuses outright rather than silently waiting/retrying (an order
     // action is time-sensitive; only the caller can decide whether waiting is safe right now).
     if (this.isOrderRateThrottled()) {
-      const err = new Error(
+      const err = new OrderSubmissionError(
         `[${context}] TỪ CHỐI GỬI — ORDERS rate limit gần chạm ngưỡng an toàn (10s: ${this.lastKnownOrderCount10s}/${ORDER_COUNT_LIMIT_PER_10S}, 1m: ${this.lastKnownOrderCount1m}/${ORDER_COUNT_LIMIT_PER_MINUTE}). Không tự động chờ/retry — caller phải quyết định.`,
+        'CONFIRMED_NOT_SUBMITTED',
       );
       this.onOrderFailure?.(context, err);
       throw err;
@@ -387,33 +391,39 @@ export class BinanceOrderExecutor {
     const signature = sign(qs, this.creds.apiSecret);
     const url = `${this.creds.baseUrl}${path}?${qs}&signature=${signature}`;
 
-    for (let attempt = 0; attempt < MAX_MUTATING_RETRIES; attempt++) {
-      try {
-        const res = await this.fetchWithTimeout(url, { method, headers: { 'X-MBX-APIKEY': this.creds.apiKey } });
-        this.noteOrderCount(res);
-        if (!res.ok) {
-          const body = await res.text();
-          const err = new Error(`[${context}] HTTP ${res.status} ${res.statusText}: ${body} (KHÔNG tự retry — lệnh có thể đã chạm sàn, cần kiểm tra trạng thái thủ công trước khi thử lại)`);
-          this.onOrderFailure?.(context, err);
-          throw err;
+    try {
+      const res = await this.fetchWithTimeout(url, { method, headers: { 'X-MBX-APIKEY': this.creds.apiKey } });
+      this.noteOrderCount(res);
+      if (!res.ok) {
+        const body = await res.text();
+        let parsedCode: number | undefined;
+        try {
+          const parsedBody = JSON.parse(body) as { code?: number };
+          parsedCode = typeof parsedBody.code === 'number' ? parsedBody.code : undefined;
+        } catch {
+          parsedCode = undefined;
         }
-        return await res.json();
-      } catch (err) {
-        if (err instanceof Error && err.message.startsWith(`[${context}]`)) throw err; // already logged above, an HTTP-response failure — never retry
-        if (isPreResponseNetworkError(err) && attempt < MAX_MUTATING_RETRIES - 1) {
-          console.warn(`[${context}] lỗi mạng trước khi gửi được request (thử lại ${attempt + 1}/${MAX_MUTATING_RETRIES}): ${(err as Error).message}`);
-          await sleep(1000 * 2 ** attempt);
-          continue;
-        }
-        const isTimeout = err instanceof Error && err.name === 'AbortError';
-        const finalErr = new Error(
-          `[${context}] ${isTimeout ? 'TIMEOUT — trạng thái lệnh KHÔNG XÁC ĐỊNH, PHẢI kiểm tra getPositionRisk()/open orders trước khi thử lại' : `lỗi mạng: ${(err as Error).message}`}`,
+        const isAllowlistedTerminalRejection = res.status >= 400 && res.status < 500 && parsedCode !== undefined && BINANCE_CONFIRMED_TERMINAL_REJECTION_CODES.has(parsedCode);
+        const deliveryStatus: SubmissionDeliveryStatus = isAllowlistedTerminalRejection ? 'CONFIRMED_NOT_SUBMITTED' : 'DELIVERY_UNKNOWN';
+        const err = new OrderSubmissionError(
+          `[${context}] HTTP ${res.status} ${res.statusText}: ${body} (KHÔNG tự retry — lệnh có thể đã chạm sàn, cần kiểm tra trạng thái thủ công trước khi thử lại)`,
+          deliveryStatus,
+          res.status,
         );
-        this.onOrderFailure?.(context, finalErr);
-        throw finalErr;
+        this.onOrderFailure?.(context, err);
+        throw err;
       }
+      return await res.json();
+    } catch (err) {
+      if (err instanceof OrderSubmissionError) throw err;
+      const isTimeout = err instanceof Error && err.name === 'AbortError';
+      const finalErr = new OrderSubmissionError(
+        `[${context}] ${isTimeout ? 'TIMEOUT — trạng thái lệnh KHÔNG XÁC ĐỊNH, PHẢI kiểm tra getPositionRisk()/open orders trước khi thử lại' : `lỗi mạng: ${(err as Error).message}`}`,
+        'DELIVERY_UNKNOWN',
+      );
+      this.onOrderFailure?.(context, finalErr);
+      throw finalErr;
     }
-    throw new Error(`[${context}] unreachable retry exhaustion`); // MAX_MUTATING_RETRIES >= 1 always returns/throws above
   }
 
   private logOrDryRun(method: string, path: string, params: Record<string, string | number | boolean>, context: string): DryRunResult | null {
@@ -516,13 +526,13 @@ export class BinanceOrderExecutor {
   /** `enforceMinQty=false` for reduceOnly closes — a small leftover position remainder is legitimate to close even below the exchange's minQty for OPENING a new position. */
   private roundQtyToStepSize(symbol: string, qty: number, enforceMinQty = true): number {
     if (!Number.isFinite(qty) || qty <= 0) {
-      throw new Error(`roundQtyToStepSize(${symbol}): quantity ${qty} phải là số hữu hạn > 0 — không gửi lệnh.`);
+      throw new OrderSubmissionError(`roundQtyToStepSize(${symbol}): quantity ${qty} phải là số hữu hạn > 0 — không gửi lệnh.`, 'CONFIRMED_NOT_SUBMITTED');
     }
     const { stepSize, minQty, stepSizeDecimals } = this.getSymbolFilters(symbol);
     const steps = Math.floor(qty / stepSize + 1e-9); // +epsilon guards against qty/stepSize landing just under an integer due to float error
     const rounded = Number((steps * stepSize).toFixed(stepSizeDecimals));
     if (enforceMinQty && rounded < minQty) {
-      throw new Error(`roundQtyToStepSize(${symbol}): quantity ${rounded} (từ ${qty}) < minQty ${minQty} — không gửi lệnh.`);
+      throw new OrderSubmissionError(`roundQtyToStepSize(${symbol}): quantity ${rounded} (từ ${qty}) < minQty ${minQty} — không gửi lệnh.`, 'CONFIRMED_NOT_SUBMITTED');
     }
     return rounded;
   }
@@ -539,13 +549,13 @@ export class BinanceOrderExecutor {
 
   private roundPriceDownToTickSize(symbol: string, price: number): number {
     if (!Number.isFinite(price) || price <= 0) {
-      throw new Error(`roundPriceDownToTickSize(${symbol}): price ${price} phải là số hữu hạn > 0 — không gửi lệnh.`);
+      throw new OrderSubmissionError(`roundPriceDownToTickSize(${symbol}): price ${price} phải là số hữu hạn > 0 — không gửi lệnh.`, 'CONFIRMED_NOT_SUBMITTED');
     }
     const { tickSize, tickSizeDecimals } = this.getSymbolFilters(symbol);
     const ticks = Math.floor(price / tickSize + 1e-9);
     const rounded = Number((ticks * tickSize).toFixed(tickSizeDecimals));
     if (rounded <= 0) {
-      throw new Error(`roundPriceDownToTickSize(${symbol}): price ${price} làm tròn xuống thành ${rounded} — không gửi lệnh.`);
+      throw new OrderSubmissionError(`roundPriceDownToTickSize(${symbol}): price ${price} làm tròn xuống thành ${rounded} — không gửi lệnh.`, 'CONFIRMED_NOT_SUBMITTED');
     }
     return rounded;
   }
@@ -555,7 +565,7 @@ export class BinanceOrderExecutor {
     const { minNotional } = this.getSymbolFilters(symbol);
     const notional = price * qty;
     if (minNotional > 0 && notional < minNotional) {
-      throw new Error(`checkMinNotional(${symbol}): giá trị lệnh $${notional.toFixed(2)} (price=${price} × qty=${qty}) < minNotional $${minNotional} — không gửi lệnh.`);
+      throw new OrderSubmissionError(`checkMinNotional(${symbol}): giá trị lệnh $${notional.toFixed(2)} (price=${price} × qty=${qty}) < minNotional $${minNotional} — không gửi lệnh.`, 'CONFIRMED_NOT_SUBMITTED');
     }
   }
 
@@ -651,15 +661,53 @@ export class BinanceOrderExecutor {
     return { leverage: raw.leverage, symbol, raw };
   }
 
-  async openMarketPosition(symbol: string, side: PositionSide, quantity: number, referencePrice: number): Promise<OrderResult | DryRunResult> {
+  async openMarketPosition(symbol: string, side: PositionSide, quantity: number, referencePrice: number, newClientOrderId?: string): Promise<OrderResult | DryRunResult> {
     const roundedPrice = this.roundPriceDownToTickSize(symbol, referencePrice);
     const roundedQty = this.roundQtyToStepSize(symbol, quantity);
     this.checkMinNotional(symbol, roundedPrice, roundedQty);
-    const params = { symbol, side: side === 'LONG' ? 'BUY' : 'SELL', type: 'MARKET', quantity: roundedQty };
+    const params: Record<string, string | number | boolean> = { symbol, side: side === 'LONG' ? 'BUY' : 'SELL', type: 'MARKET', quantity: roundedQty };
+    if (newClientOrderId !== undefined) params.newClientOrderId = newClientOrderId;
     const dry = this.logOrDryRun('POST', '/fapi/v1/order', params, `openMarketPosition(${symbol},${side})`);
     if (dry) return dry;
     const raw = (await this.signedMutate('POST', '/fapi/v1/order', params, `openMarketPosition(${symbol},${side})`)) as { orderId: number; status: string };
     return { orderId: raw.orderId, symbol, status: raw.status, raw };
+  }
+
+  async getOrderByClientOrderId(symbol: string, clientOrderId: string): Promise<{ orderId: number; status: string; executedQty: string; avgPrice: string; raw: unknown } | null> {
+    const full = { symbol, origClientOrderId: clientOrderId, timestamp: this.signedTimestamp(), recvWindow: this.recvWindowMs };
+    const qs = buildQueryString(full);
+    const signature = sign(qs, this.creds.apiSecret);
+    const url = `${this.creds.baseUrl}/fapi/v1/order?${qs}&signature=${signature}`;
+
+    let lastError: unknown;
+    for (let attempt = 0; attempt < MAX_READ_RETRIES; attempt++) {
+      try {
+        const res = await this.fetchWithTimeout(url, { method: 'GET', headers: { 'X-MBX-APIKEY': this.creds.apiKey } });
+        if (res.status === 429) {
+          if (attempt === MAX_READ_RETRIES - 1) throw new Error(`429 rate-limited after ${MAX_READ_RETRIES} attempts: /fapi/v1/order`);
+          await sleep(1000 * 2 ** attempt);
+          continue;
+        }
+        if (!res.ok) {
+          const body = await res.text();
+          let parsedCode: number | undefined;
+          try {
+            parsedCode = (JSON.parse(body) as { code?: number }).code;
+          } catch {
+            parsedCode = undefined;
+          }
+          if (res.status === 400 && parsedCode === -2013) return null;
+          throw new Error(`HTTP ${res.status} ${res.statusText} on /fapi/v1/order (getOrderByClientOrderId): ${body}`);
+        }
+        const raw = (await res.json()) as { orderId: number; status: string; executedQty?: string; avgPrice?: string };
+        return { orderId: raw.orderId, status: raw.status, executedQty: raw.executedQty ?? '0', avgPrice: raw.avgPrice ?? '0', raw };
+      } catch (err) {
+        lastError = err;
+        if (attempt === MAX_READ_RETRIES - 1) throw err;
+        await sleep(1000 * 2 ** attempt);
+      }
+    }
+    throw lastError;
   }
 
   /** TICKET-077 1.3: LIMIT order to open a position (GTC — stays on the book until filled or cancelled). */

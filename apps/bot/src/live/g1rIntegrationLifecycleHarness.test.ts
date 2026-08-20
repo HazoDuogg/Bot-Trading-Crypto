@@ -152,8 +152,9 @@ describe('Item 6 — full lifecycle harness (real functions, mocked executor, on
 
     // ---- 5. OPEN + CANONICAL FILL RECONCILIATION ----------------------------------------------
     const reconciled = reconcileExecutedOpenState({
-      plannedEntryPrice: 100, initialSlPrice: 95, canonicalQty: 1,
-      canonicalQtySource: 'EXCHANGE_EXECUTED_QTY' as never, rawAvgPrice: '100.5', leverage: 30,
+      initialSlPrice: 95, canonicalQty: 1,
+      canonicalQtySource: 'EXECUTED_QTY', rawAvgPrice: '100.5', freshPositionRiskEntryPrice: '100.5',
+      freshPositionRiskQtyAbs: 1, preSubmissionBaselineQtyAbs: 0, quantityTolerance: 0.001, leverage: 30,
     });
     expect(reconciled.ok).toBe(true);
     if (!reconciled.ok) throw new Error('unreachable');

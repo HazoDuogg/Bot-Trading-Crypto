@@ -106,11 +106,14 @@ describe('G1-F04 fixed — current-risk recomputation (computeCurrentPositionRis
   it('partial fill (canonicalQty < planned): risk computed from the ACTUAL filled qty via reconcileExecutedOpenState(), not the planned notional', () => {
     const planned = makePosition(); // planned qty = 10 (1000/100)
     const reconciled = reconcileExecutedOpenState({
-      plannedEntryPrice: planned.entryPrice,
       initialSlPrice: planned.initialSlPrice,
       canonicalQty: 6, // exchange only filled 60%
       canonicalQtySource: 'EXECUTED_QTY',
       rawAvgPrice: '100',
+      freshPositionRiskEntryPrice: '100',
+      freshPositionRiskQtyAbs: 6,
+      preSubmissionBaselineQtyAbs: 0,
+      quantityTolerance: 0.001,
       leverage: 30,
     });
     expect(reconciled.ok).toBe(true);
@@ -126,11 +129,14 @@ describe('G1-F04 fixed — current-risk recomputation (computeCurrentPositionRis
     const planned = makePosition({ entryPrice: 100, slPrice: 98 });
     // exchange actually filled at a worse avg price than planned (slippage) and at a different qty.
     const reconciled = reconcileExecutedOpenState({
-      plannedEntryPrice: 100,
       initialSlPrice: 98,
       canonicalQty: 12,
       canonicalQtySource: 'POSITION_RISK',
       rawAvgPrice: '101', // observed fill price, worse than planned 100
+      freshPositionRiskEntryPrice: '101',
+      freshPositionRiskQtyAbs: 12,
+      preSubmissionBaselineQtyAbs: 0,
+      quantityTolerance: 0.001,
       leverage: 30,
     });
     expect(reconciled.ok).toBe(true);
@@ -271,7 +277,6 @@ describe('G1-F04 fixed — liveRunner.ts / backtest.ts wiring (source-checked; t
     // multi-line const (adding PROTECTION_DEGRADED + freshness-staleness OR conditions) — the old
     // single-line substring no longer exists verbatim; each individual condition is still checked.
     expect(liveRunnerSrc).toContain('hasUnquantifiableExposureBlockingAdmission');
-    expect(liveRunnerSrc).toContain('entriesBlockedDueToUnreconciledFillBySymbol.size > 0');
     expect(liveRunnerSrc).toContain('entriesBlockedDueToRestartQuarantineBySymbol.size > 0');
     expect(liveRunnerSrc).toContain("id: 'UNKNOWN_EXPOSURE_BLOCK'");
   });
