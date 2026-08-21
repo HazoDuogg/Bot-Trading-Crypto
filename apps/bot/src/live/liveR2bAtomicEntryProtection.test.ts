@@ -175,6 +175,38 @@ describe('classifyMarketEntryOutcome', () => {
 type MockEntryExecutor = Pick<BinanceOrderExecutor, 'openMarketPosition' | 'getOrderByClientOrderId' | 'getPositionRisk'>;
 
 describe('submitAndClassifyMarketEntry — end-to-end submit+classify workflow', () => {
+  it('a filled MARKET that is initially NOT_FOUND is recovered by bounded lookup polling without resubmitting', async () => {
+    let submitCalls = 0;
+    let lookupCalls = 0;
+    const waits: number[] = [];
+    const executor: MockEntryExecutor = {
+      openMarketPosition: async () => {
+        submitCalls++;
+        throw new OrderSubmissionError('[openMarketPosition(SOLUSDT,SHORT)] TIMEOUT', 'DELIVERY_UNKNOWN');
+      },
+      getOrderByClientOrderId: async () => {
+        lookupCalls++;
+        if (lookupCalls === 1) return null;
+        return { orderId: 77, status: 'FILLED', executedQty: '1.56', avgPrice: '90.86', raw: {} };
+      },
+      getPositionRisk: async () => [{ symbol: 'SOLUSDT', positionAmt: '-1.56', entryPrice: '90.86' }],
+    };
+    const result = await submitAndClassifyMarketEntry({
+      executor,
+      symbol: 'SOLUSDT',
+      side: 'SHORT',
+      quantity: 1.56,
+      referencePrice: 90.86,
+      clientOrderId: 'r2b-SOLUSDT-S-1787292000000',
+      lookupRetryDelaysMs: [25],
+      wait: async (delayMs) => { waits.push(delayMs); },
+    });
+    expect(result).toMatchObject({ outcome: 'CONFIRMED_FILLED', orderId: 77, executedQty: 1.56, avgPrice: '90.86' });
+    expect(submitCalls).toBe(1);
+    expect(lookupCalls).toBe(2);
+    expect(waits).toEqual([25]);
+  });
+
   it('a clean 4xx rejection (CONFIRMED_NOT_SUBMITTED) creates zero phantom internal state and issues no lookup call', async () => {
     let lookupCalls = 0;
     let positionRiskCalls = 0;
@@ -191,7 +223,7 @@ describe('submitAndClassifyMarketEntry — end-to-end submit+classify workflow',
         throw new Error('should never be called for a confirmed rejection');
       },
     };
-    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-1' });
+    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-1', lookupRetryDelaysMs: [] });
     expect(result.outcome).toBe('CONFIRMED_NOT_FILLED');
     expect(lookupCalls).toBe(0);
     expect(positionRiskCalls).toBe(0);
@@ -211,7 +243,7 @@ describe('submitAndClassifyMarketEntry — end-to-end submit+classify workflow',
         throw new Error('positionRisk also unavailable');
       },
     };
-    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-2' });
+    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-2', lookupRetryDelaysMs: [] });
     expect(result.outcome).toBe('AMBIGUOUS');
     expect(result.outcome).not.toBe('CONFIRMED_NOT_FILLED');
     expect(submitCalls).toBe(1);
@@ -227,7 +259,7 @@ describe('submitAndClassifyMarketEntry — end-to-end submit+classify workflow',
       getOrderByClientOrderId: async () => null,
       getPositionRisk: async () => [{ symbol: 'BTCUSDT', positionAmt: '0' }],
     };
-    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-3' });
+    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-3', lookupRetryDelaysMs: [] });
     expect(result.outcome).toBe('AMBIGUOUS');
     expect(submitCalls).toBe(1);
   });
@@ -242,7 +274,7 @@ describe('submitAndClassifyMarketEntry — end-to-end submit+classify workflow',
       getOrderByClientOrderId: async () => ({ orderId: 9, status: 'REJECTED', executedQty: '0', avgPrice: '0', raw: {} }),
       getPositionRisk: async () => [{ symbol: 'BTCUSDT', positionAmt: '0' }],
     };
-    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-4' });
+    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-4', lookupRetryDelaysMs: [] });
     expect(result.outcome).toBe('CONFIRMED_NOT_FILLED');
     expect(submitCalls).toBe(1);
   });
@@ -257,7 +289,7 @@ describe('submitAndClassifyMarketEntry — end-to-end submit+classify workflow',
       getOrderByClientOrderId: async () => null,
       getPositionRisk: async () => [{ symbol: 'BTCUSDT', positionAmt: '0' }],
     };
-    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-5' });
+    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-5', lookupRetryDelaysMs: [] });
     expect(result.outcome).toBe('AMBIGUOUS');
     expect(submitCalls).toBe(1);
   });
@@ -272,7 +304,7 @@ describe('submitAndClassifyMarketEntry — end-to-end submit+classify workflow',
         throw new Error('should never be called on a direct terminal-status success');
       },
     };
-    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-6' });
+    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-6', lookupRetryDelaysMs: [] });
     expect(result).toMatchObject({ outcome: 'CONFIRMED_FILLED', executedQty: 0.007 });
   });
 
@@ -286,7 +318,7 @@ describe('submitAndClassifyMarketEntry — end-to-end submit+classify workflow',
       getOrderByClientOrderId: async () => null,
       getPositionRisk: async () => [{ symbol: 'BTCUSDT', positionAmt: '0' }],
     };
-    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-7' });
+    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-7', lookupRetryDelaysMs: [] });
     expect(result.outcome).toBe('AMBIGUOUS');
     expect(submitCalls).toBe(1);
   });
@@ -305,7 +337,7 @@ describe('submitAndClassifyMarketEntry — end-to-end submit+classify workflow',
         throw new Error('should never be called on a direct success');
       },
     };
-    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-8' });
+    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-8', lookupRetryDelaysMs: [] });
     expect(result).toMatchObject({ outcome: 'CONFIRMED_FILLED', executedQty: 0.01 });
     expect(lookupCalls).toBe(0);
     expect(positionRiskCalls).toBe(0);
@@ -321,7 +353,7 @@ describe('submitAndClassifyMarketEntry — end-to-end submit+classify workflow',
       getOrderByClientOrderId: async () => ({ orderId: 13, status: 'FILLED', executedQty: '0.01', avgPrice: '50000', raw: {} }),
       getPositionRisk: async () => [{ symbol: 'BTCUSDT', positionAmt: '0' }],
     };
-    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-9' });
+    const result = await submitAndClassifyMarketEntry({ executor, symbol: 'BTCUSDT', side: 'LONG', quantity: 0.01, referencePrice: 50000, clientOrderId: 'r2br-BTCUSDT-L-9', lookupRetryDelaysMs: [] });
     expect(result.outcome).toBe('AMBIGUOUS');
     expect(submitCalls).toBe(1);
   });

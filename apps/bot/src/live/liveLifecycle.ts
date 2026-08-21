@@ -149,6 +149,8 @@ export interface LifecycleContext {
   onAccountSyncUnknown: () => void;
   onWillOpen: () => void;
   persistLiveState: () => boolean;
+  marketEntryLookupRetryDelaysMs?: readonly number[];
+  marketEntryLookupWait?: (delayMs: number) => Promise<void>;
   incomeReconciliationRetryDelaysMs?: readonly number[];
   wait?: (delayMs: number) => Promise<void>;
 }
@@ -297,7 +299,7 @@ export async function handleOpenEvent(ctx: LifecycleContext, symbol: string, eve
   ctx.emitTelemetry({ ...common, clientOrderId, eventType: 'ORDER_SUBMIT_INTENT', quality: { requestedQuantity: 'DERIVED' }, data: { intentTimestampMs: Date.now(), orderRole: 'ENTRY', type: 'MARKET', reduceOnly: false, requestedQuantity: quantity } });
   ctx.emitTelemetry({ ...common, clientOrderId, eventType: 'ORDER_SENT', quality: { localSendTimestamp: 'OBSERVED' }, data: { localSendTimestampMs: Date.now(), attempt: 1 } });
 
-  const classification = await submitAndClassifyMarketEntry({ executor: ctx.executor, symbol, side: event.side, quantity, referencePrice: event.entryPrice, clientOrderId });
+  const classification = await submitAndClassifyMarketEntry({ executor: ctx.executor, symbol, side: event.side, quantity, referencePrice: event.entryPrice, clientOrderId, lookupRetryDelaysMs: ctx.marketEntryLookupRetryDelaysMs, wait: ctx.marketEntryLookupWait });
 
   if (classification.outcome === 'CONFIRMED_NOT_FILLED') {
     ctx.emitTelemetry({ ...common, clientOrderId, eventType: 'EXCHANGE_REJECT', quality: { error: 'OBSERVED' }, data: { localAckTimestampMs: Date.now(), sanitizedErrorCode: 'CONFIRMED_NOT_FILLED' } });
@@ -305,9 +307,32 @@ export async function handleOpenEvent(ctx: LifecycleContext, symbol: string, eve
     return { kind: 'NOT_FILLED', detail: classification.detail };
   }
   if (classification.outcome === 'AMBIGUOUS') {
+    const observedQty = classification.positionRiskQty;
+    const tolerance = ctx.quantityToleranceBySymbol[symbol] ?? 0;
+    const newExposureQty = observedQty === null || observedQty === undefined ? null : observedQty - preSubmissionBaselineQtyAbs;
+    const attributable = newExposureQty !== null && Number.isFinite(newExposureQty) && newExposureQty > tolerance && Math.abs(newExposureQty - quantity) <= tolerance;
+    let emergencyDetail = '';
+    if (attributable && newExposureQty !== null) {
+      try {
+        await ctx.executor.closePositionMarket(symbol, event.side, newExposureQty);
+        const afterClose = await readPositionRiskForSide(ctx.executor, symbol, event.side);
+        if (afterClose !== null && Math.abs(afterClose.qtyAbs - preSubmissionBaselineQtyAbs) <= tolerance) {
+          emergencyDetail = `; EMERGENCY_CLOSE_VERIFIED closedQty=${newExposureQty} postQty=${afterClose.qtyAbs}`;
+        } else {
+          emergencyDetail = `; EMERGENCY_CLOSE_UNVERIFIED closedQty=${newExposureQty} postQty=${afterClose?.qtyAbs ?? 'UNKNOWN'}`;
+          ctx.onAccountSyncUnknown();
+        }
+      } catch (err) {
+        emergencyDetail = `; EMERGENCY_CLOSE_FAILED qty=${newExposureQty} error=${(err as Error).message}`;
+        ctx.onAccountSyncUnknown();
+      }
+    } else if (observedQty !== null && observedQty !== undefined && observedQty > tolerance) {
+      emergencyDetail = `; EMERGENCY_CLOSE_SKIPPED_UNATTRIBUTABLE baselineQty=${preSubmissionBaselineQtyAbs} observedQty=${observedQty} submittedQty=${quantity}`;
+    }
+    const detail = `${classification.detail}${emergencyDetail}`;
     ctx.emitTelemetry({ ...common, clientOrderId, eventType: 'EXCHANGE_REJECT', quality: { error: 'OBSERVED' }, data: { localAckTimestampMs: Date.now(), sanitizedErrorCode: 'AMBIGUOUS' } });
-    console.error(`[MARKET_ENTRY_AMBIGUOUS] ${symbol} ${event.side}: ${classification.detail}`);
-    return { kind: 'AMBIGUOUS', detail: classification.detail, clientOrderId, orderId: classification.orderId, executedQty: classification.executedQty, avgPrice: classification.avgPrice };
+    console.error(`[MARKET_ENTRY_AMBIGUOUS] ${symbol} ${event.side}: ${detail}`);
+    return { kind: 'AMBIGUOUS', detail, clientOrderId, orderId: classification.orderId, executedQty: classification.executedQty, avgPrice: classification.avgPrice };
   }
 
   const canonicalQty = classification.executedQty as number;

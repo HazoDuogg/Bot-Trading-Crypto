@@ -1712,6 +1712,7 @@ export interface MarketEntryOutcomeResult {
   executedQty: number | null;
   avgPrice: unknown;
   orderId: number | null;
+  positionRiskQty?: number | null;
 }
 
 export function classifyMarketEntryOutcome(attempt: MarketSubmissionAttempt, corroboration: MarketEntryCorroboration | null): MarketEntryOutcomeResult {
@@ -1771,10 +1772,11 @@ export function classifyMarketEntryOutcome(attempt: MarketSubmissionAttempt, cor
   const knownFromOrderLookupQty = orderLookup.status === 'FOUND' ? Number(orderLookup.executedQty) : NaN;
   return {
     outcome: 'AMBIGUOUS',
-    detail: `bằng chứng tra cứu không đủ hoặc mâu thuẫn (không polling thêm): orderLookup=${JSON.stringify(orderLookup)}, positionRisk=${JSON.stringify(positionRisk)}`,
+    detail: `bằng chứng tra cứu không đủ hoặc mâu thuẫn sau bounded polling: orderLookup=${JSON.stringify(orderLookup)}, positionRisk=${JSON.stringify(positionRisk)}`,
     executedQty: orderLookup.status === 'FOUND' && Number.isFinite(knownFromOrderLookupQty) ? knownFromOrderLookupQty : null,
     avgPrice: orderLookup.status === 'FOUND' ? orderLookup.avgPrice : null,
     orderId: orderLookup.status === 'FOUND' ? orderLookup.orderId : null,
+    positionRiskQty: positionRisk.status === 'CONFIRMED_EXPOSURE' ? positionRisk.qty : positionRisk.status === 'CONFIRMED_NO_EXPOSURE' ? 0 : null,
   };
 }
 
@@ -1809,6 +1811,8 @@ export async function submitAndClassifyMarketEntry(params: {
   quantity: number;
   referencePrice: number;
   clientOrderId: string;
+  lookupRetryDelaysMs?: readonly number[];
+  wait?: (delayMs: number) => Promise<void>;
 }): Promise<MarketEntryOutcomeResult> {
   let attempt: MarketSubmissionAttempt;
   try {
@@ -1828,9 +1832,17 @@ export async function submitAndClassifyMarketEntry(params: {
     return classifyMarketEntryOutcome(attempt, null);
   }
 
-  const orderLookup = await lookupOrderByClientOrderId(params.executor, params.symbol, params.clientOrderId);
-  const positionRisk = await lookupPositionRiskExposure(params.executor, params.symbol, params.side);
-  return classifyMarketEntryOutcome(attempt, { orderLookup, positionRisk });
+  const retryDelays = params.lookupRetryDelaysMs ?? [100, 300, 750, 1_500, 2_500];
+  const wait = params.wait ?? ((delayMs: number) => new Promise<void>((resolve) => setTimeout(resolve, delayMs)));
+  let lastResult: MarketEntryOutcomeResult | null = null;
+  for (let lookupAttempt = 0; lookupAttempt <= retryDelays.length; lookupAttempt += 1) {
+    const orderLookup = await lookupOrderByClientOrderId(params.executor, params.symbol, params.clientOrderId);
+    const positionRisk = await lookupPositionRiskExposure(params.executor, params.symbol, params.side);
+    lastResult = classifyMarketEntryOutcome(attempt, { orderLookup, positionRisk });
+    if (lastResult.outcome !== 'AMBIGUOUS') return lastResult;
+    if (lookupAttempt < retryDelays.length) await wait(retryDelays[lookupAttempt]);
+  }
+  return lastResult as MarketEntryOutcomeResult;
 }
 
 export type EstablishProtectiveStopLossResult =

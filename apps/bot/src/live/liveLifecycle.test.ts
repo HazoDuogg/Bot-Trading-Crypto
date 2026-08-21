@@ -105,6 +105,8 @@ function makeCtx(executor: Partial<BinanceOrderExecutor>, overrides: Partial<Lif
       persistCallCount += 1;
       return true;
     },
+    marketEntryLookupRetryDelaysMs: [],
+    marketEntryLookupWait: async () => {},
     incomeReconciliationRetryDelaysMs: [],
     wait: async () => {},
     ...overrides,
@@ -158,6 +160,106 @@ describe('TICKET-LIVE-R3 item 3 stage 3/4/5 — handleOpenEvent: MARKET fill, re
     expect(calls.indexOf('placeStopMarket')).toBeGreaterThan(-1);
     expect(calls.indexOf('placeTakeProfitMarket')).toBeGreaterThan(calls.indexOf('placeStopMarket'));
     expect(outcome.tpAlgoIds).toEqual([601, 601]);
+  });
+
+  it('recovers a delayed SOL MARKET lookup and establishes verified SL before TP without a second submission', async () => {
+    const calls: string[] = [];
+    let lookupCalls = 0;
+    let positionRiskCalls = 0;
+    const executor: Partial<BinanceOrderExecutor> = {
+      openMarketPosition: async () => {
+        calls.push('openMarketPosition');
+        throw new OrderSubmissionError('[openMarketPosition(SOLUSDT,SHORT)] TIMEOUT', 'DELIVERY_UNKNOWN');
+      },
+      getOrderByClientOrderId: async () => {
+        lookupCalls += 1;
+        if (lookupCalls === 1) return null;
+        return { orderId: 77, status: 'FILLED', executedQty: '1.56', avgPrice: '90.86', raw: {} };
+      },
+      getPositionRisk: async () => {
+        positionRiskCalls += 1;
+        if (positionRiskCalls === 1) return [{ symbol: 'SOLUSDT', positionAmt: '0', entryPrice: '0' }];
+        return [{ symbol: 'SOLUSDT', positionAmt: '-1.56', entryPrice: '90.86' }];
+      },
+      placeStopMarket: async () => {
+        calls.push('placeStopMarket');
+        return { algoId: 501, symbol: 'SOLUSDT', algoStatus: 'NEW', raw: {} };
+      },
+      getOpenAlgoOrders: async () => [{ algoId: 501, symbol: 'SOLUSDT', side: 'BUY', origQty: 1.56, triggerPrice: 92, algoStatus: 'NEW', positionSide: 'BOTH', orderType: 'STOP_MARKET', reduceOnly: true, closePosition: false, algoType: 'CONDITIONAL', raw: {} }],
+      placeTakeProfitMarket: async () => {
+        calls.push('placeTakeProfitMarket');
+        return { algoId: 601, symbol: 'SOLUSDT', algoStatus: 'NEW', raw: {} };
+      },
+    };
+    const { ctx } = makeCtx(executor, { quantityToleranceBySymbol: { BTCUSDT: 0.001, SOLUSDT: 0.01 }, marketEntryLookupRetryDelaysMs: [0] });
+    const event = baseOpenEvent({ symbol: 'SOLUSDT', side: 'SHORT', entryPrice: 90.86, slPrice: 92, tpLevels: [{ label: 'TP1', price: 89, rMultiple: 1.5, closePercent: 0.5 }, { label: 'TP2', price: 88, rMultiple: 2.5, closePercent: 0.3 }, { label: 'TP3_RUNNER', price: null, rMultiple: null, closePercent: 0.2 }] });
+    const outcome = await handleOpenEvent(ctx, 'SOLUSDT', event, 300);
+    expect(outcome.kind).toBe('FILLED');
+    if (outcome.kind !== 'FILLED') throw new Error('unreachable');
+    expect(outcome.protection.status).toBe('PROTECTED');
+    expect(calls.filter((call) => call === 'openMarketPosition')).toHaveLength(1);
+    expect(lookupCalls).toBe(2);
+    expect(calls.indexOf('placeStopMarket')).toBeGreaterThan(-1);
+    expect(calls.indexOf('placeTakeProfitMarket')).toBeGreaterThan(calls.indexOf('placeStopMarket'));
+  });
+
+  it('emergency-closes a newly appeared exposure when bounded lookup remains ambiguous', async () => {
+    let positionRiskCalls = 0;
+    const closeCalls: Array<[string, string, number]> = [];
+    const executor: Partial<BinanceOrderExecutor> = {
+      openMarketPosition: async () => {
+        throw new OrderSubmissionError('[openMarketPosition(SOLUSDT,SHORT)] TIMEOUT', 'DELIVERY_UNKNOWN');
+      },
+      getOrderByClientOrderId: async () => null,
+      getPositionRisk: async () => {
+        positionRiskCalls += 1;
+        if (positionRiskCalls === 1) return [{ symbol: 'SOLUSDT', positionAmt: '0', entryPrice: '0' }];
+        if (positionRiskCalls === 2) return [{ symbol: 'SOLUSDT', positionAmt: '-1.56', entryPrice: '90.86' }];
+        return [{ symbol: 'SOLUSDT', positionAmt: '0', entryPrice: '0' }];
+      },
+      closePositionMarket: async (symbol, side, quantity) => {
+        closeCalls.push([symbol, side, quantity]);
+        return { orderId: 88, symbol, status: 'FILLED', raw: {} };
+      },
+      placeStopMarket: async () => {
+        throw new Error('must not place SL on an ambiguous entry');
+      },
+      placeTakeProfitMarket: async () => {
+        throw new Error('must not place TP on an ambiguous entry');
+      },
+    };
+    const { ctx } = makeCtx(executor, { quantityToleranceBySymbol: { BTCUSDT: 0.001, SOLUSDT: 0.01 } });
+    const event = baseOpenEvent({ symbol: 'SOLUSDT', side: 'SHORT', entryPrice: 90, marginRequired: 4.68, actualRiskDollar: 1.56, slPrice: 91 });
+    const outcome = await handleOpenEvent(ctx, 'SOLUSDT', event, 300);
+    expect(outcome.kind).toBe('AMBIGUOUS');
+    if (outcome.kind !== 'AMBIGUOUS') throw new Error('unreachable');
+    expect(closeCalls).toEqual([['SOLUSDT', 'SHORT', 1.56]]);
+    expect(outcome.detail).toContain('EMERGENCY_CLOSE_VERIFIED');
+  });
+
+  it('does not emergency-close exposure that cannot be attributed to the submitted quantity', async () => {
+    let positionRiskCalls = 0;
+    const closeCalls: Array<[string, string, number]> = [];
+    const executor: Partial<BinanceOrderExecutor> = {
+      openMarketPosition: async () => {
+        throw new OrderSubmissionError('[openMarketPosition(SOLUSDT,SHORT)] TIMEOUT', 'DELIVERY_UNKNOWN');
+      },
+      getOrderByClientOrderId: async () => null,
+      getPositionRisk: async () => {
+        positionRiskCalls += 1;
+        if (positionRiskCalls === 1) return [{ symbol: 'SOLUSDT', positionAmt: '-1', entryPrice: '89' }];
+        return [{ symbol: 'SOLUSDT', positionAmt: '-1.56', entryPrice: '90' }];
+      },
+      closePositionMarket: async (symbol, side, quantity) => {
+        closeCalls.push([symbol, side, quantity]);
+        return { orderId: 88, symbol, status: 'FILLED', raw: {} };
+      },
+    };
+    const { ctx } = makeCtx(executor, { quantityToleranceBySymbol: { BTCUSDT: 0.001, SOLUSDT: 0.01 } });
+    const event = baseOpenEvent({ symbol: 'SOLUSDT', side: 'SHORT', entryPrice: 90, marginRequired: 4.68, actualRiskDollar: 1.56, slPrice: 91 });
+    const outcome = await handleOpenEvent(ctx, 'SOLUSDT', event, 300);
+    expect(outcome.kind).toBe('AMBIGUOUS');
+    expect(closeCalls).toHaveLength(0);
   });
 });
 
