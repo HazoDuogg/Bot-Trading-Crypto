@@ -16,6 +16,7 @@
     "fetch-ohlcv": "npm run build:scripts && node apps/bot/scripts-dist/fetchOhlcv.js",
     "calibrate": "npm run build:scripts && node apps/bot/scripts-dist/calibrateThresholds.js",
     "backtest": "npm run build:scripts && node apps/bot/scripts-dist/backtest.js",
+    "scalp-backtest": "npm run build && npm run build:scripts && node apps/bot/scripts-dist/scalpBacktest.js",
     "generate-training-data": "npm run build:scripts && node apps/bot/scripts-dist/generateTrainingData.js",
     "generate-momentum-training-data": "npm run build:scripts && node apps/bot/scripts-dist/generateMomentumTrainingData.js",
     "simulate-mss-timeout": "npm run build:scripts && node apps/bot/scripts-dist/simulateMssTimeoutOutcomes.js",

@@ -18,7 +18,7 @@ if (!BASE_URL) {
   throw new Error('fetchOhlcv: BINANCE_URL not set in .env');
 }
 
-const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
+const DEFAULT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
 // TICKET-010 Phần A: '1m' added — MSS_TIMEFRAME defaults to 1m, needed for the backtest runner.
 // TICKET-017 Phần A.1: '1d' added — macro trend filter needs daily-candle direction.
 const INTERVALS: Record<string, number> = { '5m': 5 * 60_000, '15m': 15 * 60_000, '1h': 60 * 60_000, '1m': 60_000, '1d': 24 * 60 * 60_000 };
@@ -30,6 +30,7 @@ interface ParsedArgs {
   // Either a rolling "last N days ending now" window, or a fixed [rangeStart, rangeEnd] window.
   rangeStart: number;
   rangeEnd: number;
+  symbols: string[];
 }
 
 /** Parses --start-date=/--end-date= as YYYY-MM-DD (UTC) or raw epoch-ms; end-date is inclusive (end-of-day UTC). */
@@ -45,10 +46,15 @@ function parseArgs(): ParsedArgs {
   const outDirArg = process.argv.find((a) => a.startsWith('--out-dir='));
   const startDateArg = process.argv.find((a) => a.startsWith('--start-date='));
   const endDateArg = process.argv.find((a) => a.startsWith('--end-date='));
+  const symbolsArg = process.argv.find((a) => a.startsWith('--symbols='));
 
   // TICKET-022: separate output dir so a 365-day training-only pull never touches data/ohlcv/
   // (the 180-day dataset the chosen backtest baseline reads).
   const outDir = path.resolve(process.cwd(), outDirArg ? outDirArg.split('=')[1] : 'data/ohlcv');
+
+  // TICKET-SCALP-001: comma-separated override, additive — omitted reproduces DEFAULT_SYMBOLS
+  // byte-for-byte (every prior caller's behavior unchanged unless it opts in).
+  const symbols = symbolsArg ? symbolsArg.split('=')[1].split(',').map((s) => s.trim().toUpperCase()) : DEFAULT_SYMBOLS;
 
   // TICKET-135: explicit fixed historical window, additive — only activates when BOTH flags given.
   if (startDateArg || endDateArg) {
@@ -58,13 +64,13 @@ function parseArgs(): ParsedArgs {
     const rangeStart = parseDateFlag(startDateArg.split('=')[1], false);
     const rangeEnd = parseDateFlag(endDateArg.split('=')[1], true);
     if (rangeStart >= rangeEnd) throw new Error('fetchOhlcv: --start-date phải trước --end-date.');
-    return { outDir, rangeStart, rangeEnd };
+    return { outDir, rangeStart, rangeEnd, symbols };
   }
 
   const days = daysArg ? Number(daysArg.split('=')[1]) : 30;
   const rangeEnd = Date.now();
   const rangeStart = rangeEnd - days * 24 * 60 * 60 * 1000;
-  return { outDir, rangeStart, rangeEnd };
+  return { outDir, rangeStart, rangeEnd, symbols };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -173,12 +179,12 @@ async function fetchSymbolInterval(symbol: string, interval: string, intervalMs:
 }
 
 async function main(): Promise<void> {
-  const { rangeStart, rangeEnd, outDir } = parseArgs();
+  const { rangeStart, rangeEnd, outDir, symbols } = parseArgs();
   console.log(
-    `Fetch OHLCV ${new Date(rangeStart).toISOString()} → ${new Date(rangeEnd).toISOString()} cho ${SYMBOLS.join(', ')} → ${outDir}...`,
+    `Fetch OHLCV ${new Date(rangeStart).toISOString()} → ${new Date(rangeEnd).toISOString()} cho ${symbols.join(', ')} → ${outDir}...`,
   );
 
-  for (const symbol of SYMBOLS) {
+  for (const symbol of symbols) {
     console.log(`=== ${symbol} ===`);
     for (const [interval, intervalMs] of Object.entries(INTERVALS)) {
       await fetchSymbolInterval(symbol, interval, intervalMs, rangeStart, rangeEnd, outDir);
