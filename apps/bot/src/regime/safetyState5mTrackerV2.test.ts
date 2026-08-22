@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { applySafetyState5mFinalStabilization, INITIAL_SAFETY_STATE_5M_TRACKER, type SafetyState5mTrackerState } from './safetyState5mTrackerV2.js';
-import { applySafetyState5mStabilization } from './safetyState5mTracker.js';
 import { SafetyState5m } from './htfSafetyTypes.js';
 
 const T0 = 1_700_000_000_000;
@@ -53,18 +52,6 @@ describe('applySafetyState5mFinalStabilization', () => {
     nextIdx++;
     s = applySafetyState5mFinalStabilization(SafetyState5m.NORMAL, t(nextIdx), s); // 2nd exit-confirm candle -> exits
     expect(s.currentState).toBe(SafetyState5m.NORMAL);
-
-    // Prove the divergence directly against T140's OWN unchanged function on an equivalent candle
-    // count: T140's min dwell is 3, so it only needs 2 forced-persist candles to reach it, then 2
-    // exit-confirm candles — exits after 4 total non-matching candles, one fewer than T140B's 5.
-    let legacy: SafetyState5mTrackerState | null = null;
-    legacy = applySafetyState5mStabilization(SafetyState5m.MANIPULATED, t(0), legacy);
-    legacy = applySafetyState5mStabilization(SafetyState5m.MANIPULATED, t(1), legacy); // dwell=1
-    legacy = applySafetyState5mStabilization(SafetyState5m.NORMAL, t(2), legacy); // dwell=1<3, forced persist -> dwell=2
-    legacy = applySafetyState5mStabilization(SafetyState5m.NORMAL, t(3), legacy); // dwell=2<3, forced persist -> dwell=3
-    legacy = applySafetyState5mStabilization(SafetyState5m.NORMAL, t(4), legacy); // dwell=3, min dwell satisfied, 1st exit-confirm (cleanExitCount=1)
-    legacy = applySafetyState5mStabilization(SafetyState5m.NORMAL, t(5), legacy); // 2nd exit-confirm (cleanExitCount=2) -> T140 exits HERE
-    expect(legacy.currentState).toBe(SafetyState5m.NORMAL); // T140: already exited after only 4 non-matching candles total
   });
 
   it('VOLATILE_CHOP now requires 4-candle min dwell before ANY exit is considered', () => {
@@ -102,17 +89,6 @@ describe('applySafetyState5mFinalStabilization', () => {
     expect(s.currentState).toBe(SafetyState5m.VOLATILE_CHOP);
     expect(s.previousState).toBe(SafetyState5m.MANIPULATED);
     expect(s.dwellCandles).toBe(1);
-
-    // Prove this would NOT happen under T140's old logic: it detours through NORMAL with a pending candidate instead.
-    let legacy: SafetyState5mTrackerState | null = null;
-    legacy = applySafetyState5mStabilization(SafetyState5m.MANIPULATED, t(0), legacy);
-    legacy = applySafetyState5mStabilization(SafetyState5m.MANIPULATED, t(1), legacy);
-    legacy = applySafetyState5mStabilization(SafetyState5m.MANIPULATED, t(2), legacy); // dwell=2
-    legacy = applySafetyState5mStabilization(SafetyState5m.VOLATILE_CHOP, t(3), legacy); // dwell=2<3, still forced persist -> dwell=3
-    legacy = applySafetyState5mStabilization(SafetyState5m.VOLATILE_CHOP, t(4), legacy); // dwell=4, cleanExitCount=1 (generic counter, not yet 2)
-    legacy = applySafetyState5mStabilization(SafetyState5m.VOLATILE_CHOP, t(5), legacy); // cleanExitCount=2 -> exits to NORMAL with pendingCandidate=VOLATILE_CHOP, NOT directly to VOLATILE_CHOP
-    expect(legacy.currentState).toBe(SafetyState5m.NORMAL);
-    expect(legacy.pendingCandidate).toBe(SafetyState5m.VOLATILE_CHOP);
   });
 
   it('VOLATILE_CHOP -> LOW_LIQUIDITY transitions directly after min dwell + 2 consecutive LOW_LIQUIDITY candidates', () => {

@@ -1,10 +1,32 @@
 import { SafetyState5m } from './htfSafetyTypes.js';
-import type { SafetyState5mTrackerState } from './safetyState5mTracker.js';
-import { INITIAL_SAFETY_STATE_5M_TRACKER } from './safetyState5mTracker.js';
 
-// Re-exported so callers don't need to import the same shape from two files.
-export type { SafetyState5mTrackerState } from './safetyState5mTracker.js';
-export { INITIAL_SAFETY_STATE_5M_TRACKER } from './safetyState5mTracker.js';
+/** TICKET-SCALP-005: inlined from the now-deleted safetyState5mTracker.ts (V1) — same shape, no behavior change. */
+export interface SafetyState5mTrackerState {
+  currentState: SafetyState5m;
+  /** Candle timestamp (ms) when currentState was most recently entered. */
+  stateEnteredAt: number;
+  /** Consecutive candles currentState has been held, including this one. */
+  dwellCandles: number;
+  /** Candidate currently accumulating consecutive confirmations toward being ENTERED. Null when idle. */
+  pendingCandidate: SafetyState5m | null;
+  /** Consecutive-candle count for pendingCandidate. */
+  pendingCandidateCount: number;
+  /** Consecutive candles where candidate != currentState, counted only once minimum dwell (if any) is satisfied — drives EXIT confirmation. */
+  cleanExitCount: number;
+  /** State held immediately before currentState. Null before the first transition. */
+  previousState: SafetyState5m | null;
+}
+
+/** Ticket §5: restart safely from NORMAL — never inferred from unloaded history. */
+export const INITIAL_SAFETY_STATE_5M_TRACKER: SafetyState5mTrackerState = {
+  currentState: SafetyState5m.NORMAL,
+  stateEnteredAt: 0,
+  dwellCandles: 0,
+  pendingCandidate: null,
+  pendingCandidateCount: 0,
+  cleanExitCount: 0,
+  previousState: null,
+};
 
 const GOVERNED = new Set<SafetyState5m>([SafetyState5m.MANIPULATED, SafetyState5m.VOLATILE_CHOP, SafetyState5m.LOW_LIQUIDITY]);
 /** Ticket §1 (unchanged from T140): enter after 2 consecutive confirming candles. */

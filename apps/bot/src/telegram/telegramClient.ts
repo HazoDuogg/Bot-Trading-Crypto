@@ -1,15 +1,3 @@
-/**
- * TICKET-078 — Telegram Bot API client (plain `sendMessage`, no markdown parse_mode — every
- * template in this module is plain unicode/emoji text, so no escaping is needed).
- *
- * Retry policy mirrors live/binanceOrderExecutor.ts's read-call policy (1s,2s,4s,8s,16s backoff,
- * MAX_RETRIES=5): a Telegram response is always a definitive JSON `{ok: boolean, ...}` — unlike a
- * Binance order, sendMessage has no risk of an "ambiguous fill", so retrying is safe UNLESS a
- * response with `ok:true` already came back (message delivered, never resend that). Only a
- * pre-response network failure or an HTTP 429 (`retry_after` from Telegram's own body) is retried;
- * any other `ok:false` response is a definitive failure, surfaced to the caller, never retried.
- */
-
 export interface TelegramConfig {
   botToken: string;
   /** One message is sent to EACH chat id — .env's TELEGRAM_CHAT_ID is comma-separated. */
