@@ -1,0 +1,11 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "../scripts-dist",
+    "rootDir": "..",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["**/*.ts", "../src/noTradeZone/**/*.ts"],
+  "exclude": ["../src/noTradeZone/**/*.test.ts"]
+}
