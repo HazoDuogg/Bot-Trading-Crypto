@@ -2,7 +2,9 @@ import type { RrInput, RrResult } from './types.js';
 import { DEFAULT_FEE_CONFIG } from './types.js';
 
 // Round-trip cost (open+close, fee+slippage) expressed as a price distance, per spec section 4.
-function roundTripCost(entryPrice: number, feePct: number, slippagePct: number): number {
+// Exported for reuse by partialTp.ts — total traded volume (open+close, whether 1 exit or 2 partial exits)
+// is the same 200% of notional either way, so this single-exit cost formula applies unchanged to partial TP.
+export function roundTripCost(entryPrice: number, feePct: number, slippagePct: number): number {
   return (entryPrice * ((feePct + slippagePct) * 2)) / 100;
 }
 
