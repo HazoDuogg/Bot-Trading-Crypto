@@ -317,7 +317,10 @@ async function main() {
 
   // Step 3: sweep floor levels spanning the measured distribution (p10 through ~p75), plus the
   // round-trip fee (~0.2%) itself as a natural reference point.
-  const FLOOR_SWEEP = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3];
+  // TICKET-RT-029: extended past RT-028's 0.3 peak, to see whether PF keeps rising, plateaus, or
+  // reverses at higher floors (the "distribution tail" effect already seen with Chien Luoc 1's net
+  // R:R floor sweep) — not stopping at the first peak observed.
+  const FLOOR_SWEEP = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6];
   console.log('\n=== Sweep minSlPctFloor ===');
   console.log('floor%'.padEnd(10) + 'n'.padEnd(8) + 'lenh/ngay/coin'.padEnd(16) + 'TP%'.padEnd(8) + 'SL%'.padEnd(8) + 'PnL$'.padEnd(14) + 'winRate'.padEnd(10) + 'PF');
   for (const floor of FLOOR_SWEEP) {
@@ -327,6 +330,25 @@ async function main() {
       `${floor}`.padEnd(10) +
         String(s.n).padEnd(8) +
         s.tradesPerDayPerCoin.toFixed(3).padEnd(16) +
+        `${s.n > 0 ? ((s.tp / s.n) * 100).toFixed(0) : '0'}%`.padEnd(8) +
+        `${s.n > 0 ? ((s.sl / s.n) * 100).toFixed(0) : '0'}%`.padEnd(8) +
+        `$${s.pnl.toFixed(2)}`.padEnd(14) +
+        `${s.winRate.toFixed(1)}%`.padEnd(10) +
+        `${Number.isFinite(s.profitFactor) ? s.profitFactor.toFixed(2) : 'inf'}`,
+    );
+  }
+
+  // TICKET-RT-029 step 2: breakdown per coin at floor=0.3 — confirms (or not) that the positive
+  // result isn't just 1-2 coins dragging the pooled average up, same check style as RT-013.
+  const BREAKDOWN_FLOOR = 0.3;
+  console.log(`\n=== Breakdown theo tung coin, floor=${BREAKDOWN_FLOOR}% ===`);
+  console.log('symbol'.padEnd(12) + 'n'.padEnd(8) + 'TP%'.padEnd(8) + 'SL%'.padEnd(8) + 'PnL$'.padEnd(14) + 'winRate'.padEnd(10) + 'PF');
+  for (const symbol of symbols) {
+    const symbolTrades = allTrades.filter((t) => t.symbol === symbol && t.slPct >= BREAKDOWN_FLOOR);
+    const s = summarize(symbolTrades, spanDays, 1);
+    console.log(
+      symbol.padEnd(12) +
+        String(s.n).padEnd(8) +
         `${s.n > 0 ? ((s.tp / s.n) * 100).toFixed(0) : '0'}%`.padEnd(8) +
         `${s.n > 0 ? ((s.sl / s.n) * 100).toFixed(0) : '0'}%`.padEnd(8) +
         `$${s.pnl.toFixed(2)}`.padEnd(14) +
