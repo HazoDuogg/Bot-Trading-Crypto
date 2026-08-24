@@ -10,6 +10,7 @@ import { detectPinBar } from '../src/entry/pinBar.js';
 import { detectEngulfing } from '../src/entry/engulfing.js';
 import { detectBos } from '../src/entry/bos.js';
 import { DEFAULT_BOS_CONFIG } from '../src/entry/types.js';
+import { checkPullbackZone, DEFAULT_PULLBACK_ZONE_CONFIG } from '../src/entry/pullbackZone.js';
 import { computeAtr } from '../src/noTradeZone/atr.js';
 import { calculateSl } from '../src/risk/slCalculator.js';
 import type { EntryStrategy } from '../src/risk/types.js';
@@ -131,6 +132,17 @@ async function findSignals(symbol: string, dataDir: string): Promise<Signal[]> {
     if (matrix.strategy === 'TREND_PULLBACK') {
       const signalDir = candlestickDirection(m5Window);
       if (signalDir !== matrix.direction) continue;
+
+      const zone = checkPullbackZone({
+        direction: matrix.direction,
+        entryPrice: m5Window[m5Window.length - 1].close,
+        m15Candles: m15Window,
+        swingPivotWidth: SWING_WIDTH,
+        atrM5,
+        toleranceAtrMultiplier: DEFAULT_PULLBACK_ZONE_CONFIG.toleranceAtrMultiplier,
+      });
+      if (!zone.valid) continue;
+
       direction = matrix.direction;
     } else {
       const bos = detectBos(m5Window, DEFAULT_BOS_CONFIG);
