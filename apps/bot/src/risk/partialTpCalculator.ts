@@ -1,14 +1,20 @@
-import type { PartialTpInput, PartialTpResult } from './partialTp.js';
-import { DEFAULT_PARTIAL_TP_CONFIG } from './partialTp.js';
-import { DEFAULT_FEE_CONFIG } from './types.js';
-import { roundTripCost } from './rrCalculator.js';
+import type { ExecutionFeeConfig, PartialTpInput, PartialTpResult } from './partialTp.js';
+import { DEFAULT_PARTIAL_TP_CONFIG, TAKER_ONLY_FEE_CONFIG } from './partialTp.js';
 
 const EPSILON = 1e-9;
 
-// TP1/TP2 are fixed multiples (not solved-for) — cost simply eats into the blended reward, same round-trip
-// cost formula as a single exit (see roundTripCost comment: total traded volume is unchanged by splitting the exit).
+// Cost = one entry fill + the full position eventually exiting (TP1 50% + TP2 50% = 100% of notional exits,
+// so exit legs contribute exitFeePct+exitSlippagePct once in total, regardless of the TP1/TP2 split).
+function executionCost(entryPrice: number, fees: ExecutionFeeConfig): number {
+  const pctSum = fees.entryFeePct + fees.entrySlippagePct + fees.exitFeePct + fees.exitSlippagePct;
+  return (entryPrice * pctSum) / 100;
+}
+
+// TP1/TP2 are fixed multiples (not solved-for) — cost simply eats into the blended reward.
+// Entry is assumed taker; exit legs use fees.exitFeePct/exitSlippagePct, which the caller sets to a maker
+// rate (0 slippage) or taker rate (with slippage) depending on the execution scenario being modeled.
 export function calculatePartialTp(input: PartialTpInput): PartialTpResult {
-  const feeConfig = input.feeConfig ?? DEFAULT_FEE_CONFIG;
+  const feeConfig = input.feeConfig ?? TAKER_ONLY_FEE_CONFIG;
   const config = input.config ?? DEFAULT_PARTIAL_TP_CONFIG;
 
   const slDistance = Math.abs(input.entryPrice - input.slPrice);
@@ -23,7 +29,7 @@ export function calculatePartialTp(input: PartialTpInput): PartialTpResult {
 
   const blendedGrossRMultiple = config.tp1ClosePct * config.tp1RMultiple + config.tp2ClosePct * config.tp2RMultiple;
 
-  const cost = roundTripCost(input.entryPrice, feeConfig.takerFeePct, feeConfig.slippagePct);
+  const cost = executionCost(input.entryPrice, feeConfig);
   const netRisk = slDistance + cost;
   const netReward = blendedGrossRMultiple * slDistance - cost;
   const netRMultiple = netReward / netRisk;
