@@ -3,7 +3,8 @@ import path from 'node:path';
 import { checkNoTradeZone } from '../src/noTradeZone/noTradeZone.js';
 import type { Candle } from '../src/noTradeZone/types.js';
 import { classifyTrendH1 } from '../src/trend/trendH1.js';
-import { detectFvg } from '../src/entry/fvg.js';
+import { detectFvg, DEFAULT_FVG_CONFIG } from '../src/entry/fvg.js';
+import { DEFAULT_FVG_STRATEGY_CONFIG } from '../src/entry/fvgStrategyConfig.js';
 import type { Direction } from '../src/entry/types.js';
 import { calculatePositionSize } from '../src/positionSizing/positionSizing.js';
 import { DEFAULT_MAX_MARGIN_PCT } from '../src/positionSizing/types.js';
@@ -20,15 +21,14 @@ import { DEFAULT_REGIME_CONFIG } from '../src/regime/types.js';
 // (classifyTrendH1, unmodified) still applies; findKeyZones is NOT used — a fresh FVG is itself the
 // "strong impulse" signal per the video, no additional "at a proven zone" gate is applied.
 //
-// TODO_CONFIRM placeholders (video's 16-trade/30-day 81% winrate sample is explicitly too small to
-// anchor on, per ticket — not used as an expectation baseline):
-//   DEFAULT_FVG_CONFIG.minCandle2BodyRatio = 0.6 — see src/entry/fvg.ts, not backtest-chosen.
-//   MAX_WAIT_CANDLES = 20 (M15 candles = 5 hours) — how long an unfilled FVG limit stays live before
-//     being cancelled; arbitrary, same "don't wait forever" reasoning as RT-022's retest timeout, not
-//     re-derived here.
-//   TARGET_R_MULTIPLE = 1.5 — the LOWER end of the video's stated 1.5-2.0 range, per ticket
-//     instruction ("chọn cận dưới"), not backtest-chosen. RT-027 doesn't sweep this — flagged for a
-//     follow-up sweep only if this base version shows a positive signal.
+// Parameter status as of TICKET-RT-033 (video's 16-trade/30-day 81% winrate sample is explicitly too
+// small to anchor on, per RT-027 — never used as an expectation baseline):
+//   DEFAULT_FVG_CONFIG.minCandle2BodyRatio — backtest-confirmed 0.7 (RT-032), see src/entry/fvg.ts.
+//   DEFAULT_FVG_STRATEGY_CONFIG.maxWaitCandles — confirmed 20, RT-031 found it insensitive over 10-40.
+//   DEFAULT_FVG_STRATEGY_CONFIG.targetRMultiple — STILL TODO_CONFIRM at the safe, fully-verified 1.5;
+//     RT-031 measured 2.0 giving higher PnL$ at similar PF, but that has not been signed off — do not
+//     change without explicit confirmation, see src/entry/fvgStrategyConfig.ts.
+//   DEFAULT_FVG_STRATEGY_CONFIG.minSlPctFloor — backtest-confirmed 0.5 (RT-028/029).
 //
 // Only ONE pending (unfilled) FVG is tracked per symbol at a time — if a fresh FVG appears while an
 // earlier one is still waiting to fill, the new one REPLACES the old wait (most recent wins), same
@@ -58,12 +58,14 @@ const H1_MS = 60 * 60 * 1000;
 const M15_MS = 15 * 60 * 1000;
 const ATR_PERIOD = 14;
 
-const MAX_WAIT_CANDLES = 20;
-const TARGET_R_MULTIPLE = 1.5;
 const EMA_PERIOD_H1 = 200;
-const FLOOR_PCT = 0.5; // TICKET-RT-031: fixed for every sweep below, per RT-029's chosen PF peak
+// TICKET-RT-033: FLOOR_PCT/MAX_WAIT_CANDLES/TARGET_R_MULTIPLE/minCandle2BodyRatio no longer live here
+// as local constants — pulled from src/entry/fvg.js's DEFAULT_FVG_CONFIG and
+// src/entry/fvgStrategyConfig.js's DEFAULT_FVG_STRATEGY_CONFIG, the single source of truth shared
+// with any future production code, so this measurement script can't silently drift out of sync.
+const FLOOR_PCT = DEFAULT_FVG_STRATEGY_CONFIG.minSlPctFloor;
 
-// TICKET-RT-031: the 3 remaining TODO_CONFIRM parameters, now swept ONE AT A TIME — each affects the
+// TICKET-RT-031: the 3 remaining TODO_CONFIRM parameters, swept ONE AT A TIME — each affects the
 // scan itself (FVG shape or fill-wait or TP distance), unlike the floor (post-hoc filter), so each
 // value here requires a full re-run of findTrades(), not just a re-filter of one fixed trade list.
 interface FvgSweepConfig {
@@ -72,9 +74,9 @@ interface FvgSweepConfig {
   targetRMultiple: number;
 }
 const DEFAULT_SWEEP_CONFIG: FvgSweepConfig = {
-  minCandle2BodyRatio: 0.6,
-  maxWaitCandles: MAX_WAIT_CANDLES,
-  targetRMultiple: TARGET_R_MULTIPLE,
+  minCandle2BodyRatio: DEFAULT_FVG_CONFIG.minCandle2BodyRatio,
+  maxWaitCandles: DEFAULT_FVG_STRATEGY_CONFIG.maxWaitCandles,
+  targetRMultiple: DEFAULT_FVG_STRATEGY_CONFIG.targetRMultiple,
 };
 
 const FEE_PCT_SUM = 0.05 + 0.05 + 0.05 + 0.05;
@@ -416,7 +418,9 @@ async function main() {
   );
 
   const baseline = summarize(allTrades, spanDays, symbols.length);
-  printSummary(`BASELINE (khong floor, khop RT-027: n=1959, PnL=-$1799.16, winRate=52.1%, PF=0.70)`, baseline);
+  // TICKET-RT-033: this baseline now uses the current production default (minCandle2BodyRatio=0.7,
+  // set in RT-032) — numbers differ from RT-027's original n=1959/PF=0.70 (which used 0.6), by design.
+  printSummary('BASELINE (khong floor, dung DEFAULT_FVG_CONFIG hien tai)', baseline);
 
   // Step 3: sweep floor levels spanning the measured distribution (p10 through ~p75), plus the
   // round-trip fee (~0.2%) itself as a natural reference point.
@@ -468,7 +472,8 @@ async function main() {
   // TICKET-RT-031: sweep each of the 3 remaining TODO_CONFIRM params ONE AT A TIME, floor fixed at
   // 0.5% in every run (post-hoc filter, same as before). Baseline row = current defaults, matches
   // RT-029: PF=1.48, n=469, PnL=$559.58.
-  console.log(`\n\nBaseline hien tai (floor=${FLOOR_PCT}%, moi tham so mac dinh): PF=1.48, n=469, PnL=$559.58 (RT-029)`);
+  // TICKET-RT-033 confirmation target: minCandle2BodyRatio=0.7 row below should read n=358, PF=1.54.
+  console.log(`\n\nDoi chieu RT-032 (floor=${FLOOR_PCT}%, minCandle2BodyRatio=0.7): ky vong n=358, PF=1.54`);
 
   printParamSweepHeader('Sweep minCandle2BodyRatio (giu maxWaitCandles=20, targetRMultiple=1.5)');
   for (const value of [0.4, 0.5, 0.6, 0.7, 0.8]) {
