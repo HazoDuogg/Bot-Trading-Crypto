@@ -14,18 +14,12 @@ import { computeAtr } from '../src/noTradeZone/atr.js';
 import { calculateSl } from '../src/risk/slCalculator.js';
 import type { EntryStrategy } from '../src/risk/types.js';
 import { calculatePartialTp } from '../src/risk/partialTpCalculator.js';
-import type { ExecutionFeeConfig } from '../src/risk/partialTp.js';
-import { TAKER_ONLY_FEE_CONFIG, MAKER_EXIT_FEE_CONFIG } from '../src/risk/partialTp.js';
 
 const H1_MS = 60 * 60 * 1000;
 const M15_MS = 15 * 60 * 1000;
 const ATR_PERIOD = 14;
 const SWING_WIDTH = DEFAULT_REGIME_CONFIG.swingPivotWidth;
-
-// A = everything taker (current production default). B = entry stays taker, TP1/TP2 fill as maker
-// (see MAKER_EXIT_FEE_CONFIG in partialTp.ts — real maker fill rate not yet measured, TODO_CONFIRM there).
-const FEE_SCENARIO_A: ExecutionFeeConfig = TAKER_ONLY_FEE_CONFIG;
-const FEE_SCENARIO_B: ExecutionFeeConfig = MAKER_EXIT_FEE_CONFIG;
+const MAX_LOOKAHEAD_CANDLES = 50;
 
 async function readCsv(filePath: string): Promise<Candle[]> {
   const raw = await readFile(filePath, 'utf8');
@@ -43,13 +37,12 @@ async function readCsv(filePath: string): Promise<Candle[]> {
   });
 }
 
-interface Sample {
-  symbol: string;
+interface PassingSignal {
   strategy: 'TREND_PULLBACK' | 'BREAKOUT_WATCH';
-  passesA: boolean;
-  passesB: boolean;
-  netRA: number;
-  netRB: number;
+  direction: Direction;
+  entryIndex: number; // index into the symbol's m5All array
+  tp1Price: number;
+  tp2Price: number;
 }
 
 function candlestickDirection(m5Window: Candle[]): Direction | null {
@@ -65,12 +58,12 @@ function candlestickDirection(m5Window: Candle[]): Direction | null {
   return null;
 }
 
-async function processSymbol(symbol: string, dataDir: string): Promise<{ samples: Sample[]; spanDays: number }> {
+async function findPassingSignals(symbol: string, dataDir: string): Promise<{ signals: PassingSignal[]; m5All: Candle[] }> {
   const h1All = await readCsv(path.join(dataDir, `${symbol}_1h.csv`));
   const m15All = await readCsv(path.join(dataDir, `${symbol}_15m.csv`));
   const m5All = await readCsv(path.join(dataDir, `${symbol}_5m.csv`));
 
-  const samples: Sample[] = [];
+  const signals: PassingSignal[] = [];
   let h1Cursor = 0;
   let m15Cursor = 0;
 
@@ -131,114 +124,107 @@ async function processSymbol(symbol: string, dataDir: string): Promise<{ samples
     });
     if (!slResult) continue;
 
-    const resultA = calculatePartialTp({
-      direction,
-      entryPrice,
-      slPrice: slResult.slPrice,
-      feeConfig: FEE_SCENARIO_A,
-    });
-    const resultB = calculatePartialTp({
-      direction,
-      entryPrice,
-      slPrice: slResult.slPrice,
-      feeConfig: FEE_SCENARIO_B,
-    });
+    const partialTp = calculatePartialTp({ direction, entryPrice, slPrice: slResult.slPrice });
+    if (!partialTp.passes) continue;
 
-    samples.push({
-      symbol,
+    signals.push({
       strategy: matrix.strategy,
-      passesA: resultA.passes,
-      passesB: resultB.passes,
-      netRA: resultA.netRMultiple,
-      netRB: resultB.netRMultiple,
+      direction,
+      entryIndex: i,
+      tp1Price: partialTp.tp1Price,
+      tp2Price: partialTp.tp2Price,
     });
   }
 
-  const spanMs = m5All.length > 0 ? m5All[m5All.length - 1].openTime - m5All[0].openTime : 0;
-  return { samples, spanDays: spanMs / (24 * 60 * 60 * 1000) };
+  return { signals, m5All };
 }
 
-function median(values: number[]): number {
-  if (values.length === 0) return NaN;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+type SweepOutcome = 'sustained' | 'wick-only' | 'undetermined';
+
+function classifyTouch(m5All: Candle[], entryIndex: number, direction: Direction, tpPrice: number): SweepOutcome {
+  const start = entryIndex + 1;
+  const end = Math.min(m5All.length - 1, entryIndex + MAX_LOOKAHEAD_CANDLES);
+
+  for (let j = start; j <= end; j++) {
+    const candle = m5All[j];
+    const touched = direction === 'LONG' ? candle.high >= tpPrice : candle.low <= tpPrice;
+    if (!touched) continue;
+
+    const closeFavorable = direction === 'LONG' ? candle.close >= tpPrice : candle.close <= tpPrice;
+    if (closeFavorable) return 'sustained';
+
+    const next = m5All[j + 1];
+    if (next) {
+      const nextFavorable = direction === 'LONG' ? next.close >= tpPrice : next.close <= tpPrice;
+      if (nextFavorable) return 'sustained';
+    }
+    return 'wick-only';
+  }
+  return 'undetermined';
 }
 
-function mean(values: number[]): number {
-  if (values.length === 0) return NaN;
-  return values.reduce((a, b) => a + b, 0) / values.length;
+interface LegStats {
+  total: number;
+  touched: number;
+  sustained: number;
+  wickOnly: number;
+}
+
+function emptyStats(): LegStats {
+  return { total: 0, touched: 0, sustained: 0, wickOnly: 0 };
+}
+
+function printLegStats(label: string, stats: LegStats): void {
+  const touchedPct = stats.total > 0 ? (stats.touched / stats.total) * 100 : 0;
+  const sustainedPct = stats.touched > 0 ? (stats.sustained / stats.touched) * 100 : 0;
+  const wickOnlyPct = stats.touched > 0 ? (stats.wickOnly / stats.touched) * 100 : 0;
+  console.log(
+    `  ${label}: n=${stats.total}  touched=${stats.touched} (${touchedPct.toFixed(1)}%)  |  trong so touched: sustained=${stats.sustained} (${sustainedPct.toFixed(1)}%)  wick-only=${stats.wickOnly} (${wickOnlyPct.toFixed(1)}%)`,
+  );
 }
 
 async function main() {
-  const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'XRPUSDT'];
+  const symbols = ['BTCUSDT', 'ETHUSDT'];
   const dataDir = path.resolve(process.cwd(), 'apps/bot/data');
   const strategies: Strategy[] = ['TREND_PULLBACK', 'BREAKOUT_WATCH'];
 
-  const bySymbol: Record<string, { samples: Sample[]; spanDays: number }> = {};
+  console.log(
+    'LUU Y: day la proxy gian tiep tu OHLC (khong co order book/tick data), khong phai mo phong khop lenh that.\n' +
+    'Ket qua chi mang tinh tham khao, khong thay the viec theo doi fill-rate that khi chay testnet.\n',
+  );
+
   for (const symbol of symbols) {
     console.log(`Processing ${symbol}...`);
-    bySymbol[symbol] = await processSymbol(symbol, dataDir);
-    console.log(`  ${bySymbol[symbol].samples.length} signals (TREND_PULLBACK + BREAKOUT_WATCH) over ${bySymbol[symbol].spanDays.toFixed(1)} days`);
-  }
+    const { signals, m5All } = await findPassingSignals(symbol, dataDir);
+    console.log(`  ${signals.length} tin hieu da pass (TREND_PULLBACK + BREAKOUT_WATCH)\n`);
 
-  console.log('\n=== Ket qua theo symbol x strategy (Kich ban A: taker 0.05%/0.05% vs B: 0.02%/0.05%) ===');
-  for (const symbol of symbols) {
-    const { samples, spanDays } = bySymbol[symbol];
+    console.log(`=== ${symbol} ===`);
     for (const strategy of strategies) {
-      const subset = samples.filter((s) => s.strategy === strategy);
-      if (subset.length === 0) {
-        console.log(`  ${symbol} / ${strategy}: n=0`);
-        continue;
-      }
-      const passA = subset.filter((s) => s.passesA).length;
-      const passB = subset.filter((s) => s.passesB).length;
-      const pctA = (passA / subset.length) * 100;
-      const pctB = (passB / subset.length) * 100;
-      const perDayA = spanDays > 0 ? passA / spanDays : 0;
-      const perDayB = spanDays > 0 ? passB / spanDays : 0;
-      const netRAValues = subset.map((s) => s.netRA);
-      const netRBValues = subset.map((s) => s.netRB);
-
-      console.log(`\n  ${symbol} / ${strategy}  (n=${subset.length}, ${spanDays.toFixed(1)} ngay)`);
-      console.log(
-        `    A (taker): pass=${passA}/${subset.length} (${pctA.toFixed(1)}%)  ${perDayA.toFixed(2)} lenh pass/ngay  netR mean=${mean(netRAValues).toFixed(3)} median=${median(netRAValues).toFixed(3)}`,
-      );
-      console.log(
-        `    B (maker-exit approx): pass=${passB}/${subset.length} (${pctB.toFixed(1)}%)  ${perDayB.toFixed(2)} lenh pass/ngay  netR mean=${mean(netRBValues).toFixed(3)} median=${median(netRBValues).toFixed(3)}`,
-      );
-    }
-  }
-
-  console.log('\n=== So sanh A vs B — rieng BTC va ETH ===');
-  console.log(
-    'symbol/strategy'.padEnd(28) +
-    'passA%'.padEnd(10) +
-    'passB%'.padEnd(10) +
-    'delta_pp'.padEnd(10) +
-    'A/ngay'.padEnd(10) +
-    'B/ngay'.padEnd(10),
-  );
-  for (const symbol of ['BTCUSDT', 'ETHUSDT']) {
-    const { samples, spanDays } = bySymbol[symbol];
-    for (const strategy of strategies) {
-      const subset = samples.filter((s) => s.strategy === strategy);
+      const subset = signals.filter((s) => s.strategy === strategy);
+      console.log(`\n${strategy} (n=${subset.length}):`);
       if (subset.length === 0) continue;
-      const passA = subset.filter((s) => s.passesA).length;
-      const passB = subset.filter((s) => s.passesB).length;
-      const pctA = (passA / subset.length) * 100;
-      const pctB = (passB / subset.length) * 100;
-      const perDayA = spanDays > 0 ? passA / spanDays : 0;
-      const perDayB = spanDays > 0 ? passB / spanDays : 0;
-      console.log(
-        `${symbol} / ${strategy}`.padEnd(28) +
-        `${pctA.toFixed(1)}%`.padEnd(10) +
-        `${pctB.toFixed(1)}%`.padEnd(10) +
-        `${(pctB - pctA).toFixed(1)}pp`.padEnd(10) +
-        `${perDayA.toFixed(2)}`.padEnd(10) +
-        `${perDayB.toFixed(2)}`.padEnd(10),
-      );
+
+      const tp1Stats = emptyStats();
+      const tp2Stats = emptyStats();
+
+      for (const signal of subset) {
+        for (const [stats, tpPrice] of [
+          [tp1Stats, signal.tp1Price],
+          [tp2Stats, signal.tp2Price],
+        ] as const) {
+          stats.total++;
+          const outcome = classifyTouch(m5All, signal.entryIndex, signal.direction, tpPrice);
+          if (outcome === 'undetermined') continue;
+          stats.touched++;
+          if (outcome === 'sustained') stats.sustained++;
+          else stats.wickOnly++;
+        }
+      }
+
+      printLegStats('TP1', tp1Stats);
+      printLegStats('TP2', tp2Stats);
     }
+    console.log('');
   }
 }
 
