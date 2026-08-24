@@ -1,13 +1,15 @@
 import type { Candle, Direction } from './types.js';
 
 export interface FvgConfig {
-  minCandle2BodyRatio: number; // TODO_CONFIRM — "than dai" of candle2, measured as body/range
+  minCandle2BodyRatio: number; // "than dai" of candle2, measured as body/range
 }
 
-// TODO_CONFIRM: placeholder per TICKET-RT-027 — video gives no number for "than dai", 0.6 is a
-// reasonable-looking guess (body clearly dominates the range), not backtest-chosen.
+// TICKET-RT-032: backtest-confirmed, 0.6 -> 0.7. Robust improvement across 5/5 coin (90 days, 5 coin,
+// floor=0.5%) — in particular fixes ETH, the weakest coin at 0.6 (PF 1.00, essentially breakeven) up
+// to PF 1.32, without the small-sample noise seen at 0.8 (BTC n=13 at that level). See RT-031/RT-032
+// reports for the full per-coin breakdown and sweep tables this was chosen from.
 export const DEFAULT_FVG_CONFIG: FvgConfig = {
-  minCandle2BodyRatio: 0.6,
+  minCandle2BodyRatio: 0.7,
 };
 
 export interface FvgResult {
