@@ -12,15 +12,6 @@ import { detectEngulfing } from '../src/entry/engulfing.js';
 import { computeAtr } from '../src/noTradeZone/atr.js';
 import { calculateRr } from '../src/risk/rrCalculator.js';
 
-// TICKET-RT-007: compares two RANGE_TRADING SL formulas against the current one (0.25x ATR buffer,
-// unchanged in src/risk/slCalculator.ts — NOT modified here). Detection pipeline (NTZ, regime routing,
-// candlestick trigger, range-proximity gate) is identical to TICKET-RT-006's measureSlDistribution.ts;
-// only the RANGE_TRADING SL formula and the downstream R:R check are varied, per this ticket's ask.
-//
-// R:R>=1.2 filter uses the opposite range boundary as cappedTpPrice (calculateRr's documented use case:
-// "nearest resistance/support zone that may limit TP short of ideal level") — for a range trade, TP
-// realistically can't extend past the far side of the range, so that's the natural cap. This is this
-// script's interpretation, not an existing spec formula.
 
 const H1_MS = 60 * 60 * 1000;
 const M15_MS = 15 * 60 * 1000;
@@ -264,10 +255,10 @@ async function main() {
     const p75 = percentile(sorted, 0.75);
     console.log(
       r.label.padEnd(28) +
-        String(sorted.length).padEnd(8) +
-        `${p25.toFixed(3)}%`.padEnd(10) +
-        `${median.toFixed(3)}%`.padEnd(10) +
-        `${p75.toFixed(3)}%`.padEnd(10),
+      String(sorted.length).padEnd(8) +
+      `${p25.toFixed(3)}%`.padEnd(10) +
+      `${median.toFixed(3)}%`.padEnd(10) +
+      `${p75.toFixed(3)}%`.padEnd(10),
     );
   }
 

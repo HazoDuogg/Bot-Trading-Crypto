@@ -15,13 +15,6 @@ import { computeAtr } from '../src/noTradeZone/atr.js';
 import { calculateSl } from '../src/risk/slCalculator.js';
 import type { EntryStrategy } from '../src/risk/types.js';
 
-// This script wires already-tested modules together purely for measurement (per TICKET-RT-006).
-// No entry-signal orchestrator exists in src yet, so the strategy->trigger mapping below is this
-// script's own interpretation, not project spec:
-//   TREND_PULLBACK / RANGE_TRADING -> pinBar or engulfing on M5 in the regime-implied direction
-//   BREAKOUT_WATCH                 -> detectBos() on M5 (name match is unambiguous)
-// RANGE_TRADING's rangeLevel = nearest M15 swing high/low, only counted "at the level" when the
-// M5 close is within 1x ATR(M5,14) of it. Entry price = the signal candle's M5 close.
 
 const H1_MS = 60 * 60 * 1000;
 const M15_MS = 15 * 60 * 1000;
