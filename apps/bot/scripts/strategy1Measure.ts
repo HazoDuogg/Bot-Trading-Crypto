@@ -13,6 +13,8 @@ import { calculateStructuralSlTp } from '../src/risk/structuralSlTp.js';
 import type { Direction } from '../src/risk/structuralSlTp.js';
 import { calculatePositionSize } from '../src/positionSizing/positionSizing.js';
 import { DEFAULT_MAX_MARGIN_PCT } from '../src/positionSizing/types.js';
+import { computeStochastic, DEFAULT_STOCHASTIC_CONFIG } from '../src/indicators/stochastic.js';
+import { computeFibZone } from '../src/indicators/fibonacci.js';
 
 // TICKET-RT-023: measures "Chien luoc 1" (H1 trend + H1 key zones + M5 Pin Bar/Engulfing + M5
 // structural SL/TP + volume confirm + net R:R floor) end to end on real data. Does NOT touch
@@ -135,6 +137,10 @@ interface Candidate {
   passesVolume: boolean;
   passesSlFloor: boolean;
   passesNetR: boolean;
+  // TICKET-RT-025: measured only, never filtered on.
+  stochCrossSignal: boolean;
+  retracementPct: number | null; // null = no opposite-type zone to pair with, Fib not computable
+  inFibZone: boolean;
 }
 
 async function findCandidates(symbol: string, dataDir: string, swingPivotWidthM5: number): Promise<Candidate[]> {
@@ -200,6 +206,42 @@ async function findCandidates(symbol: string, dataDir: string, swingPivotWidthM5
       distanceAtr = Math.abs(m5Price - nearestZone.price) / cachedAtrH1;
     }
 
+    // Fibonacci: reuses the SAME KeyZone pair (nearestZone + the nearest opposite-type zone), per
+    // ticket instruction, instead of computing a separate swing pair that could disagree with it.
+    const oppositeZoneType = zoneType === 'support' ? 'resistance' : 'support';
+    const oppositeZones = cachedZones.filter((z) => z.type === oppositeZoneType);
+    let retracementPct: number | null = null;
+    let inFibZone = false;
+    if (nearestZone && oppositeZones.length > 0) {
+      const oppositeZone = oppositeZones.reduce((closest, z) =>
+        Math.abs(z.price - m5Price) < Math.abs(closest.price - m5Price) ? z : closest,
+      );
+      const swingLowPrice = direction === 'LONG' ? nearestZone.price : oppositeZone.price;
+      const swingHighPrice = direction === 'LONG' ? oppositeZone.price : nearestZone.price;
+      const fib = computeFibZone(swingLowPrice, swingHighPrice, m5Price);
+      if (!Number.isNaN(fib.retracementPct)) {
+        retracementPct = fib.retracementPct;
+        inFibZone = direction === 'LONG' ? fib.inDiscountZone : fib.inPremiumZone;
+      }
+    }
+
+    // Stochastic on M5, at the signal candle — only the trailing slice needed for the last k/d values
+    // (avoids recomputing over the full, ever-growing m5Window on every candidate).
+    const stochWindow = m5Window.slice(-(DEFAULT_STOCHASTIC_CONFIG.kPeriod + DEFAULT_STOCHASTIC_CONFIG.smoothK + DEFAULT_STOCHASTIC_CONFIG.dPeriod + 5));
+    const { k: stochKArr, d: stochDArr } = computeStochastic(stochWindow, DEFAULT_STOCHASTIC_CONFIG);
+    let stochCrossSignal = false;
+    if (stochKArr.length >= 2 && stochDArr.length >= 2) {
+      const currK = stochKArr[stochKArr.length - 1];
+      const currD = stochDArr[stochDArr.length - 1];
+      const prevK = stochKArr[stochKArr.length - 2];
+      const prevD = stochDArr[stochDArr.length - 2];
+      if (direction === 'LONG') {
+        stochCrossSignal = prevK <= prevD && currK > currD && currK < 20;
+      } else {
+        stochCrossSignal = prevK >= prevD && currK < currD && currK > 80;
+      }
+    }
+
     const lookbackCandles = m5Window.slice(-1 - VOLUME_LOOKBACK, -1);
     const volumeRatio =
       lookbackCandles.length === VOLUME_LOOKBACK
@@ -260,6 +302,9 @@ async function findCandidates(symbol: string, dataDir: string, swingPivotWidthM5
       passesVolume: volumeRatio !== null && volumeRatio >= VOLUME_CONFIRM_MULTIPLIER,
       passesSlFloor: slPctRaw !== null && slPctRaw >= MIN_SL_PCT_FLOOR,
       passesNetR: netRMultiple !== null && netRMultiple >= MIN_NET_R_MULTIPLE,
+      stochCrossSignal,
+      retracementPct,
+      inFibZone,
     });
   }
 
@@ -341,7 +386,9 @@ function summarizeOutcome(label: string, candidates: Candidate[]): void {
 // calculateStructuralSlTp() almost always latched onto a swing right next to entry (SL% median
 // 0.013%, RT-023). ONLY this M5 width is swept here; findKeyZones/calculateStructuralSlTp/every
 // other threshold stays exactly as RT-023 left them, to isolate this one variable.
-const SWING_WIDTH_M5_SWEEP = [5, 8, 10, 15, 20];
+// TICKET-RT-025 runs only the best width found (20) — not the full RT-024 sweep — since this
+// ticket's job is the Stochastic/Fib correlation measurement, not another width sweep.
+const SWING_WIDTH_M5_SWEEP = [20];
 
 interface SweepResult {
   width: number;
@@ -415,6 +462,42 @@ async function main() {
         `${Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : 'inf'}`,
     );
   }
+
+  // TICKET-RT-025: correlation between stochCrossSignal/inFibZone and outcome, at width=20 — on
+  // BOTH the unfiltered set and the RT-024 4-condition-filtered set. Measurement only, no filtering.
+  const width20 = results.find((r) => r.width === 20);
+  if (width20) {
+    const unfiltered = width20.candidates.filter((c) => c.outcome !== null);
+    const filtered = width20.candidates.filter(
+      (c) => c.passesZone && c.passesVolume && c.passesSlFloor && c.passesNetR && c.outcome !== null,
+    );
+    printCorrelationTable('TOAN BO chua loc (width=20)', unfiltered);
+    printCorrelationTable('SAU 4 dieu kien cu (width=20, RT-024)', filtered);
+  }
+}
+
+function tpRate(candidates: Candidate[]): string {
+  if (candidates.length === 0) return 'n=0';
+  const tp = candidates.filter((c) => c.outcome === 'TP').length;
+  return `n=${candidates.length}  TP=${tp} (${((tp / candidates.length) * 100).toFixed(1)}%)`;
+}
+
+function printCorrelationTable(label: string, candidates: Candidate[]): void {
+  console.log(`\n=== Tuong quan Stochastic/Fibonacci voi outcome — ${label} ===`);
+
+  console.log('\n  stochCrossSignal:');
+  console.log(`    true:  ${tpRate(candidates.filter((c) => c.stochCrossSignal))}`);
+  console.log(`    false: ${tpRate(candidates.filter((c) => !c.stochCrossSignal))}`);
+
+  console.log('\n  inFibZone:');
+  console.log(`    true:  ${tpRate(candidates.filter((c) => c.inFibZone))}`);
+  console.log(`    false: ${tpRate(candidates.filter((c) => !c.inFibZone))}`);
+
+  console.log('\n  Ca 2 vs chi 1 vs khong co:');
+  console.log(`    ca 2 (stoch AND fib):     ${tpRate(candidates.filter((c) => c.stochCrossSignal && c.inFibZone))}`);
+  console.log(`    chi stoch (khong fib):    ${tpRate(candidates.filter((c) => c.stochCrossSignal && !c.inFibZone))}`);
+  console.log(`    chi fib (khong stoch):    ${tpRate(candidates.filter((c) => !c.stochCrossSignal && c.inFibZone))}`);
+  console.log(`    khong cai nao:            ${tpRate(candidates.filter((c) => !c.stochCrossSignal && !c.inFibZone))}`);
 }
 
 main().catch((err) => {
