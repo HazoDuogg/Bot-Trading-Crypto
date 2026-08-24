@@ -3,7 +3,7 @@ import path from 'node:path';
 import { checkNoTradeZone } from '../src/noTradeZone/noTradeZone.js';
 import type { Candle } from '../src/noTradeZone/types.js';
 import { classifyTrendH1 } from '../src/trend/trendH1.js';
-import { detectFvg, DEFAULT_FVG_CONFIG } from '../src/entry/fvg.js';
+import { detectFvg } from '../src/entry/fvg.js';
 import type { Direction } from '../src/entry/types.js';
 import { calculatePositionSize } from '../src/positionSizing/positionSizing.js';
 import { DEFAULT_MAX_MARGIN_PCT } from '../src/positionSizing/types.js';
@@ -61,6 +61,21 @@ const ATR_PERIOD = 14;
 const MAX_WAIT_CANDLES = 20;
 const TARGET_R_MULTIPLE = 1.5;
 const EMA_PERIOD_H1 = 200;
+const FLOOR_PCT = 0.5; // TICKET-RT-031: fixed for every sweep below, per RT-029's chosen PF peak
+
+// TICKET-RT-031: the 3 remaining TODO_CONFIRM parameters, now swept ONE AT A TIME — each affects the
+// scan itself (FVG shape or fill-wait or TP distance), unlike the floor (post-hoc filter), so each
+// value here requires a full re-run of findTrades(), not just a re-filter of one fixed trade list.
+interface FvgSweepConfig {
+  minCandle2BodyRatio: number;
+  maxWaitCandles: number;
+  targetRMultiple: number;
+}
+const DEFAULT_SWEEP_CONFIG: FvgSweepConfig = {
+  minCandle2BodyRatio: 0.6,
+  maxWaitCandles: MAX_WAIT_CANDLES,
+  targetRMultiple: TARGET_R_MULTIPLE,
+};
 
 const FEE_PCT_SUM = 0.05 + 0.05 + 0.05 + 0.05;
 
@@ -133,7 +148,7 @@ interface SymbolResult {
   trades: Trade[];
 }
 
-async function findTrades(symbol: string, dataDir: string): Promise<SymbolResult> {
+async function findTrades(symbol: string, dataDir: string, sweepConfig: FvgSweepConfig = DEFAULT_SWEEP_CONFIG): Promise<SymbolResult> {
   const h1All = await readCsv(path.join(dataDir, `${symbol}_1h.csv`));
   const m15All = await readCsv(path.join(dataDir, `${symbol}_15m.csv`));
   const leverage = LEVERAGE[symbol];
@@ -176,7 +191,10 @@ async function findTrades(symbol: string, dataDir: string): Promise<SymbolResult
         const slDistance = Math.abs(entryPrice - slPrice);
 
         if (slDistance > 0) {
-          const tpPrice = pending.direction === 'LONG' ? entryPrice + TARGET_R_MULTIPLE * slDistance : entryPrice - TARGET_R_MULTIPLE * slDistance;
+          const tpPrice =
+            pending.direction === 'LONG'
+              ? entryPrice + sweepConfig.targetRMultiple * slDistance
+              : entryPrice - sweepConfig.targetRMultiple * slDistance;
           const sizing = calculatePositionSize({
             balance: BALANCE,
             riskUsd: RISK_USD,
@@ -203,7 +221,7 @@ async function findTrades(symbol: string, dataDir: string): Promise<SymbolResult
           }
         }
         pending = null;
-      } else if (pending.waitCount >= MAX_WAIT_CANDLES) {
+      } else if (pending.waitCount >= sweepConfig.maxWaitCandles) {
         pending = null; // timeout, unfilled — not counted as a trade
       }
     }
@@ -215,7 +233,7 @@ async function findTrades(symbol: string, dataDir: string): Promise<SymbolResult
     const trendDirection: Direction = trend === 'UPTREND' ? 'LONG' : 'SHORT';
 
     // --- 2) check for a fresh FVG at this candle (candle1=i-2, candle2=i-1, candle3=i) ---
-    const fvg = detectFvg(m15All[i - 2], m15All[i - 1], m15All[i], DEFAULT_FVG_CONFIG);
+    const fvg = detectFvg(m15All[i - 2], m15All[i - 1], m15All[i], { minCandle2BodyRatio: sweepConfig.minCandle2BodyRatio });
     if (fvg.isFvg && fvg.direction === trendDirection && fvg.gapLow !== undefined && fvg.gapHigh !== undefined && fvg.invalidationPrice !== undefined) {
       fvgCount++;
 
@@ -339,6 +357,33 @@ function printKeyZoneCorrelation(label: string, trades: Trade[]): void {
   );
 }
 
+async function runFull(dataDir: string, symbols: string[], sweepConfig: FvgSweepConfig): Promise<Trade[]> {
+  let allTrades: Trade[] = [];
+  for (const symbol of symbols) {
+    const result = await findTrades(symbol, dataDir, sweepConfig);
+    allTrades = allTrades.concat(result.trades);
+  }
+  return allTrades;
+}
+
+function printParamSweepRow(label: string, s: Summary): void {
+  console.log(
+    label.padEnd(14) +
+      String(s.n).padEnd(8) +
+      s.tradesPerDayPerCoin.toFixed(3).padEnd(16) +
+      `${s.n > 0 ? ((s.tp / s.n) * 100).toFixed(0) : '0'}%`.padEnd(8) +
+      `${s.n > 0 ? ((s.sl / s.n) * 100).toFixed(0) : '0'}%`.padEnd(8) +
+      `$${s.pnl.toFixed(2)}`.padEnd(14) +
+      `${s.winRate.toFixed(1)}%`.padEnd(10) +
+      `${Number.isFinite(s.profitFactor) ? s.profitFactor.toFixed(2) : 'inf'}`,
+  );
+}
+
+function printParamSweepHeader(title: string): void {
+  console.log(`\n=== ${title} ===`);
+  console.log('gia tri'.padEnd(14) + 'n'.padEnd(8) + 'lenh/ngay/coin'.padEnd(16) + 'TP%'.padEnd(8) + 'SL%'.padEnd(8) + 'PnL$'.padEnd(14) + 'winRate'.padEnd(10) + 'PF');
+}
+
 async function main() {
   const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'XRPUSDT'];
   const dataDir = path.resolve(process.cwd(), 'apps/bot/data');
@@ -419,6 +464,32 @@ async function main() {
   // Reported on BOTH the no-floor baseline (n=1959) and floor=0.5% (RT-029's PF peak, n=469).
   printKeyZoneCorrelation('BASELINE khong floor', allTrades);
   printKeyZoneCorrelation('floor=0.5% (RT-029 PF peak)', allTrades.filter((t) => t.slPct >= 0.5));
+
+  // TICKET-RT-031: sweep each of the 3 remaining TODO_CONFIRM params ONE AT A TIME, floor fixed at
+  // 0.5% in every run (post-hoc filter, same as before). Baseline row = current defaults, matches
+  // RT-029: PF=1.48, n=469, PnL=$559.58.
+  console.log(`\n\nBaseline hien tai (floor=${FLOOR_PCT}%, moi tham so mac dinh): PF=1.48, n=469, PnL=$559.58 (RT-029)`);
+
+  printParamSweepHeader('Sweep minCandle2BodyRatio (giu maxWaitCandles=20, targetRMultiple=1.5)');
+  for (const value of [0.4, 0.5, 0.6, 0.7, 0.8]) {
+    const trades = await runFull(dataDir, symbols, { ...DEFAULT_SWEEP_CONFIG, minCandle2BodyRatio: value });
+    const filtered = trades.filter((t) => t.slPct >= FLOOR_PCT);
+    printParamSweepRow(`${value}`, summarize(filtered, spanDays, symbols.length));
+  }
+
+  printParamSweepHeader('Sweep MAX_WAIT_CANDLES (giu minCandle2BodyRatio=0.6, targetRMultiple=1.5)');
+  for (const value of [10, 15, 20, 30, 40]) {
+    const trades = await runFull(dataDir, symbols, { ...DEFAULT_SWEEP_CONFIG, maxWaitCandles: value });
+    const filtered = trades.filter((t) => t.slPct >= FLOOR_PCT);
+    printParamSweepRow(`${value}`, summarize(filtered, spanDays, symbols.length));
+  }
+
+  printParamSweepHeader('Sweep TARGET_R_MULTIPLE (giu minCandle2BodyRatio=0.6, maxWaitCandles=20)');
+  for (const value of [1.5, 1.75, 2.0]) {
+    const trades = await runFull(dataDir, symbols, { ...DEFAULT_SWEEP_CONFIG, targetRMultiple: value });
+    const filtered = trades.filter((t) => t.slPct >= FLOOR_PCT);
+    printParamSweepRow(`${value}`, summarize(filtered, spanDays, symbols.length));
+  }
 
   console.log('\n=== So sanh voi cac ket qua da do trong ngay (baseline, khong floor) ===');
   console.log('  M5 Chien Luoc 1 tot nhat (RT-024, width=20): PF=0.17, winRate=12.5%, 0.089 lenh/ngay/coin');
