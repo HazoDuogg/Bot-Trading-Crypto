@@ -1,5 +1,4 @@
-import type { Direction, FeeConfig } from './types.js';
-import { DEFAULT_FEE_CONFIG } from './types.js';
+import type { Direction } from './types.js';
 
 export interface PartialTpConfig {
   tp1RMultiple: number;
@@ -20,11 +19,39 @@ export const DEFAULT_PARTIAL_TP_CONFIG: PartialTpConfig = {
   minRealRMultiple: 1.2,
 };
 
+// Entry is assumed market/taker (signal-driven, must fill immediately — no waiting).
+// Exit legs (TP1/TP2) can be maker (limit order, resting in the book) or taker (market) — configurable per scenario.
+// A filled maker/limit order gets exactly its set price, so exitSlippagePct should be 0 for a maker exit config;
+// only a market/taker exit realistically incurs slippage.
+export interface ExecutionFeeConfig {
+  entryFeePct: number;
+  entrySlippagePct: number;
+  exitFeePct: number;
+  exitSlippagePct: number;
+}
+
+// Baseline: everything taker (matches the old single-rate FeeConfig behavior).
+export const TAKER_ONLY_FEE_CONFIG: ExecutionFeeConfig = {
+  entryFeePct: 0.05,
+  entrySlippagePct: 0.05,
+  exitFeePct: 0.05,
+  exitSlippagePct: 0.05,
+};
+
+// Entry stays taker (must fill on signal); TP1/TP2 assumed to fill as maker limit orders — 0 slippage since a
+// filled limit order fills at its set price. TODO_CONFIRM: real maker fill rate not yet measured (see TICKET-RT-011).
+export const MAKER_EXIT_FEE_CONFIG: ExecutionFeeConfig = {
+  entryFeePct: 0.05,
+  entrySlippagePct: 0.05,
+  exitFeePct: 0.02,
+  exitSlippagePct: 0,
+};
+
 export interface PartialTpInput {
   direction: Direction;
   entryPrice: number;
   slPrice: number;
-  feeConfig?: FeeConfig;
+  feeConfig?: ExecutionFeeConfig;
   config?: PartialTpConfig;
 }
 
