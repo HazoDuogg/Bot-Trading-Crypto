@@ -30,6 +30,13 @@ import { DEFAULT_MAX_MARGIN_PCT } from '../src/positionSizing/types.js';
 // earlier one is still waiting to fill, the new one REPLACES the old wait (most recent wins), same
 // overlap-handling choice as RT-022's wait-for-retest state machine, for the same reason: the ticket
 // doesn't specify how to handle overlapping setups.
+//
+// TICKET-RT-028: adds a minSlPctFloor, applied POST-HOC in main() by filtering the already-built
+// `allTrades` list (slPct is computed and stored on every trade regardless of any floor) rather than
+// rejecting inside findTrades()'s fill logic — entryPrice/slPrice/tpPrice/outcome never depend on the
+// floor, so filtering afterward is exactly equivalent to "don't count as filled" for every reported
+// number (n, breakdown, PnL, winRate, PF), without re-running the scan per floor value. detectFvg()
+// itself is untouched — the floor is a risk/sizing decision, not a pattern-recognition one.
 
 const H1_MS = 60 * 60 * 1000;
 const M15_MS = 15 * 60 * 1000;
@@ -87,6 +94,7 @@ interface Trade {
   qty: number;
   notional: number;
   outcome: Outcome;
+  slPct: number; // TICKET-RT-028: always computed, floor applied post-hoc in main() — see note there
 }
 
 function scanOutcome(m15All: Candle[], entryIndex: number, direction: Direction, slPrice: number, tpPrice: number): Outcome {
@@ -167,6 +175,7 @@ async function findTrades(symbol: string, dataDir: string): Promise<SymbolResult
               qty: sizing.qty,
               notional: sizing.notional,
               outcome,
+              slPct: (slDistance / entryPrice) * 100,
             });
           }
         }
@@ -211,6 +220,67 @@ function computePnl(t: Trade): number {
   return t.qty * directedDelta(t.direction, t.entryPrice, exitPrice) - costDollars;
 }
 
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return NaN;
+  const idx = (sorted.length - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+}
+
+interface Summary {
+  n: number;
+  tp: number;
+  sl: number;
+  open: number;
+  pnl: number;
+  winRate: number;
+  profitFactor: number;
+  tradesPerDayPerCoin: number;
+}
+
+function summarize(trades: Trade[], spanDays: number, symbolCount: number): Summary {
+  const tp = trades.filter((t) => t.outcome === 'TP').length;
+  const sl = trades.filter((t) => t.outcome === 'SL').length;
+  const open = trades.filter((t) => t.outcome === 'STILL_OPEN').length;
+
+  let pnl = 0;
+  let wins = 0;
+  let losses = 0;
+  let grossProfit = 0;
+  let grossLoss = 0;
+  for (const t of trades) {
+    if (t.outcome === 'STILL_OPEN') continue;
+    const p = computePnl(t);
+    pnl += p;
+    if (p > 0) {
+      wins++;
+      grossProfit += p;
+    } else if (p < 0) {
+      losses++;
+      grossLoss += Math.abs(p);
+    }
+  }
+  const decided = wins + losses;
+  const winRate = decided > 0 ? (wins / decided) * 100 : 0;
+  const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
+  const tradesPerDayPerCoin = spanDays > 0 ? trades.length / spanDays / symbolCount : 0;
+
+  return { n: trades.length, tp, sl, open, pnl, winRate, profitFactor, tradesPerDayPerCoin };
+}
+
+function printSummary(label: string, s: Summary): void {
+  console.log(`\n=== ${label} ===`);
+  console.log(`  n=${s.n}  (${s.tradesPerDayPerCoin.toFixed(3)} lenh/ngay/coin)`);
+  console.log(`  TP: ${s.tp} (${s.n > 0 ? ((s.tp / s.n) * 100).toFixed(1) : '0.0'}%)`);
+  console.log(`  SL: ${s.sl} (${s.n > 0 ? ((s.sl / s.n) * 100).toFixed(1) : '0.0'}%)`);
+  console.log(`  STILL_OPEN: ${s.open} (${s.n > 0 ? ((s.open / s.n) * 100).toFixed(1) : '0.0'}%)`);
+  console.log(
+    `  PnL=$${s.pnl.toFixed(2)}  winRate=${s.winRate.toFixed(1)}%  PF=${Number.isFinite(s.profitFactor) ? s.profitFactor.toFixed(2) : 'inf'}`,
+  );
+}
+
 async function main() {
   const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'XRPUSDT'];
   const dataDir = path.resolve(process.cwd(), 'apps/bot/data');
@@ -233,45 +303,43 @@ async function main() {
 
   console.log(`\nTong: ${totalFvg} FVG, ${totalFilled} da fill (${totalFvg > 0 ? ((totalFilled / totalFvg) * 100).toFixed(1) : '0.0'}% fill rate)`);
 
-  const decidable = allTrades.filter((t) => t.outcome !== 'STILL_OPEN');
-  const tp = allTrades.filter((t) => t.outcome === 'TP').length;
-  const sl = allTrades.filter((t) => t.outcome === 'SL').length;
-  const open = allTrades.filter((t) => t.outcome === 'STILL_OPEN').length;
-
-  let pnl = 0;
-  let wins = 0;
-  let losses = 0;
-  let grossProfit = 0;
-  let grossLoss = 0;
-  for (const t of decidable) {
-    const p = computePnl(t);
-    pnl += p;
-    if (p > 0) {
-      wins++;
-      grossProfit += p;
-    } else if (p < 0) {
-      losses++;
-      grossLoss += Math.abs(p);
-    }
-  }
-  const decided = wins + losses;
-  const winRate = decided > 0 ? (wins / decided) * 100 : 0;
-  const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
-  const tradesPerDayPerCoin = spanDays > 0 ? allTrades.length / spanDays / symbols.length : 0;
-
-  console.log(`\n=== Ket qua sau khi fill (n=${allTrades.length}, ${tradesPerDayPerCoin.toFixed(3)} lenh/ngay/coin, ${spanDays.toFixed(1)} ngay x ${symbols.length} coin) ===`);
-  console.log(`  TP: ${tp} (${allTrades.length > 0 ? ((tp / allTrades.length) * 100).toFixed(1) : '0.0'}%)`);
-  console.log(`  SL: ${sl} (${allTrades.length > 0 ? ((sl / allTrades.length) * 100).toFixed(1) : '0.0'}%)`);
-  console.log(`  STILL_OPEN: ${open} (${allTrades.length > 0 ? ((open / allTrades.length) * 100).toFixed(1) : '0.0'}%)`);
+  // TICKET-RT-028 step 1: SL% distribution of ALL filled trades, no floor applied — measured before
+  // guessing where to put the floor, not reused blindly from Chien Luoc 1's 0.05% (different SL source:
+  // candle1's wick, not a swing point).
+  const slPctValues = allTrades.map((t) => t.slPct).sort((a, b) => a - b);
+  console.log('\n=== Phan phoi SL% (tat ca lenh da fill, CHUA ap floor) ===');
   console.log(
-    `  PnL=$${pnl.toFixed(2)}  winRate=${winRate.toFixed(1)}%  PF=${Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : 'inf'}  wins=${wins}  losses=${losses}`,
+    `  n=${slPctValues.length}  p10=${percentile(slPctValues, 0.1).toFixed(4)}  p25=${percentile(slPctValues, 0.25).toFixed(4)}  median=${percentile(slPctValues, 0.5).toFixed(4)}  p75=${percentile(slPctValues, 0.75).toFixed(4)}  p90=${percentile(slPctValues, 0.9).toFixed(4)}  min=${slPctValues[0].toFixed(4)}  max=${slPctValues[slPctValues.length - 1].toFixed(4)}`,
   );
 
-  console.log('\n=== So sanh voi cac ket qua da do trong ngay ===');
+  const baseline = summarize(allTrades, spanDays, symbols.length);
+  printSummary(`BASELINE (khong floor, khop RT-027: n=1959, PnL=-$1799.16, winRate=52.1%, PF=0.70)`, baseline);
+
+  // Step 3: sweep floor levels spanning the measured distribution (p10 through ~p75), plus the
+  // round-trip fee (~0.2%) itself as a natural reference point.
+  const FLOOR_SWEEP = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3];
+  console.log('\n=== Sweep minSlPctFloor ===');
+  console.log('floor%'.padEnd(10) + 'n'.padEnd(8) + 'lenh/ngay/coin'.padEnd(16) + 'TP%'.padEnd(8) + 'SL%'.padEnd(8) + 'PnL$'.padEnd(14) + 'winRate'.padEnd(10) + 'PF');
+  for (const floor of FLOOR_SWEEP) {
+    const filtered = allTrades.filter((t) => t.slPct >= floor);
+    const s = summarize(filtered, spanDays, symbols.length);
+    console.log(
+      `${floor}`.padEnd(10) +
+        String(s.n).padEnd(8) +
+        s.tradesPerDayPerCoin.toFixed(3).padEnd(16) +
+        `${s.n > 0 ? ((s.tp / s.n) * 100).toFixed(0) : '0'}%`.padEnd(8) +
+        `${s.n > 0 ? ((s.sl / s.n) * 100).toFixed(0) : '0'}%`.padEnd(8) +
+        `$${s.pnl.toFixed(2)}`.padEnd(14) +
+        `${s.winRate.toFixed(1)}%`.padEnd(10) +
+        `${Number.isFinite(s.profitFactor) ? s.profitFactor.toFixed(2) : 'inf'}`,
+    );
+  }
+
+  console.log('\n=== So sanh voi cac ket qua da do trong ngay (baseline, khong floor) ===');
   console.log('  M5 Chien Luoc 1 tot nhat (RT-024, width=20): PF=0.17, winRate=12.5%, 0.089 lenh/ngay/coin');
   console.log('  M15 Chien Luoc 1 tot nhat (RT-026, width=2): PF=0.44, winRate=42.9%, 0.016 lenh/ngay/coin');
   console.log(
-    `  M15 FVG (ticket nay):                         PF=${Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : 'inf'}, winRate=${winRate.toFixed(1)}%, ${tradesPerDayPerCoin.toFixed(3)} lenh/ngay/coin`,
+    `  M15 FVG khong floor (RT-027):                 PF=${Number.isFinite(baseline.profitFactor) ? baseline.profitFactor.toFixed(2) : 'inf'}, winRate=${baseline.winRate.toFixed(1)}%, ${baseline.tradesPerDayPerCoin.toFixed(3)} lenh/ngay/coin`,
   );
 }
 
