@@ -8,10 +8,11 @@ export interface ExposureTrackerConfig {
   minRiskFraction: number; // floor as a fraction of the candidate's pre-scale-down actualRiskUsd, e.g. 0.3 = 30%
 }
 
-// TODO_CONFIRM: baseline placeholders per TICKET-RT-015 — not backtest-chosen yet, that's this ticket's job.
+// TODO_CONFIRM: chosen from TICKET-RT-015 sweep (skip/scale-down counts across 1093 signals,
+// 5 coin, 90 days) — cap=70% has diminishing returns past this point (70%->80% only rescues
 export const DEFAULT_EXPOSURE_TRACKER_CONFIG: ExposureTrackerConfig = {
   maxTotalUsedMargin: 0.7,
-  minRiskFraction: 0.3,
+  minRiskFraction: 0.4, // was 0.3
 };
 
 export interface OpenPosition {
