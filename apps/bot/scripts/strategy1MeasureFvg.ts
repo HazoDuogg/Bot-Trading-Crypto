@@ -7,6 +7,10 @@ import { detectFvg, DEFAULT_FVG_CONFIG } from '../src/entry/fvg.js';
 import type { Direction } from '../src/entry/types.js';
 import { calculatePositionSize } from '../src/positionSizing/positionSizing.js';
 import { DEFAULT_MAX_MARGIN_PCT } from '../src/positionSizing/types.js';
+import { computeAtr } from '../src/noTradeZone/atr.js';
+import { findKeyZones } from '../src/zones/keyZones.js';
+import type { KeyZone } from '../src/zones/keyZones.js';
+import { DEFAULT_REGIME_CONFIG } from '../src/regime/types.js';
 
 // TICKET-RT-027: FVG (Fair Value Gap) as an independent entry signal, per the "Casper SMC" video —
 // with the "US session open" liquidity-window part STRIPPED OUT entirely (doesn't apply to 24/7
@@ -37,9 +41,22 @@ import { DEFAULT_MAX_MARGIN_PCT } from '../src/positionSizing/types.js';
 // floor, so filtering afterward is exactly equivalent to "don't count as filled" for every reported
 // number (n, breakdown, PnL, winRate, PF), without re-running the scan per floor value. detectFvg()
 // itself is untouched — the floor is a risk/sizing decision, not a pattern-recognition one.
+//
+// TICKET-RT-030: measures (never filters on) whether the FVG's gap contains an H1 KeyZone price —
+// findKeyZones() is reused UNMODIFIED. There is no exported "DEFAULT_KEY_ZONE_CONFIG" in
+// src/zones/keyZones.ts (the ticket assumed one) — FVG_KEY_ZONE_CONFIG below replicates the exact
+// same values strategy1Measure.ts's KEY_ZONE_CONFIG uses, not new numbers. "Breaks a zone" = literal
+// containment, zero tolerance per ticket instruction: some zone's price falls within [gapLow, gapHigh].
+const FVG_KEY_ZONE_CONFIG = {
+  swingPivotWidth: DEFAULT_REGIME_CONFIG.swingPivotWidth,
+  clusterToleranceAtrMultiplier: 0.5,
+  minTouches: 2,
+  maxZoneAgeCandles: 500,
+};
 
 const H1_MS = 60 * 60 * 1000;
 const M15_MS = 15 * 60 * 1000;
+const ATR_PERIOD = 14;
 
 const MAX_WAIT_CANDLES = 20;
 const TARGET_R_MULTIPLE = 1.5;
@@ -83,6 +100,7 @@ interface PendingFvg {
   invalidationPrice: number;
   fvgIndex: number; // index of candle3
   waitCount: number;
+  breaksKeyZone: boolean; // TICKET-RT-030: measured only, never filtered on
 }
 
 interface Trade {
@@ -95,6 +113,7 @@ interface Trade {
   notional: number;
   outcome: Outcome;
   slPct: number; // TICKET-RT-028: always computed, floor applied post-hoc in main() — see note there
+  breaksKeyZone: boolean;
 }
 
 function scanOutcome(m15All: Candle[], entryIndex: number, direction: Direction, slPrice: number, tpPrice: number): Outcome {
@@ -124,6 +143,9 @@ async function findTrades(symbol: string, dataDir: string): Promise<SymbolResult
   let filledCount = 0;
   const trades: Trade[] = [];
   let pending: PendingFvg | null = null;
+
+  let cachedH1Cursor = -1;
+  let cachedZones: KeyZone[] = [];
 
   for (let i = 2; i < m15All.length; i++) {
     const m15CloseTime = m15All[i].openTime + M15_MS;
@@ -176,6 +198,7 @@ async function findTrades(symbol: string, dataDir: string): Promise<SymbolResult
               notional: sizing.notional,
               outcome,
               slPct: (slDistance / entryPrice) * 100,
+              breaksKeyZone: pending.breaksKeyZone,
             });
           }
         }
@@ -195,6 +218,19 @@ async function findTrades(symbol: string, dataDir: string): Promise<SymbolResult
     const fvg = detectFvg(m15All[i - 2], m15All[i - 1], m15All[i], DEFAULT_FVG_CONFIG);
     if (fvg.isFvg && fvg.direction === trendDirection && fvg.gapLow !== undefined && fvg.gapHigh !== undefined && fvg.invalidationPrice !== undefined) {
       fvgCount++;
+
+      // TICKET-RT-030: recompute H1 KeyZones only when h1Cursor has advanced since last time —
+      // findKeyZones is O(h1Window length), and h1Cursor only changes once per hour.
+      if (h1Cursor !== cachedH1Cursor) {
+        cachedH1Cursor = h1Cursor;
+        const atrH1Values = computeAtr(h1Window, ATR_PERIOD);
+        const atrH1 = atrH1Values.length > 0 ? atrH1Values[atrH1Values.length - 1] : 0;
+        cachedZones = atrH1 > 0 ? findKeyZones(h1Window, atrH1, FVG_KEY_ZONE_CONFIG) : [];
+      }
+      const gapLow = fvg.gapLow;
+      const gapHigh = fvg.gapHigh;
+      const breaksKeyZone = cachedZones.some((z) => z.price >= gapLow && z.price <= gapHigh);
+
       pending = {
         direction: fvg.direction,
         gapLow: fvg.gapLow,
@@ -202,6 +238,7 @@ async function findTrades(symbol: string, dataDir: string): Promise<SymbolResult
         invalidationPrice: fvg.invalidationPrice,
         fvgIndex: i,
         waitCount: 0,
+        breaksKeyZone,
       };
     }
   }
@@ -281,6 +318,27 @@ function printSummary(label: string, s: Summary): void {
   );
 }
 
+function printKeyZoneCorrelation(label: string, trades: Trade[]): void {
+  const withZone = trades.filter((t) => t.breaksKeyZone);
+  const withoutZone = trades.filter((t) => !t.breaksKeyZone);
+  const matchPct = trades.length > 0 ? (withZone.length / trades.length) * 100 : 0;
+
+  console.log(`\n=== Tuong quan breaksKeyZone voi outcome — ${label} ===`);
+  console.log(`  Ty le FVG pha qua KeyZone H1: ${withZone.length}/${trades.length} (${matchPct.toFixed(1)}%)`);
+  if (matchPct < 5) {
+    console.log('  LUU Y: ty le duoi 5% — co mau nhom "true" co the qua nho, KHONG tu ket luan chac chan tu so nay.');
+  }
+
+  const sBreak = summarize(withZone, 1, 1);
+  const sNoBreak = summarize(withoutZone, 1, 1);
+  console.log(
+    `  breaksKeyZone=true:  n=${sBreak.n}  TP=${sBreak.tp} (${sBreak.n > 0 ? ((sBreak.tp / sBreak.n) * 100).toFixed(1) : '0.0'}%)  PnL=$${sBreak.pnl.toFixed(2)}  winRate=${sBreak.winRate.toFixed(1)}%  PF=${Number.isFinite(sBreak.profitFactor) ? sBreak.profitFactor.toFixed(2) : 'inf'}`,
+  );
+  console.log(
+    `  breaksKeyZone=false: n=${sNoBreak.n}  TP=${sNoBreak.tp} (${sNoBreak.n > 0 ? ((sNoBreak.tp / sNoBreak.n) * 100).toFixed(1) : '0.0'}%)  PnL=$${sNoBreak.pnl.toFixed(2)}  winRate=${sNoBreak.winRate.toFixed(1)}%  PF=${Number.isFinite(sNoBreak.profitFactor) ? sNoBreak.profitFactor.toFixed(2) : 'inf'}`,
+  );
+}
+
 async function main() {
   const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'XRPUSDT'];
   const dataDir = path.resolve(process.cwd(), 'apps/bot/data');
@@ -356,6 +414,11 @@ async function main() {
         `${Number.isFinite(s.profitFactor) ? s.profitFactor.toFixed(2) : 'inf'}`,
     );
   }
+
+  // TICKET-RT-030: correlation between breaksKeyZone and outcome — measured only, never filtered on.
+  // Reported on BOTH the no-floor baseline (n=1959) and floor=0.5% (RT-029's PF peak, n=469).
+  printKeyZoneCorrelation('BASELINE khong floor', allTrades);
+  printKeyZoneCorrelation('floor=0.5% (RT-029 PF peak)', allTrades.filter((t) => t.slPct >= 0.5));
 
   console.log('\n=== So sanh voi cac ket qua da do trong ngay (baseline, khong floor) ===');
   console.log('  M5 Chien Luoc 1 tot nhat (RT-024, width=20): PF=0.17, winRate=12.5%, 0.089 lenh/ngay/coin');
