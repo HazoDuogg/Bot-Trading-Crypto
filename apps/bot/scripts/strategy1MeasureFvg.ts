@@ -477,6 +477,33 @@ async function main() {
     printParamSweepRow(`${value}`, summarize(filtered, spanDays, symbols.length));
   }
 
+  // TICKET-RT-032: per-coin robustness check for minCandle2BodyRatio=0.6/0.7/0.8 — RT-031's pooled
+  // PF gains (1.48/1.54/1.59) could just be 1-2 coins pulling the average up, same check style as
+  // RT-029. floor/maxWaitCandles/targetRMultiple all fixed at their current values.
+  console.log('\n=== TICKET-RT-032: Breakdown theo coin cho minCandle2BodyRatio (floor=0.5%) ===');
+  for (const ratio of [0.6, 0.7, 0.8]) {
+    const trades = await runFull(dataDir, symbols, { ...DEFAULT_SWEEP_CONFIG, minCandle2BodyRatio: ratio });
+    const filtered = trades.filter((t) => t.slPct >= FLOOR_PCT);
+    console.log(`\n--- minCandle2BodyRatio=${ratio} ---`);
+    console.log('symbol'.padEnd(12) + 'n'.padEnd(8) + 'TP%'.padEnd(8) + 'SL%'.padEnd(8) + 'PnL$'.padEnd(14) + 'winRate'.padEnd(10) + 'PF');
+    let positiveCoinCount = 0;
+    for (const symbol of symbols) {
+      const symbolTrades = filtered.filter((t) => t.symbol === symbol);
+      const s = summarize(symbolTrades, spanDays, 1);
+      if (s.profitFactor > 1) positiveCoinCount++;
+      console.log(
+        symbol.padEnd(12) +
+          String(s.n).padEnd(8) +
+          `${s.n > 0 ? ((s.tp / s.n) * 100).toFixed(0) : '0'}%`.padEnd(8) +
+          `${s.n > 0 ? ((s.sl / s.n) * 100).toFixed(0) : '0'}%`.padEnd(8) +
+          `$${s.pnl.toFixed(2)}`.padEnd(14) +
+          `${s.winRate.toFixed(1)}%`.padEnd(10) +
+          `${Number.isFinite(s.profitFactor) ? s.profitFactor.toFixed(2) : 'inf'}`,
+      );
+    }
+    console.log(`  -> ${positiveCoinCount}/5 coin co PF>1 ${positiveCoinCount >= 4 ? '(DAT tieu chi robust >=4/5)' : '(CHUA dat tieu chi robust >=4/5)'}`);
+  }
+
   printParamSweepHeader('Sweep MAX_WAIT_CANDLES (giu minCandle2BodyRatio=0.6, targetRMultiple=1.5)');
   for (const value of [10, 15, 20, 30, 40]) {
     const trades = await runFull(dataDir, symbols, { ...DEFAULT_SWEEP_CONFIG, maxWaitCandles: value });
