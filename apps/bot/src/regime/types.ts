@@ -23,14 +23,6 @@ export interface SwingPoint {
   type: SwingType;
 }
 
-export type Strategy = 'TREND_PULLBACK' | 'RANGE_TRADING' | 'BREAKOUT_WATCH' | 'STANDBY';
-export type Direction = 'LONG' | 'SHORT';
-
-export interface RegimeMatrixResult {
-  strategy: Strategy;
-  direction?: Direction; // present for TREND_PULLBACK and BREAKOUT_WATCH
-}
-
 export interface RegimeConfig {
   emaPeriod: number;
   slopeLookback: number;
