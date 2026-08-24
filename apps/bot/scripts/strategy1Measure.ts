@@ -137,7 +137,7 @@ interface Candidate {
   passesNetR: boolean;
 }
 
-async function findCandidates(symbol: string, dataDir: string): Promise<Candidate[]> {
+async function findCandidates(symbol: string, dataDir: string, swingPivotWidthM5: number): Promise<Candidate[]> {
   const h1All = await readCsv(path.join(dataDir, `${symbol}_1h.csv`));
   const m15All = await readCsv(path.join(dataDir, `${symbol}_15m.csv`));
   const m5All = await readCsv(path.join(dataDir, `${symbol}_5m.csv`));
@@ -211,7 +211,7 @@ async function findCandidates(symbol: string, dataDir: string): Promise<Candidat
       direction,
       entryPrice,
       m5Candles: m5Window,
-      swingPivotWidth: SWING_WIDTH,
+      swingPivotWidth: swingPivotWidthM5,
       minSlPctFloor: 0, // no floor here — floor applied as a separate boolean below, for distribution purposes
     });
 
@@ -336,42 +336,85 @@ function summarizeOutcome(label: string, candidates: Candidate[]): void {
   );
 }
 
+// TICKET-RT-024: swingPivotWidth=2 (H1-calibrated: 2 candles = 2 hours either side) was being reused
+// for M5 structural SL/TP (2 candles = only 10 minutes either side) — far too tight, so
+// calculateStructuralSlTp() almost always latched onto a swing right next to entry (SL% median
+// 0.013%, RT-023). ONLY this M5 width is swept here; findKeyZones/calculateStructuralSlTp/every
+// other threshold stays exactly as RT-023 left them, to isolate this one variable.
+const SWING_WIDTH_M5_SWEEP = [5, 8, 10, 15, 20];
+
+interface SweepResult {
+  width: number;
+  candidates: Candidate[];
+}
+
 async function main() {
   const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'XRPUSDT'];
   const dataDir = path.resolve(process.cwd(), 'apps/bot/data');
 
-  let allCandidates: Candidate[] = [];
-  for (const symbol of symbols) {
-    console.log(`Processing ${symbol}...`);
-    const candidates = await findCandidates(symbol, dataDir);
-    console.log(`  ${candidates.length} raw Pin Bar/Engulfing signals in trend direction (before zone/volume/SL-floor/R:R filters)`);
-    allCandidates = allCandidates.concat(candidates);
+  const results: SweepResult[] = [];
+  for (const width of SWING_WIDTH_M5_SWEEP) {
+    console.log(`\n########## swingPivotWidthM5 = ${width} ##########`);
+    let allCandidates: Candidate[] = [];
+    for (const symbol of symbols) {
+      const candidates = await findCandidates(symbol, dataDir, width);
+      console.log(`  ${symbol}: ${candidates.length} raw signals`);
+      allCandidates = allCandidates.concat(candidates);
+    }
+    console.log(`  Total raw candidates: ${allCandidates.length}`);
+
+    console.log('\n  --- Phan phoi (tat ca candidate, chua loc) ---');
+    printDistribution('  SL% (structural, chua ap floor)', allCandidates.filter((c) => c.slPctRaw !== null).map((c) => c.slPctRaw as number));
+    printDistribution('  netRMultiple (chua ap san)', allCandidates.filter((c) => c.netRMultiple !== null).map((c) => c.netRMultiple as number));
+
+    const noStructural = allCandidates.filter((c) => c.slPrice === null).length;
+    console.log(`  Khong tinh duoc structural SL/TP: ${noStructural}/${allCandidates.length}`);
+
+    summarizeOutcome(`  width=${width}: TAT CA candidate (khong loc gi)`, allCandidates.filter((c) => c.outcome !== null));
+
+    const filtered = allCandidates.filter((c) => c.passesZone && c.passesVolume && c.passesSlFloor && c.passesNetR && c.outcome !== null);
+    summarizeOutcome(`  width=${width}: SAU KHI loc du 4 dieu kien (minSlPctFloor=${MIN_SL_PCT_FLOOR}, minNetRMultiple=${MIN_NET_R_MULTIPLE}, khong doi tu RT-023)`, filtered);
+
+    results.push({ width, candidates: allCandidates });
   }
-  console.log(`\nTotal raw candidates: ${allCandidates.length}\n`);
 
-  console.log('=== Phan phoi cho tung TODO_CONFIRM (tat ca candidate, chua loc) ===\n');
-  printDistribution('distanceAtr (ATR H1) toi vung H1 gan nhat', allCandidates.filter((c) => c.distanceAtr !== null).map((c) => c.distanceAtr as number));
-  printDistribution('touchCount cua vung duoc dung', allCandidates.filter((c) => c.touchCount !== null).map((c) => c.touchCount as number));
-  printDistribution('volumeRatio (nen tin hieu M5)', allCandidates.filter((c) => c.volumeRatio !== null).map((c) => c.volumeRatio as number));
-  printDistribution('SL% (structural, chua ap floor)', allCandidates.filter((c) => c.slPctRaw !== null).map((c) => c.slPctRaw as number));
-  printDistribution('netRMultiple (chua ap san)', allCandidates.filter((c) => c.netRMultiple !== null).map((c) => c.netRMultiple as number));
-
-  const noZone = allCandidates.filter((c) => c.distanceAtr === null).length;
-  const noStructural = allCandidates.filter((c) => c.slPrice === null).length;
-  console.log(`\n  Khong co vung H1 phu hop: ${noZone}/${allCandidates.length}`);
-  console.log(`  Khong tinh duoc structural SL/TP (thieu swing M5 phu hop): ${noStructural}/${allCandidates.length}`);
-
-  summarizeOutcome('TAT CA candidate (khong loc gi, chi can co outcome)', allCandidates.filter((c) => c.outcome !== null));
-
-  const filtered = allCandidates.filter((c) => c.passesZone && c.passesVolume && c.passesSlFloor && c.passesNetR && c.outcome !== null);
-  summarizeOutcome('SAU KHI loc du 4 dieu kien (zone + volume + SL floor + net R:R, dung placeholder TODO_CONFIRM o tren)', filtered);
-
-  console.log('\n=== Breakdown loc rieng tung dieu kien (tren tap co outcome) ===');
-  const withOutcome = allCandidates.filter((c) => c.outcome !== null);
-  console.log(`  passesZone: ${withOutcome.filter((c) => c.passesZone).length}/${withOutcome.length}`);
-  console.log(`  passesVolume: ${withOutcome.filter((c) => c.passesVolume).length}/${withOutcome.length}`);
-  console.log(`  passesSlFloor: ${withOutcome.filter((c) => c.passesSlFloor).length}/${withOutcome.length}`);
-  console.log(`  passesNetR: ${withOutcome.filter((c) => c.passesNetR).length}/${withOutcome.length}`);
+  console.log('\n\n=== SO SANH TONG HOP (sau khi loc du 4 dieu kien) ===\n');
+  console.log('Baseline width=2 (RT-023, da do): n=1, TP=0%, SL=100%, PnL=-$6.41, winRate=0.0%, PF=0.00\n');
+  console.log('width'.padEnd(8) + 'n'.padEnd(6) + 'TP%'.padEnd(8) + 'SL%'.padEnd(8) + 'PnL$'.padEnd(14) + 'winRate'.padEnd(10) + 'PF');
+  for (const { width, candidates } of results) {
+    const filtered = candidates.filter((c) => c.passesZone && c.passesVolume && c.passesSlFloor && c.passesNetR && c.outcome !== null);
+    const n = filtered.length;
+    const tp = filtered.filter((c) => c.outcome === 'TP').length;
+    const sl = filtered.filter((c) => c.outcome === 'SL').length;
+    let pnl = 0;
+    let wins = 0;
+    let losses = 0;
+    let grossProfit = 0;
+    let grossLoss = 0;
+    for (const c of filtered) {
+      const p = computePnl(c);
+      pnl += p;
+      if (p > 0) {
+        wins++;
+        grossProfit += p;
+      } else if (p < 0) {
+        losses++;
+        grossLoss += Math.abs(p);
+      }
+    }
+    const decided = wins + losses;
+    const winRate = decided > 0 ? (wins / decided) * 100 : 0;
+    const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
+    console.log(
+      String(width).padEnd(8) +
+        String(n).padEnd(6) +
+        `${n > 0 ? ((tp / n) * 100).toFixed(0) : '0'}%`.padEnd(8) +
+        `${n > 0 ? ((sl / n) * 100).toFixed(0) : '0'}%`.padEnd(8) +
+        `$${pnl.toFixed(2)}`.padEnd(14) +
+        `${winRate.toFixed(1)}%`.padEnd(10) +
+        `${Number.isFinite(profitFactor) ? profitFactor.toFixed(2) : 'inf'}`,
+    );
+  }
 }
 
 main().catch((err) => {
