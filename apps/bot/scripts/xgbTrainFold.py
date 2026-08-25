@@ -10,6 +10,12 @@ onnxruntime-node, no xgboost/gbm library); `xgboost` 3.3.0 is installed for the 
 Python (verified via `python -c "import xgboost"`) alongside pandas/scikit-learn, so this
 script uses that Python xgboost via subprocess rather than reimplementing gradient boosting
 in TS, per the ticket's "bao lai neu can quyet dinh cong cu" allowance.
+
+TICKET-RT-059: optional 4th CLI arg (comma-separated feature column names) added so
+xgbWalkForwardAuditV2.ts can reuse this same trainer for both the v1-subset comparison run
+and the full v2 run, without duplicating the training code. Backward compatible: RT-058's
+xgbWalkForwardAudit.ts calls this with exactly 2 args (train/test paths only) and is
+untouched, so it keeps using the original 8-feature FEATURE_COLUMNS default below.
 """
 import json
 import sys
@@ -40,12 +46,13 @@ def load(path: str) -> pd.DataFrame:
 
 def main() -> None:
     train_path, test_path = sys.argv[1], sys.argv[2]
+    feature_columns = sys.argv[3].split(",") if len(sys.argv) > 3 and sys.argv[3] else FEATURE_COLUMNS
     train_df = load(train_path)
     test_df = load(test_path)
 
-    X_train = train_df[FEATURE_COLUMNS]
+    X_train = train_df[feature_columns]
     y_train = train_df["won"]
-    X_test = test_df[FEATURE_COLUMNS]
+    X_test = test_df[feature_columns]
     y_test = test_df["won"]
 
     model = XGBClassifier(
@@ -66,8 +73,8 @@ def main() -> None:
     importance_raw = model.get_booster().get_score(importance_type="gain")
     # get_score keys are the real column names when fit() was called with a DataFrame (which it was
     # above) — fall back to positional "f{i}" keys too in case that ever changes, 0 for unused features.
-    feature_importance = {name: 0.0 for name in FEATURE_COLUMNS}
-    for i, name in enumerate(FEATURE_COLUMNS):
+    feature_importance = {name: 0.0 for name in feature_columns}
+    for i, name in enumerate(feature_columns):
         if name in importance_raw:
             feature_importance[name] = float(importance_raw[name])
         elif f"f{i}" in importance_raw:
