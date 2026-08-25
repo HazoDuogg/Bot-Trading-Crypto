@@ -69,9 +69,8 @@ const MIN_CANDLE2_BODY_RATIO = DEFAULT_FVG_CONFIG.minCandle2BodyRatio;
 
 export const FEE_PCT_SUM = 0.05 + 0.05 + 0.05 + 0.05; // same constant as every sibling script since RT-027
 
-const BALANCE = 500; // ONE shared portfolio balance across all 5 coins (not 5x$500 as before)
+export const BALANCE = 500; // ONE shared portfolio balance across all 5 coins (not 5x$500 as before)
 export const RISK_PCT = 0.01;
-const RISK_USD = BALANCE * RISK_PCT;
 const LEVERAGE: Record<string, number> = {
   BTCUSDT: 20,
   ETHUSDT: 20,
@@ -152,6 +151,7 @@ export interface ClosedTrade {
   slPct: number;
   breaksKeyZone: boolean;
   scaledDown: boolean;
+  closeTime: number; // openTime + M15_MS of the candle where SL/TP touched — TICKET-RT-056
 }
 
 interface SymbolState {
@@ -175,9 +175,13 @@ export function computeClosedPnl(t: ClosedTrade): number {
   return t.qty * directedDelta(t.direction, t.entryPrice, exitPrice) - cost;
 }
 
+// riskPctResolver (TICKET-RT-056): optional per-trade risk-% override, defaulting to the fixed
+// RISK_PCT (1%) every prior ticket used — passing it changes ONLY the sizing input into
+// calculatePositionSize()/admitPosition(), not any entry/exit/detection logic.
 export function runSimulation(
   allData: SymbolData[],
   targetRMultiple: number,
+  riskPctResolver: (symbol: string, breaksKeyZone: boolean) => number = () => RISK_PCT,
 ): { closedTrades: ClosedTrade[]; rejectedByExposure: number; scaledDownCount: number } {
   const states: SymbolState[] = allData.map((data) => ({
     data,
@@ -238,6 +242,7 @@ export function runSimulation(
             slPct: (o.slDistance / o.entryPrice) * 100,
             breaksKeyZone: o.breaksKeyZone,
             scaledDown: o.scaledDown,
+            closeTime: m15CloseTime,
           });
           exposureState = closePosition(exposureState, o.id);
           st.open = null;
@@ -259,9 +264,10 @@ export function runSimulation(
           if (slDistance > 0) {
             const slPct = (slDistance / entryPrice) * 100;
             const tpPrice = direction === 'LONG' ? entryPrice + targetRMultiple * slDistance : entryPrice - targetRMultiple * slDistance;
+            const riskUsd = BALANCE * riskPctResolver(symbol, st.pending.breaksKeyZone);
             const sizing = calculatePositionSize({
               balance: BALANCE,
-              riskUsd: RISK_USD,
+              riskUsd,
               entryPrice,
               slPrice,
               leverage: LEVERAGE[symbol],
