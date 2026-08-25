@@ -370,6 +370,79 @@ async function main() {
     const s = evaluateTargetR(m15Map, symbolTrades, finePeak.targetR);
     printRow(symbol, s);
   }
+
+  // TICKET-RT-044: extend the fine sweep past RT-043's right edge (2.10R) to check whether the jump
+  // seen there ($653.72, PF=1.613) is a continuing trend or an isolated peak — same
+  // evaluateTargetR()/findBaseTrades(), same 358-trade set, no entry/SL/breakeven/partial change.
+  // 2.10R is re-run here (not just carried over from the RT-043 loop above) so the two independent
+  // computations of that point can be diffed for an exact-match check.
+  console.log('\n\n=== TICKET-RT-044: Mo rong sweep min 2.10R-2.30R (xac minh cu nhay tai 2.10R) ===');
+  const EXT_SWEEP = [2.1, 2.15, 2.2, 2.25, 2.3];
+  console.log(
+    'targetR'.padEnd(10) +
+      'n'.padEnd(6) +
+      'PnL$'.padEnd(12) +
+      'dPnL$'.padEnd(12) +
+      'PF'.padEnd(8) +
+      'dPF'.padEnd(8) +
+      'winRate'.padEnd(10) +
+      'TP%'.padEnd(8) +
+      'SL%',
+  );
+  const extResults: { targetR: number; stats: Stats }[] = [];
+  let prevPnlExt: number | null = null;
+  let prevPfExt: number | null = null;
+  for (const targetR of EXT_SWEEP) {
+    const s = evaluateTargetR(m15Map, filled, targetR);
+    extResults.push({ targetR, stats: s });
+    const dPnl = prevPnlExt === null ? 0 : s.pnl - prevPnlExt;
+    const dPf = prevPfExt === null ? 0 : s.profitFactor - prevPfExt;
+    console.log(
+      `${targetR.toFixed(2)}R`.padEnd(10) +
+        String(s.n).padEnd(6) +
+        `$${s.pnl.toFixed(2)}`.padEnd(12) +
+        `${prevPnlExt === null ? '-' : (dPnl >= 0 ? '+' : '') + dPnl.toFixed(2)}`.padEnd(12) +
+        `${Number.isFinite(s.profitFactor) ? s.profitFactor.toFixed(3) : 'inf'}`.padEnd(8) +
+        `${prevPfExt === null ? '-' : (dPf >= 0 ? '+' : '') + dPf.toFixed(3)}`.padEnd(8) +
+        `${s.winRate.toFixed(1)}%`.padEnd(10) +
+        `${s.n > 0 ? ((s.tp / s.n) * 100).toFixed(1) : '0.0'}%`.padEnd(8) +
+        `${s.n > 0 ? ((s.sl / s.n) * 100).toFixed(1) : '0.0'}%`,
+    );
+    prevPnlExt = s.pnl;
+    prevPfExt = s.profitFactor;
+  }
+
+  const rt043At210 = fineResults.find((r) => Math.abs(r.targetR - 2.1) < 1e-9)!;
+  const rt044At210 = extResults[0];
+  const matches210 = Math.abs(rt043At210.stats.pnl - rt044At210.stats.pnl) < 1e-6 && Math.abs(rt043At210.stats.profitFactor - rt044At210.stats.profitFactor) < 1e-6;
+  console.log(
+    `\n  Doi chieu 2.10R: RT-043 tinh $${rt043At210.stats.pnl.toFixed(2)}/PF=${rt043At210.stats.profitFactor.toFixed(3)}` +
+      ` vs RT-044 tinh lai $${rt044At210.stats.pnl.toFixed(2)}/PF=${rt044At210.stats.profitFactor.toFixed(3)} -> ${matches210 ? 'KHOP 100%' : 'LECH — CAN DIEU TRA'}`,
+  );
+
+  const extPeak = extResults.reduce((a, b) => (b.stats.pnl > a.stats.pnl ? b : a));
+  console.log(`\n  -> Dinh PnL$ trong dai mo rong: targetRMultiple=${extPeak.targetR}R ($${extPeak.stats.pnl.toFixed(2)})`);
+  console.log(
+    '  Danh gia xu huong (tang mượt hay dung yen/tut sau 2.10R) bang loi trong bao cao dua tren cot dPnL$/dPF,' +
+      ' khong hard-code nguong "xu huong" o day.',
+  );
+
+  console.log(`\n=== Breakdown 5 coin cho muc cao nhat trong dai mo rong (targetRMultiple=${extPeak.targetR}R) ===`);
+  console.log('symbol'.padEnd(12) + 'n'.padEnd(6) + 'PnL$'.padEnd(14) + 'PF'.padEnd(8) + 'winRate'.padEnd(10) + 'TP%'.padEnd(8) + 'SL%');
+  for (const symbol of symbols) {
+    const symbolTrades = filled.filter((t) => t.symbol === symbol);
+    const s = evaluateTargetR(m15Map, symbolTrades, extPeak.targetR);
+    printRow(symbol, s);
+  }
+
+  console.log(`\n=== Doi chieu rieng HYPEUSDT qua tat ca cac muc da test (baseline 1.5R -> ${extPeak.targetR}R) ===`);
+  const hypeTrades = filled.filter((t) => t.symbol === 'HYPEUSDT');
+  const hypeCheckpoints = [1.5, 1.7, 1.9, 2.0, 2.1, ...EXT_SWEEP.filter((r) => r !== 2.1)];
+  for (const targetR of hypeCheckpoints) {
+    const s = evaluateTargetR(m15Map, hypeTrades, targetR);
+    printRow(`${targetR}R`, s);
+  }
+  console.log('  (doi chieu baseline HYPEUSDT 1.5R: PnL=$204.40, PF=1.57 — tu RT-042/043)');
 }
 
 main().catch((err) => {
