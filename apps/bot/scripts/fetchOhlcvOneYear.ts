@@ -7,6 +7,17 @@ import path from 'node:path';
 // overwritten — those tickets' confirmed numbers must stay reproducible against the exact data they
 // were measured on. Same fetch/pagination logic as scripts/fetchOhlcv.ts, just a 365-day window and
 // looped over all 5 symbols/2 intervals instead of one at a time from argv.
+//
+// TICKET-RT-054: Binance's klines endpoint returns any candle with openTime <= the requested
+// endTime — including the CURRENTLY-FORMING (not yet closed) candle, whose high/low/close only
+// reflect data up to the query instant, not its true final values. There was no closeTime-based
+// exclusion anywhere in this file. Confirmed empirically: exactly the last row of each of the 10
+// fetched files (5 symbols x 2 intervals) was this in-progress candle — re-querying the same
+// openTime after real time passed showed materially different low/close everywhere (e.g. BTCUSDT
+// 1h: low 80461.30 -> 79288.50, close 80461.30 -> 79661.50). Zero gaps/repeats found anywhere else
+// in any file, so this was a single-candle-per-file tail artifact, not a repeating pagination bug.
+// Fixed here by capturing each candle's real closeTime (raw kline row[6]) and dropping any candle
+// whose closeTime hasn't passed yet at the moment of writing.
 loadEnv();
 
 interface Kline {
@@ -16,6 +27,7 @@ interface Kline {
   low: string;
   close: string;
   volume: string;
+  closeTime: number;
 }
 
 const BINANCE_URL = process.env.BINANCE_URL;
@@ -39,6 +51,7 @@ async function fetchKlinesPage(symbol: string, interval: string, startTime: numb
     low: row[3] as string,
     close: row[4] as string,
     volume: row[5] as string,
+    closeTime: row[6] as number,
   }));
 }
 
@@ -77,9 +90,13 @@ async function main() {
     for (const interval of intervals) {
       console.log(`Fetching ${symbol} ${interval} from ${new Date(startTime).toISOString()} to ${new Date(endTime).toISOString()}`);
       const klines = await fetchAllKlines(symbol, interval, startTime, endTime);
-      console.log(`  ${symbol} ${interval}: ${klines.length} candles`);
+      // TICKET-RT-054: drop any candle that hasn't actually closed yet as of right now — Binance
+      // includes the in-progress candle when its openTime <= the requested endTime.
+      const closedOnly = klines.filter((k) => k.closeTime < Date.now());
+      const droppedCount = klines.length - closedOnly.length;
+      console.log(`  ${symbol} ${interval}: ${closedOnly.length} candles (da dong)${droppedCount > 0 ? `, loai ${droppedCount} nen chua dong` : ''}`);
       const outPath = path.join(dataDir, `${symbol}_${interval}_1y.csv`);
-      await writeFile(outPath, toCsv(klines), 'utf8');
+      await writeFile(outPath, toCsv(closedOnly), 'utf8');
       console.log(`  Wrote ${outPath}`);
     }
   }

@@ -67,10 +67,10 @@ const FLOOR_PCT = DEFAULT_FVG_STRATEGY_CONFIG.minSlPctFloor;
 const MAX_WAIT_CANDLES = DEFAULT_FVG_STRATEGY_CONFIG.maxWaitCandles;
 const MIN_CANDLE2_BODY_RATIO = DEFAULT_FVG_CONFIG.minCandle2BodyRatio;
 
-const FEE_PCT_SUM = 0.05 + 0.05 + 0.05 + 0.05; // same constant as every sibling script since RT-027
+export const FEE_PCT_SUM = 0.05 + 0.05 + 0.05 + 0.05; // same constant as every sibling script since RT-027
 
 const BALANCE = 500; // ONE shared portfolio balance across all 5 coins (not 5x$500 as before)
-const RISK_PCT = 0.01;
+export const RISK_PCT = 0.01;
 const RISK_USD = BALANCE * RISK_PCT;
 const LEVERAGE: Record<string, number> = {
   BTCUSDT: 20,
@@ -79,7 +79,7 @@ const LEVERAGE: Record<string, number> = {
   HYPEUSDT: 10,
   XRPUSDT: 10,
 };
-const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'XRPUSDT'];
+export const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'XRPUSDT'];
 
 async function readCsv(filePath: string): Promise<Candle[]> {
   const raw = await readFile(filePath, 'utf8');
@@ -97,13 +97,13 @@ async function readCsv(filePath: string): Promise<Candle[]> {
   });
 }
 
-interface SymbolData {
+export interface SymbolData {
   symbol: string;
   m15All: Candle[];
   h1All: Candle[];
 }
 
-async function loadAllSymbolData(dataDir: string): Promise<SymbolData[]> {
+export async function loadAllSymbolData(dataDir: string): Promise<SymbolData[]> {
   const out: SymbolData[] = [];
   for (const symbol of SYMBOLS) {
     const m15All = await readCsv(path.join(dataDir, `${symbol}_15m_1y.csv`));
@@ -138,7 +138,7 @@ interface OpenTrade {
   scaledDown: boolean;
 }
 
-interface ClosedTrade {
+export interface ClosedTrade {
   symbol: string;
   direction: Direction;
   entryIndex: number;
@@ -164,18 +164,18 @@ interface SymbolState {
   nextId: number;
 }
 
-function directedDelta(direction: Direction, entryPrice: number, exitPrice: number): number {
+export function directedDelta(direction: Direction, entryPrice: number, exitPrice: number): number {
   return direction === 'LONG' ? exitPrice - entryPrice : entryPrice - exitPrice;
 }
 
-function computeClosedPnl(t: ClosedTrade): number {
+export function computeClosedPnl(t: ClosedTrade): number {
   if (t.outcome === 'STILL_OPEN') return 0;
   const cost = (t.notional * FEE_PCT_SUM) / 100;
   const exitPrice = t.outcome === 'TP' ? t.tpPrice : t.slPrice;
   return t.qty * directedDelta(t.direction, t.entryPrice, exitPrice) - cost;
 }
 
-function runSimulation(
+export function runSimulation(
   allData: SymbolData[],
   targetRMultiple: number,
 ): { closedTrades: ClosedTrade[]; rejectedByExposure: number; scaledDownCount: number } {
@@ -341,7 +341,7 @@ function runSimulation(
   return { closedTrades, rejectedByExposure, scaledDownCount };
 }
 
-interface Summary {
+export interface Summary {
   n: number;
   tp: number;
   sl: number;
@@ -350,7 +350,7 @@ interface Summary {
   profitFactor: number;
 }
 
-function summarize(trades: ClosedTrade[]): Summary {
+export function summarize(trades: ClosedTrade[]): Summary {
   const tp = trades.filter((t) => t.outcome === 'TP').length;
   const sl = trades.filter((t) => t.outcome === 'SL').length;
   let pnl = 0;
