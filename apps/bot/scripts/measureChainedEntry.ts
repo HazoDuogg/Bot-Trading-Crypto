@@ -356,6 +356,51 @@ async function main() {
     `\n% lenh (trong nhom TP=${TARGET_R}R) co setup FVG hop le noi tiep trong ${CHAIN_DETECTION_WINDOW} nen M15: ${withChain.length}/${tpTrades.length} (${((withChain.length / tpTrades.length) * 100).toFixed(1)}%)`,
   );
 
+  // TICKET-RT-047: does the ORIGINAL 358-trade entry-scan (findBaseTrades, reading strategy1MeasureFvg.ts's
+  // findTrades() verbatim) enforce "1 open trade per coin"? Reading that code: `pending = null` fires
+  // immediately on fill (no check on whether the just-filled trade has since closed via TP/SL — that
+  // outcome is computed by a fully separate, decoupled forward scan), so the loop is free to detect
+  // and fill a brand-new FVG on the very next candle regardless of open positions. There is no
+  // "openPosition"/"isOpen"/concurrency state anywhere in the codebase (grep confirms). This predicts
+  // the 45 chained entries found above are ALREADY duplicates inside the original 358 — verified below
+  // by exact (symbol, entryIndex) match against the full unfiltered entry list.
+  console.log('\n=== TICKET-RT-047: Xac minh double-counting (doc code xac nhan KHONG co gioi han 1 lenh/coin) ===');
+  const allEntryKeys = new Set(allTrades.map((t) => `${t.symbol}:${t.entryIndex}`));
+  const filledEntryKeys = new Set(filled.map((t) => `${t.symbol}:${t.entryIndex}`));
+  let dupInFilled = 0;
+  let dupInAllTrades = 0;
+  for (const r of withChain) {
+    const key = `${r.original.symbol}:${r.chain!.chainEntryIndex}`;
+    if (filledEntryKeys.has(key)) dupInFilled++;
+    if (allEntryKeys.has(key)) dupInAllTrades++;
+  }
+  console.log(
+    `  ${dupInFilled}/${withChain.length} lenh chain co (symbol, entryIndex) TRUNG KHOP voi 1 lenh da co san trong 358 lenh goc (post-floor).`,
+  );
+  console.log(
+    `  ${dupInAllTrades}/${withChain.length} lenh chain trung khop voi entry da duoc scan phat hien (truoc floor, toan bo cac entry da tim thay).`,
+  );
+  if (dupInFilled === withChain.length) {
+    console.log(
+      '  -> XAC NHAN: TOAN BO 45 lenh "chain" da nam san trong 358 lenh goc (dem trung 100%).' +
+        ' $171.01 (RT-046) la SO AO do dem trung — DUNG huong nay, KHONG can mo phong them.',
+    );
+  } else if (dupInFilled > 0) {
+    console.log(
+      `  -> XAC NHAN MOT PHAN: ${dupInFilled}/${withChain.length} la dem trung, con ${withChain.length - dupInFilled} co the la co hoi that (chua bi loai boi floor o 358 lenh goc).` +
+        ' Can xem xet ky truoc khi mo phong tiep.',
+    );
+    const nonDup = withChain.filter((r) => !filledEntryKeys.has(`${r.original.symbol}:${r.chain!.chainEntryIndex}`));
+    for (const r of nonDup) {
+      console.log(
+        `     Khong trung: symbol=${r.original.symbol} chainEntryIndex=${r.chain!.chainEntryIndex} outcome=${r.chain!.outcome} pnl=$${r.chain!.pnl.toFixed(2)}` +
+          ` slPct=${((r.chain!.slDistance / r.chain!.entryPrice) * 100).toFixed(4)}% (floor=${FLOOR_PCT}%)`,
+      );
+    }
+  } else {
+    console.log('  -> KHONG co dem trung nao phat hien — 45 lenh chain co the la co hoi that. Tien hanh mo phong day du.');
+  }
+
   const decided = withChain.filter((r) => r.chain!.outcome !== 'STILL_OPEN');
   const stillOpenChain = withChain.filter((r) => r.chain!.outcome === 'STILL_OPEN');
   let totalChainPnl = 0;
