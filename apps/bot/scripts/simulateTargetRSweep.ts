@@ -314,6 +314,62 @@ async function main() {
     const s = evaluateTargetR(m15Map, symbolTrades, BASELINE_TARGET_R);
     printRow(symbol, s);
   }
+
+  // TICKET-RT-043: fine-resolution sweep (0.05R steps) around RT-042's 1.7R-2.0R region, to check
+  // whether the "dip" at 1.8R seen in the coarse (0.1R) sweep is a genuine local dip or just landed
+  // on a few boundary-sensitive trades — reuses the exact same evaluateTargetR()/findBaseTrades()
+  // used above, same 358-trade set, no entry/SL/breakeven/partial change.
+  console.log('\n\n=== TICKET-RT-043: Sweep min 0.05R quanh vung 1.70R-2.10R ===');
+  const FINE_SWEEP = [1.7, 1.75, 1.8, 1.85, 1.9, 1.95, 2.0, 2.05, 2.1];
+  console.log(
+    'targetR'.padEnd(10) +
+      'n'.padEnd(6) +
+      'PnL$'.padEnd(12) +
+      'dPnL$'.padEnd(12) +
+      'PF'.padEnd(8) +
+      'dPF'.padEnd(8) +
+      'winRate'.padEnd(10) +
+      'TP%'.padEnd(8) +
+      'SL%',
+  );
+  const fineResults: { targetR: number; stats: Stats }[] = [];
+  let prevPnl: number | null = null;
+  let prevPf: number | null = null;
+  for (const targetR of FINE_SWEEP) {
+    const s = evaluateTargetR(m15Map, filled, targetR);
+    fineResults.push({ targetR, stats: s });
+    const dPnl = prevPnl === null ? 0 : s.pnl - prevPnl;
+    const dPf = prevPf === null ? 0 : s.profitFactor - prevPf;
+    console.log(
+      `${targetR.toFixed(2)}R`.padEnd(10) +
+        String(s.n).padEnd(6) +
+        `$${s.pnl.toFixed(2)}`.padEnd(12) +
+        `${prevPnl === null ? '-' : (dPnl >= 0 ? '+' : '') + dPnl.toFixed(2)}`.padEnd(12) +
+        `${Number.isFinite(s.profitFactor) ? s.profitFactor.toFixed(3) : 'inf'}`.padEnd(8) +
+        `${prevPf === null ? '-' : (dPf >= 0 ? '+' : '') + dPf.toFixed(3)}`.padEnd(8) +
+        `${s.winRate.toFixed(1)}%`.padEnd(10) +
+        `${s.n > 0 ? ((s.tp / s.n) * 100).toFixed(1) : '0.0'}%`.padEnd(8) +
+        `${s.n > 0 ? ((s.sl / s.n) * 100).toFixed(1) : '0.0'}%`,
+    );
+    prevPnl = s.pnl;
+    prevPf = s.profitFactor;
+  }
+
+  const finePeak = fineResults.reduce((a, b) => (b.stats.pnl > a.stats.pnl ? b : a));
+  console.log(`\n  -> Dinh PnL$ trong sweep min: targetRMultiple=${finePeak.targetR}R ($${finePeak.stats.pnl.toFixed(2)})`);
+  console.log(
+    '  Xem cot dPnL$/dPF o tren de tu doc: gia tri doi dau lien tuc giua cac muc lien ke (0.05R) = giat cuc;' +
+      ' gia tri cung dau/gan 0 qua nhieu muc lien tiep = cao nguyen on dinh. Danh gia bang loi trong bao cao,' +
+      ' khong hard-code nguong "phang" o day de tranh tu dat mot ngưỡng tuy tien.',
+  );
+
+  console.log(`\n=== Breakdown 5 coin cho muc dinh cua sweep min (targetRMultiple=${finePeak.targetR}R) ===`);
+  console.log('symbol'.padEnd(12) + 'n'.padEnd(6) + 'PnL$'.padEnd(14) + 'PF'.padEnd(8) + 'winRate'.padEnd(10) + 'TP%'.padEnd(8) + 'SL%');
+  for (const symbol of symbols) {
+    const symbolTrades = filled.filter((t) => t.symbol === symbol);
+    const s = evaluateTargetR(m15Map, symbolTrades, finePeak.targetR);
+    printRow(symbol, s);
+  }
 }
 
 main().catch((err) => {
