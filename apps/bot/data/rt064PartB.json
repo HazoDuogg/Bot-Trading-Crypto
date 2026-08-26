@@ -1,0 +1,3796 @@
+{
+  "results": [
+    {
+      "optionLabel": "A (v1, 8 feature)",
+      "foldIndex": 1,
+      "testMonth": "2026-03",
+      "baselineTopSize": 25,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 68,
+          "spearman": 0.6161538461538462
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 48,
+          "spearman": 0.5976923076923077
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 72,
+          "spearman": 0.6530769230769231
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 60,
+          "spearman": 0.5576923076923077
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 52,
+          "spearman": 0.1753846153846154
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 52,
+          "spearman": 0.1946153846153846
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 48,
+          "spearman": 0.47307692307692306
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 68,
+          "spearman": 0.5846153846153846
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 72,
+          "spearman": 0.6592307692307692
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.5323076923076923
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 60,
+          "spearman": 0.5869230769230769
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 60,
+          "spearman": 0.4969230769230769
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 64,
+          "spearman": 0.5076923076923077
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 80,
+          "spearman": 0.6476923076923077
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.7346153846153847
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 60,
+          "spearman": 0.5761538461538461
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.7861538461538462
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 68,
+          "spearman": 0.6515384615384615
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.55
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 68,
+          "spearman": 0.6284615384615385
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 52,
+          "spearman": 0.15384615384615385
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 72,
+          "spearman": 0.54
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.5361538461538462
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.6084615384615385
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 68,
+          "spearman": 0.47923076923076924
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 52,
+          "spearman": 0.56
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 68,
+          "spearman": 0.48307692307692307
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 64,
+          "spearman": 0.5715384615384616
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 68,
+          "spearman": 0.6507692307692308
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 64,
+          "spearman": 0.6569230769230769
+        }
+      ]
+    },
+    {
+      "optionLabel": "B (v2, 14 feature)",
+      "foldIndex": 1,
+      "testMonth": "2026-03",
+      "baselineTopSize": 25,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.5392307692307692
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 44,
+          "spearman": 0.6523076923076923
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 60,
+          "spearman": 0.6176923076923077
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 68,
+          "spearman": 0.6415384615384615
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 24,
+          "spearman": 0.1376923076923077
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 40,
+          "spearman": 0.4269230769230769
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 48,
+          "spearman": 0.4115384615384615
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 48,
+          "spearman": 0.7215384615384616
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 64,
+          "spearman": 0.6953846153846154
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 40,
+          "spearman": 0.4461538461538462
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 52,
+          "spearman": 0.52
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.6523076923076923
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.6246153846153846
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.20307692307692307
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 64,
+          "spearman": 0.5784615384615385
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 52,
+          "spearman": 0.3792307692307692
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 64,
+          "spearman": 0.5869230769230769
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 64,
+          "spearman": 0.6269230769230769
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 60,
+          "spearman": 0.7515384615384615
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 52,
+          "spearman": 0.2746153846153846
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 48,
+          "spearman": 0.6107692307692307
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 72,
+          "spearman": 0.6392307692307693
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 64,
+          "spearman": 0.5453846153846154
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.45
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 68,
+          "spearman": 0.5046153846153846
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 48,
+          "spearman": 0.6184615384615385
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.6876923076923077
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.7823076923076923
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 64,
+          "spearman": 0.49
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 64,
+          "spearman": 0.7138461538461538
+        }
+      ]
+    },
+    {
+      "optionLabel": "C (toi gian, 4 feature)",
+      "foldIndex": 1,
+      "testMonth": "2026-03",
+      "baselineTopSize": 25,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 60,
+          "spearman": 0.7084615384615385
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 60,
+          "spearman": 0.7223076923076923
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 64,
+          "spearman": 0.36
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 64,
+          "spearman": 0.6815384615384615
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 64,
+          "spearman": 0.5584615384615385
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 64,
+          "spearman": 0.4576923076923077
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 60,
+          "spearman": 0.6276923076923077
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 60,
+          "spearman": 0.4369230769230769
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 76,
+          "spearman": 0.6938461538461539
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.047692307692307694
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 48,
+          "spearman": 0.16615384615384615
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 64,
+          "spearman": 0.46923076923076923
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.09923076923076923
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 68,
+          "spearman": 0.5869230769230769
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 60,
+          "spearman": 0.52
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 64,
+          "spearman": 0.7007692307692308
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.6584615384615384
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 68,
+          "spearman": 0.47692307692307695
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 60,
+          "spearman": 0.5276923076923077
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 52,
+          "spearman": 0.5553846153846154
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 52,
+          "spearman": 0.3261538461538461
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 64,
+          "spearman": 0.5930769230769231
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 68,
+          "spearman": 0.7076923076923077
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.6615384615384615
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 52,
+          "spearman": 0.38384615384615384
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 60,
+          "spearman": 0.6547413085147153
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 76,
+          "spearman": 0.6630769230769231
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 68,
+          "spearman": 0.6530769230769231
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 64,
+          "spearman": 0.4676923076923077
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 80,
+          "spearman": 0.823076923076923
+        }
+      ]
+    },
+    {
+      "optionLabel": "D (v2 + regularization)",
+      "foldIndex": 1,
+      "testMonth": "2026-03",
+      "baselineTopSize": 25,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 52,
+          "spearman": 0.5269230769230769
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 52,
+          "spearman": 0.28923076923076924
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 52,
+          "spearman": 0.5515384615384615
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.4053846153846154
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 24,
+          "spearman": 0.22846153846153847
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 48,
+          "spearman": 0.20076923076923076
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 60,
+          "spearman": 0.35384615384615387
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 40,
+          "spearman": 0.6261538461538462
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 72,
+          "spearman": 0.39153846153846156
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 52,
+          "spearman": 0.38384615384615384
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 64,
+          "spearman": 0.6138461538461538
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 64,
+          "spearman": 0.6046153846153847
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 72,
+          "spearman": 0.2553846153846154
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 52,
+          "spearman": 0.20615384615384616
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 60,
+          "spearman": 0.21923076923076923
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 64,
+          "spearman": 0.5584615384615385
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 68,
+          "spearman": 0.3984615384615385
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.5430769230769231
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 52,
+          "spearman": 0.37153846153846154
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 64,
+          "spearman": 0.3230769230769231
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 60,
+          "spearman": 0.5338461538461539
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.6053846153846154
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 68,
+          "spearman": 0.563076923076923
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 76,
+          "spearman": 0.4323076923076923
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 52,
+          "spearman": 0.043076923076923075
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 52,
+          "spearman": 0.3223076923076923
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.36846153846153845
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 56.00000000000001,
+          "spearman": 0.45384615384615384
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 64,
+          "spearman": 0.5423076923076923
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 68,
+          "spearman": 0.4823076923076923
+        }
+      ]
+    },
+    {
+      "optionLabel": "A (v1, 8 feature)",
+      "foldIndex": 2,
+      "testMonth": "2026-04",
+      "baselineTopSize": 13,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.7307692307692307
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.6758241758241759
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.46153846153846156
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.5164835164835165
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.6428571428571429
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 53.84615384615385,
+          "spearman": -0.08791208791208792
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.18681318681318682
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.6813186813186813
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 30.76923076923077,
+          "spearman": 0.36813186813186816
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 76.92307692307693,
+          "spearman": 0.37362637362637363
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.8626373626373627
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.4230769230769231
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.5274725274725275
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 46.15384615384615,
+          "spearman": -0.03296703296703297
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.3791208791208791
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.06593406593406594
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.36813186813186816
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.2857142857142857
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.3626373626373626
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.24175824175824176
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.5714285714285714
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 53.84615384615385,
+          "spearman": -0.4065934065934066
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.21428571428571427
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.5604395604395604
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.6208791208791209
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 69.23076923076923,
+          "spearman": -0.005494505494505495
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.2087912087912088
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.14835164835164835
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.4725274725274725
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.5604395604395604
+        }
+      ]
+    },
+    {
+      "optionLabel": "B (v2, 14 feature)",
+      "foldIndex": 2,
+      "testMonth": "2026-04",
+      "baselineTopSize": 13,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.6483516483516484
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.7142857142857143
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.2032967032967033
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.6043956043956044
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.36813186813186816
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 38.46153846153847,
+          "spearman": -0.01098901098901099
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.4835164835164835
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.34065934065934067
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.12087912087912088
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.27472527472527475
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.5714285714285714
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.5659340659340659
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.3791208791208791
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.19230769230769232
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.45054945054945056
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.3241758241758242
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.5659340659340659
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.32967032967032966
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.2692307692307692
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.07692307692307693
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 46.15384615384615,
+          "spearman": -0.12637362637362637
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.46703296703296704
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 46.15384615384615,
+          "spearman": -0.13186813186813187
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 38.46153846153847,
+          "spearman": -0.22527472527472528
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.7802197802197802
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.005494505494505495
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.2857142857142857
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.6208791208791209
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.5769230769230769
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.4835164835164835
+        }
+      ]
+    },
+    {
+      "optionLabel": "C (toi gian, 4 feature)",
+      "foldIndex": 2,
+      "testMonth": "2026-04",
+      "baselineTopSize": 13,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.42857142857142855
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 76.92307692307693,
+          "spearman": 0.14835164835164835
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.46703296703296704
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.5384615384615384
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.7252747252747253
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 84.61538461538461,
+          "spearman": -0.03296703296703297
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.3241758241758242
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 76.92307692307693,
+          "spearman": -0.027472527472527472
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.26373626373626374
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 84.61538461538461,
+          "spearman": 0.3131868131868132
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.5714285714285714
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.6648351648351648
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 76.92307692307693,
+          "spearman": 0.4010989010989011
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 76.92307692307693,
+          "spearman": 0.5934065934065934
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 92.3076923076923,
+          "spearman": 0.4835164835164835
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 46.15384615384615,
+          "spearman": -0.07142857142857142
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 38.46153846153847,
+          "spearman": -0.06043956043956044
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.09340659340659341
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 61.53846153846154,
+          "spearman": -0.33516483516483514
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 69.23076923076923,
+          "spearman": -0.34615384615384615
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.1043956043956044
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 76.92307692307693,
+          "spearman": 0.3076923076923077
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.10989010989010989
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.16483516483516483
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.19230769230769232
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.12637362637362637
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.23626373626373626
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.532967032967033
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.6538461538461539
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.554945054945055
+        }
+      ]
+    },
+    {
+      "optionLabel": "D (v2 + regularization)",
+      "foldIndex": 2,
+      "testMonth": "2026-04",
+      "baselineTopSize": 13,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.5934065934065934
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.510989010989011
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.554945054945055
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.36813186813186816
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.41208791208791207
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 30.76923076923077,
+          "spearman": 0.10989010989010989
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.4340659340659341
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.46703296703296704
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.4340659340659341
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.5384615384615384
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.8681318681318682
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.6318681318681318
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.4835164835164835
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.43956043956043955
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.26373626373626374
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.7362637362637363
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.7197802197802198
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.3956043956043956
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.31868131868131866
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.521978021978022
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.6263736263736264
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.4725274725274725
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.34065934065934067
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.04395604395604396
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.3241758241758242
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.36813186813186816
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.3516483516483517
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.26373626373626374
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.7582417582417582
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.6043956043956044
+        }
+      ]
+    },
+    {
+      "optionLabel": "A (v1, 8 feature)",
+      "foldIndex": 3,
+      "testMonth": "2026-05",
+      "baselineTopSize": 13,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.5439560439560439
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.2967032967032967
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.7692307692307693
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.23626373626373626
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.6318681318681318
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.7912087912087912
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.5164835164835165
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.6758241758241759
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.5714285714285714
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.7912087912087912
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.38461538461538464
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.04395604395604396
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.8571428571428571
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.521978021978022
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.46703296703296704
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.4725274725274725
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.7142857142857143
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.3131868131868132
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 76.92307692307693,
+          "spearman": 0.5274725274725275
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.4945054945054945
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.6648351648351648
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.3241758241758242
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 53.84615384615385,
+          "spearman": -0.10989010989010989
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.33516483516483514
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.15384615384615385
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.37362637362637363
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.7857142857142857
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.7472527472527473
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.7087912087912088
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.9230769230769231
+        }
+      ]
+    },
+    {
+      "optionLabel": "B (v2, 14 feature)",
+      "foldIndex": 3,
+      "testMonth": "2026-05",
+      "baselineTopSize": 13,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.6813186813186813
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.06043956043956044
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.6758241758241759
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.3516483516483517
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.2032967032967033
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.4725274725274725
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.6263736263736264
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.3956043956043956
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.38461538461538464
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.6758241758241759
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.01098901098901099
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.02197802197802198
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 76.92307692307693,
+          "spearman": 0.7692307692307693
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 30.76923076923077,
+          "spearman": 0.2857142857142857
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.7637362637362637
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.4065934065934066
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.5769230769230769
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.32967032967032966
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.24725274725274726
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.45054945054945056
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.02197802197802198
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.42857142857142855
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.14285714285714285
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.47802197802197804
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.23626373626373626
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.489010989010989
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.3626373626373626
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.5494505494505495
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.26373626373626374
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 76.92307692307693,
+          "spearman": 0.6758241758241759
+        }
+      ]
+    },
+    {
+      "optionLabel": "C (toi gian, 4 feature)",
+      "foldIndex": 3,
+      "testMonth": "2026-05",
+      "baselineTopSize": 13,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.2967032967032967
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 30.76923076923077,
+          "spearman": 0.4835164835164835
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.6813186813186813
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.29120879120879123
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.32967032967032966
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.7252747252747253
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.6263736263736264
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.4175824175824176
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.6648351648351648
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.5164835164835165
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.054945054945054944
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.532967032967033
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.7637362637362637
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.8296703296703297
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.4945054945054945
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.6648351648351648
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.4010989010989011
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.46703296703296704
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.31868131868131866
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.08791208791208792
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.532967032967033
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.6373626373626373
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.2857142857142857
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.36813186813186816
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.45054945054945056
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.4340659340659341
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.6153846153846154
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.6043956043956044
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.5384615384615384
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.6923076923076923
+        }
+      ]
+    },
+    {
+      "optionLabel": "D (v2 + regularization)",
+      "foldIndex": 3,
+      "testMonth": "2026-05",
+      "baselineTopSize": 13,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 84.61538461538461,
+          "spearman": 0.38461538461538464
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.5
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 76.92307692307693,
+          "spearman": 0.5274725274725275
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.3241758241758242
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.2802197802197802
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.10989010989010989
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.29120879120879123
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.17032967032967034
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.3516483516483517
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.7087912087912088
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.14285714285714285
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.44505494505494503
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.6263736263736264
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.37362637362637363
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.521978021978022
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.23626373626373626
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 76.92307692307693,
+          "spearman": -0.054945054945054944
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.7032967032967034
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 76.92307692307693,
+          "spearman": 0.5054945054945055
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.31868131868131866
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.4340659340659341
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.23626373626373626
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 38.46153846153847,
+          "spearman": 0.24725274725274726
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 61.53846153846154,
+          "spearman": 0.7967032967032966
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.532967032967033
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 46.15384615384615,
+          "spearman": 0.2802197802197802
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 76.92307692307693,
+          "spearman": 0.7472527472527473
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 46.15384615384615,
+          "spearman": -0.12637362637362637
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 53.84615384615385,
+          "spearman": 0.6923076923076923
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 69.23076923076923,
+          "spearman": 0.6208791208791209
+        }
+      ]
+    },
+    {
+      "optionLabel": "A (v1, 8 feature)",
+      "foldIndex": 4,
+      "testMonth": "2026-06",
+      "baselineTopSize": 32,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 59.375,
+          "spearman": 0.5098973607038123
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 68.75,
+          "spearman": 0.4662756598240469
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 59.375,
+          "spearman": 0.39882697947214074
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 68.75,
+          "spearman": 0.3222140762463343
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 62.5,
+          "spearman": 0.657624633431085
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 75,
+          "spearman": 0.16055718475073313
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 43.75,
+          "spearman": 0.11803519061583578
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 68.75,
+          "spearman": 0.4574780058651026
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 56.25,
+          "spearman": 0.6539589442815249
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 62.5,
+          "spearman": 0.2785923753665689
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 56.25,
+          "spearman": 0.3214809384164223
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 71.875,
+          "spearman": 0.40271286027444264
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 56.25,
+          "spearman": 0.38966275659824046
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 68.75,
+          "spearman": 0.5106304985337243
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 56.25,
+          "spearman": 0.12719941348973607
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 71.875,
+          "spearman": 0.4710410557184751
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 56.25,
+          "spearman": 0.45161290322580644
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 59.375,
+          "spearman": 0.25806451612903225
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 59.375,
+          "spearman": 0.3412756598240469
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 56.25,
+          "spearman": 0.40285923753665687
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 59.375,
+          "spearman": 0.014296187683284457
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 65.625,
+          "spearman": 0.39956011730205276
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 62.5,
+          "spearman": 0.3467741935483871
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 68.75,
+          "spearman": 0.37316715542521994
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 50,
+          "spearman": 0.3588709677419355
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 53.125,
+          "spearman": 0.33944281524926684
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 71.875,
+          "spearman": 0.2060117302052786
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 62.5,
+          "spearman": 0.3848973607038123
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 65.625,
+          "spearman": 0.3064516129032258
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 62.5,
+          "spearman": 0.09750733137829912
+        }
+      ]
+    },
+    {
+      "optionLabel": "B (v2, 14 feature)",
+      "foldIndex": 4,
+      "testMonth": "2026-06",
+      "baselineTopSize": 32,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 65.625,
+          "spearman": 0.7917888563049853
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 65.625,
+          "spearman": 0.43218475073313783
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 68.75,
+          "spearman": 0.36363636363636365
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 62.5,
+          "spearman": 0.6664222873900293
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 71.875,
+          "spearman": 0.6876832844574781
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 62.5,
+          "spearman": 0.4879032258064516
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 50,
+          "spearman": 0.5604838709677419
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 68.75,
+          "spearman": 0.5744134897360704
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 62.5,
+          "spearman": 0.7217741935483871
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 46.875,
+          "spearman": 0.2287390029325513
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 59.375,
+          "spearman": 0.5157624633431085
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 59.375,
+          "spearman": 0.5835777126099707
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 59.375,
+          "spearman": 0.3159824046920821
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 68.75,
+          "spearman": 0.4934017595307918
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 53.125,
+          "spearman": 0.49816715542521994
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 62.5,
+          "spearman": 0.3284457478005865
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 53.125,
+          "spearman": 0.48863636363636365
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 62.5,
+          "spearman": 0.6433284457478006
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 59.375,
+          "spearman": 0.5879765395894428
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 62.5,
+          "spearman": 0.5865102639296188
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 59.375,
+          "spearman": 0.44941348973607037
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 71.875,
+          "spearman": 0.6099706744868035
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 59.375,
+          "spearman": 0.36326979472140764
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 56.25,
+          "spearman": 0.3291788856304985
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 56.25,
+          "spearman": 0.42631964809384165
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 56.25,
+          "spearman": 0.6308651026392962
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 71.875,
+          "spearman": 0.5392228739002932
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 62.5,
+          "spearman": 0.6055718475073314
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 68.75,
+          "spearman": 0.3097791232880328
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 56.25,
+          "spearman": 0.39222873900293254
+        }
+      ]
+    },
+    {
+      "optionLabel": "C (toi gian, 4 feature)",
+      "foldIndex": 4,
+      "testMonth": "2026-06",
+      "baselineTopSize": 32,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 53.125,
+          "spearman": 0.5724239475448807
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 68.75,
+          "spearman": 0.5137984974770803
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 59.375,
+          "spearman": 0.43050974658404223
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 65.625,
+          "spearman": 0.526315798323728
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 62.5,
+          "spearman": 0.6431976963444719
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 56.25,
+          "spearman": 0.6029155816219272
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 46.875,
+          "spearman": 0.5614228466952033
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 75,
+          "spearman": 0.4235423827125798
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 56.25,
+          "spearman": 0.3502017103813972
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 68.75,
+          "spearman": 0.44668563163960295
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 46.875,
+          "spearman": 0.3520352271896768
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 62.5,
+          "spearman": 0.6875688031048374
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 59.375,
+          "spearman": 0.3289630636951756
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 65.625,
+          "spearman": 0.5852585652028376
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 59.375,
+          "spearman": 0.22332234724845118
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 71.875,
+          "spearman": 0.49330644511875554
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 53.125,
+          "spearman": 0.42024205245767665
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 56.25,
+          "spearman": 0.4825816239391819
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 59.375,
+          "spearman": 0.4631463457714185
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 56.25,
+          "spearman": 0.6663000081287944
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 62.5,
+          "spearman": 0.38283830956877346
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 68.75,
+          "spearman": 0.3703703952724724
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 50,
+          "spearman": 0.49248261470389154
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 59.375,
+          "spearman": 0.2819948851133973
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 40.625,
+          "spearman": 0.3674367683792251
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 46.875,
+          "spearman": 0.4096076549696551
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 68.75,
+          "spearman": 0.5808581248629666
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 53.125,
+          "spearman": 0.36853687846419286
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 62.5,
+          "spearman": 0.6178951643902139
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 59.375,
+          "spearman": 0.5342867979326656
+        }
+      ]
+    },
+    {
+      "optionLabel": "D (v2 + regularization)",
+      "foldIndex": 4,
+      "testMonth": "2026-06",
+      "baselineTopSize": 32,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 68.75,
+          "spearman": 0.6022727272727273
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 59.375,
+          "spearman": 0.6983137829912024
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 53.125,
+          "spearman": 0.18914956011730205
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 62.5,
+          "spearman": 0.6612903225806451
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 71.875,
+          "spearman": 0.5480205278592375
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 71.875,
+          "spearman": 0.5813782991202346
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 59.375,
+          "spearman": 0.39552785923753664
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 71.875,
+          "spearman": 0.5982404692082112
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 65.625,
+          "spearman": 0.4442815249266862
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 53.125,
+          "spearman": 0.44501466275659823
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 59.375,
+          "spearman": 0.48533724340175954
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 68.75,
+          "spearman": 0.5909090909090909
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 59.375,
+          "spearman": 0.623900293255132
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 65.625,
+          "spearman": 0.532258064516129
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 46.875,
+          "spearman": 0.6370967741935484
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 59.375,
+          "spearman": 0.39552785923753664
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 65.625,
+          "spearman": 0.41312316715542524
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 53.125,
+          "spearman": 0.48277126099706746
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 68.75,
+          "spearman": 0.438049853372434
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 62.5,
+          "spearman": 0.7478005865102639
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 56.25,
+          "spearman": 0.3709677419354839
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 71.875,
+          "spearman": 0.6315982404692082
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 59.375,
+          "spearman": 0.5153958944281525
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 56.25,
+          "spearman": 0.3973607038123167
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 50,
+          "spearman": 0.5630498533724341
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 65.625,
+          "spearman": 0.5454545454545454
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 59.375,
+          "spearman": 0.4937683284457478
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 62.5,
+          "spearman": 0.5700146627565983
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 56.25,
+          "spearman": 0.5293255131964809
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 50,
+          "spearman": 0.36986803519061584
+        }
+      ]
+    },
+    {
+      "optionLabel": "A (v1, 8 feature)",
+      "foldIndex": 5,
+      "testMonth": "2026-07",
+      "baselineTopSize": 11,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.16363636363636364
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.44545454545454544
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.4636363636363636
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.33636363636363636
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.8818181818181818
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.42727272727272725
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.45454545454545453
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.5
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.3090909090909091
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.5545454545454546
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.43636363636363634
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.8181818181818182
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.4727272727272727
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.12727272727272726
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.8454545454545455
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.7
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.6090909090909091
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.5454545454545454
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.2727272727272727
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.32727272727272727
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.36363636363636365
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.6272727272727273
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.33636363636363636
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.6363636363636364
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.8090909090909091
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.3181818181818182
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.20909090909090908
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 36.36363636363637,
+          "spearman": 0.43636363636363634
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 27.27272727272727,
+          "spearman": 0.3
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.42727272727272725
+        }
+      ]
+    },
+    {
+      "optionLabel": "B (v2, 14 feature)",
+      "foldIndex": 5,
+      "testMonth": "2026-07",
+      "baselineTopSize": 11,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.08181818181818182
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 27.27272727272727,
+          "spearman": 0.8090909090909091
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.7181818181818181
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.6454545454545455
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 27.27272727272727,
+          "spearman": 0.5909090909090909
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.7909090909090909
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.7636363636363637
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 36.36363636363637,
+          "spearman": 0.5818181818181818
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.8272727272727273
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.7181818181818181
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 18.181818181818183,
+          "spearman": 0.15454545454545454
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.5727272727272728
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 36.36363636363637,
+          "spearman": 0.7090909090909091
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.6818181818181818
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.8818181818181818
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.45454545454545453
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.45454545454545453
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.2
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.9090909090909091
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.45454545454545453
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.4090909090909091
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.7272727272727273
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 72.72727272727273,
+          "spearman": -0.05454545454545454
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.5818181818181818
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.8363636363636363
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.4090909090909091
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 36.36363636363637,
+          "spearman": 0.6818181818181818
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.4090909090909091
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.5727272727272728
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 36.36363636363637,
+          "spearman": 0.35454545454545455
+        }
+      ]
+    },
+    {
+      "optionLabel": "C (toi gian, 4 feature)",
+      "foldIndex": 5,
+      "testMonth": "2026-07",
+      "baselineTopSize": 11,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.2545454545454545
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.4
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.39090909090909093
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.7545454545454545
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.2727272727272727
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.32727272727272727
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 81.81818181818183,
+          "spearman": 0.7454545454545455
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.44545454545454544
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 81.81818181818183,
+          "spearman": 0.7181818181818181
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.5454545454545454
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.2818181818181818
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.6454545454545455
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 45.45454545454545,
+          "spearman": -0.10909090909090909
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.6818181818181818
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.2727272727272727
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.36363636363636365
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 27.27272727272727,
+          "spearman": 0.14545454545454545
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.4636363636363636
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.2818181818181818
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.4
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.43636363636363634
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.8090909090909091
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.15454545454545454
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.23636363636363636
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.3
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.22727272727272727
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.3
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.2
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.3181818181818182
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 81.81818181818183,
+          "spearman": -0.06363636363636363
+        }
+      ]
+    },
+    {
+      "optionLabel": "D (v2 + regularization)",
+      "foldIndex": 5,
+      "testMonth": "2026-07",
+      "baselineTopSize": 11,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.18181818181818182
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.6181818181818182
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.6636363636363637
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.07272727272727272
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.7090909090909091
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.6272727272727273
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 36.36363636363637,
+          "spearman": 0.4
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.5818181818181818
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 81.81818181818183,
+          "spearman": 0.4636363636363636
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.4636363636363636
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.7818181818181819
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.5636363636363636
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.7909090909090909
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.3090909090909091
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.6181818181818182
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.6727272727272727
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.36363636363636365
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.4
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.5454545454545454
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.6636363636363637
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 36.36363636363637,
+          "spearman": 0.6818181818181818
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.8272727272727273
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.10909090909090909
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.7545454545454545
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.6727272727272727
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.20909090909090908
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.3
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.6363636363636364
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.6909090909090909
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 36.36363636363637,
+          "spearman": 0.42727272727272725
+        }
+      ]
+    },
+    {
+      "optionLabel": "A (v1, 8 feature)",
+      "foldIndex": 6,
+      "testMonth": "2026-08",
+      "baselineTopSize": 11,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.8
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 81.81818181818183,
+          "spearman": 0.6818181818181818
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.9181818181818182
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 90.9090909090909,
+          "spearman": 0.6545454545454545
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.13636363636363635
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.6181818181818182
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.8727272727272727
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 36.36363636363637,
+          "spearman": 0.7909090909090909
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 90.9090909090909,
+          "spearman": 0.6454545454545455
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.6545454545454545
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.8727272727272727
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.2727272727272727
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.8818181818181818
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.4818181818181818
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 81.81818181818183,
+          "spearman": 0.7909090909090909
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.8272727272727273
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 81.81818181818183,
+          "spearman": 0.8818181818181818
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.7363636363636363
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.6636363636363637
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.8090909090909091
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.5545454545454546
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.7545454545454545
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 81.81818181818183,
+          "spearman": 0.8818181818181818
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.36363636363636365
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.6272727272727273
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.7272727272727273
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.13636363636363635
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 90.9090909090909,
+          "spearman": 0.6545454545454545
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.6090909090909091
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.12727272727272726
+        }
+      ]
+    },
+    {
+      "optionLabel": "B (v2, 14 feature)",
+      "foldIndex": 6,
+      "testMonth": "2026-08",
+      "baselineTopSize": 11,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 36.36363636363637,
+          "spearman": 0.5
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.7545454545454545
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.2545454545454545
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.5454545454545454
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.45454545454545453
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.5363636363636364
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.18181818181818182
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.7272727272727273
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.5181818181818182
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 36.36363636363637,
+          "spearman": 0.06363636363636363
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.6727272727272727
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.4818181818181818
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.42727272727272725
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.42727272727272725
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.7727272727272727
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 27.27272727272727,
+          "spearman": 0.7454545454545455
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.6181818181818182
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.24545454545454545
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.6
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.8545454545454545
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.2909090909090909
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.6454545454545455
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.24545454545454545
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.36363636363636365
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.16363636363636364
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.2636363636363636
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.32727272727272727
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 81.81818181818183,
+          "spearman": 0.8909090909090909
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 63.63636363636363,
+          "spearman": -0.11818181818181818
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.045454545454545456
+        }
+      ]
+    },
+    {
+      "optionLabel": "C (toi gian, 4 feature)",
+      "foldIndex": 6,
+      "testMonth": "2026-08",
+      "baselineTopSize": 11,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.41818181818181815
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 81.81818181818183,
+          "spearman": 0.5272727272727272
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.38181818181818183
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.5454545454545454
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.5545454545454546
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.44545454545454544
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.37272727272727274
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.7909090909090909
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.5636363636363636
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.4636363636363636
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 63.63636363636363,
+          "spearman": -0.03636363636363636
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.7636363636363637
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.22727272727272727
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.6272727272727273
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 36.36363636363637,
+          "spearman": 0.7909090909090909
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.5636363636363636
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.5545454545454546
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.7
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.5363636363636364
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.8363636363636363
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.8181818181818182
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.5363636363636364
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.5272727272727272
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.7272727272727273
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 90.9090909090909,
+          "spearman": 0.3181818181818182
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.5636363636363636
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.5272727272727272
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.4818181818181818
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 72.72727272727273,
+          "spearman": -0.03636363636363636
+        }
+      ]
+    },
+    {
+      "optionLabel": "D (v2 + regularization)",
+      "foldIndex": 6,
+      "testMonth": "2026-08",
+      "baselineTopSize": 11,
+      "iterations": [
+        {
+          "iteration": 0,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.6545454545454545
+        },
+        {
+          "iteration": 1,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.6090909090909091
+        },
+        {
+          "iteration": 2,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.6
+        },
+        {
+          "iteration": 3,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.24545454545454545
+        },
+        {
+          "iteration": 4,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.4
+        },
+        {
+          "iteration": 5,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.5363636363636364
+        },
+        {
+          "iteration": 6,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.7363636363636363
+        },
+        {
+          "iteration": 7,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.6181818181818182
+        },
+        {
+          "iteration": 8,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.38181818181818183
+        },
+        {
+          "iteration": 9,
+          "overlapPct": 18.181818181818183,
+          "spearman": 0.09090909090909091
+        },
+        {
+          "iteration": 10,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.6
+        },
+        {
+          "iteration": 11,
+          "overlapPct": 36.36363636363637,
+          "spearman": 0.37272727272727274
+        },
+        {
+          "iteration": 12,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.8181818181818182
+        },
+        {
+          "iteration": 13,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.5363636363636364
+        },
+        {
+          "iteration": 14,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.8181818181818182
+        },
+        {
+          "iteration": 15,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.02727272727272727
+        },
+        {
+          "iteration": 16,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.5363636363636364
+        },
+        {
+          "iteration": 17,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.7818181818181819
+        },
+        {
+          "iteration": 18,
+          "overlapPct": 81.81818181818183,
+          "spearman": 0.42727272727272725
+        },
+        {
+          "iteration": 19,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.7636363636363637
+        },
+        {
+          "iteration": 20,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.24545454545454545
+        },
+        {
+          "iteration": 21,
+          "overlapPct": 81.81818181818183,
+          "spearman": 0.3
+        },
+        {
+          "iteration": 22,
+          "overlapPct": 45.45454545454545,
+          "spearman": 0.3181818181818182
+        },
+        {
+          "iteration": 23,
+          "overlapPct": 63.63636363636363,
+          "spearman": 0.7
+        },
+        {
+          "iteration": 24,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.2
+        },
+        {
+          "iteration": 25,
+          "overlapPct": 81.81818181818183,
+          "spearman": 0.38181818181818183
+        },
+        {
+          "iteration": 26,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.6272727272727273
+        },
+        {
+          "iteration": 27,
+          "overlapPct": 72.72727272727273,
+          "spearman": 0.6545454545454545
+        },
+        {
+          "iteration": 28,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.4636363636363636
+        },
+        {
+          "iteration": 29,
+          "overlapPct": 54.54545454545454,
+          "spearman": 0.045454545454545456
+        }
+      ]
+    }
+  ]
+}

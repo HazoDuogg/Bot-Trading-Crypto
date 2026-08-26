@@ -1,0 +1,3556 @@
+{
+  "results": [
+    {
+      "optionLabel": "A (v1, 8 feature)",
+      "foldIndex": 1,
+      "testMonth": "2026-03",
+      "top": {
+        "n": 25,
+        "winRate": 0.48,
+        "wilsonLower": 0.32581809779808024,
+        "wilsonUpper": 0.6380880424421618,
+        "pf": 1.4647210135715412,
+        "expectancyUsd": 1.8324331441199644,
+        "expectancyR": 0.488,
+        "pnlUsd": 45.81082860299911,
+        "maxDrawdownUsd": 37.46399819585515,
+        "longestLosingStreak": 3
+      },
+      "middle": {
+        "n": 73,
+        "winRate": 0.4246575342465753,
+        "wilsonLower": 0.3338684728190262,
+        "wilsonUpper": 0.520831731444484,
+        "pf": 1.0356621136799267,
+        "expectancyUsd": 0.16791910760748185,
+        "expectancyR": 0.31643835616438365,
+        "pnlUsd": 12.258094855346176,
+        "maxDrawdownUsd": 71.28710015827912,
+        "longestLosingStreak": 6
+      },
+      "bottom": {
+        "n": 25,
+        "winRate": 0.48,
+        "wilsonLower": 0.32581809779808024,
+        "wilsonUpper": 0.6380880424421618,
+        "pf": 1.097582172975929,
+        "expectancyUsd": 0.4465531919152663,
+        "expectancyR": 0.4879999999999999,
+        "pnlUsd": 11.163829797881657,
+        "maxDrawdownUsd": 32.877989378363814,
+        "longestLosingStreak": 3
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1773369000000,
+          "outcome": "TP",
+          "pnl": 14.352127659574418,
+          "predicted": 0.9352168440818787
+        },
+        {
+          "entryTimestampUtc": 1773716400000,
+          "outcome": "SL",
+          "pnl": -9.203848920863306,
+          "predicted": 0.8907278180122375
+        },
+        {
+          "entryTimestampUtc": 1773154800000,
+          "outcome": "SL",
+          "pnl": -6.066791277258574,
+          "predicted": 0.857344925403595
+        },
+        {
+          "entryTimestampUtc": 1773615600000,
+          "outcome": "TP",
+          "pnl": 12.890600000000044,
+          "predicted": 0.8536283373832703
+        },
+        {
+          "entryTimestampUtc": 1772555400000,
+          "outcome": "SL",
+          "pnl": -10.038840206185546,
+          "predicted": 0.834751307964325
+        },
+        {
+          "entryTimestampUtc": 1772555400000,
+          "outcome": "SL",
+          "pnl": -5.7919354838709705,
+          "predicted": 0.8189840316772461
+        },
+        {
+          "entryTimestampUtc": 1772555400000,
+          "outcome": "SL",
+          "pnl": -9.62700000000002,
+          "predicted": 0.8141558766365051
+        },
+        {
+          "entryTimestampUtc": 1773995400000,
+          "outcome": "SL",
+          "pnl": -6.077702702702711,
+          "predicted": 0.8121790885925293
+        },
+        {
+          "entryTimestampUtc": 1772528400000,
+          "outcome": "TP",
+          "pnl": 12.873760890609788,
+          "predicted": 0.8021663427352905
+        },
+        {
+          "entryTimestampUtc": 1772640000000,
+          "outcome": "TP",
+          "pnl": 14.410147058823558,
+          "predicted": 0.7949017286300659
+        },
+        {
+          "entryTimestampUtc": 1772336700000,
+          "outcome": "SL",
+          "pnl": -8.073013100436679,
+          "predicted": 0.7849318981170654
+        },
+        {
+          "entryTimestampUtc": 1773617400000,
+          "outcome": "TP",
+          "pnl": 12.983575129533603,
+          "predicted": 0.7744060754776001
+        },
+        {
+          "entryTimestampUtc": 1773375300000,
+          "outcome": "SL",
+          "pnl": -6.039173553719008,
+          "predicted": 0.7664655447006226
+        },
+        {
+          "entryTimestampUtc": 1772515800000,
+          "outcome": "SL",
+          "pnl": -6.735235602094218,
+          "predicted": 0.7497531771659851
+        },
+        {
+          "entryTimestampUtc": 1773765000000,
+          "outcome": "TP",
+          "pnl": 9.20431818181817,
+          "predicted": 0.7476627230644226
+        },
+        {
+          "entryTimestampUtc": 1772331300000,
+          "outcome": "TP",
+          "pnl": 9.578795180722905,
+          "predicted": 0.7369205951690674
+        },
+        {
+          "entryTimestampUtc": 1773935100000,
+          "outcome": "TP",
+          "pnl": 13.207235294117655,
+          "predicted": 0.7164638042449951
+        },
+        {
+          "entryTimestampUtc": 1773481500000,
+          "outcome": "TP",
+          "pnl": 13.266785714285662,
+          "predicted": 0.7126744389533997
+        },
+        {
+          "entryTimestampUtc": 1772630100000,
+          "outcome": "TP",
+          "pnl": 13.540069473247627,
+          "predicted": 0.7076200246810913
+        },
+        {
+          "entryTimestampUtc": 1773028800000,
+          "outcome": "SL",
+          "pnl": -8.549747899159666,
+          "predicted": 0.7061423659324646
+        },
+        {
+          "entryTimestampUtc": 1773736200000,
+          "outcome": "SL",
+          "pnl": -5.877376344086015,
+          "predicted": 0.696399450302124
+        },
+        {
+          "entryTimestampUtc": 1774145700000,
+          "outcome": "SL",
+          "pnl": -6.424654545454516,
+          "predicted": 0.6826269030570984
+        },
+        {
+          "entryTimestampUtc": 1772415900000,
+          "outcome": "SL",
+          "pnl": -10.071734693877504,
+          "predicted": 0.6825573444366455
+        },
+        {
+          "entryTimestampUtc": 1773616500000,
+          "outcome": "TP",
+          "pnl": 9.168637992831595,
+          "predicted": 0.6767562031745911
+        },
+        {
+          "entryTimestampUtc": 1773235800000,
+          "outcome": "TP",
+          "pnl": 8.91183035714282,
+          "predicted": 0.6729129552841187
+        }
+      ]
+    },
+    {
+      "optionLabel": "B (v2, 14 feature)",
+      "foldIndex": 1,
+      "testMonth": "2026-03",
+      "top": {
+        "n": 25,
+        "winRate": 0.52,
+        "wilsonLower": 0.3619119575578382,
+        "wilsonUpper": 0.6741819022019198,
+        "pf": 1.7064316442253793,
+        "expectancyUsd": 2.555532979792469,
+        "expectancyR": 0.6119999999999999,
+        "pnlUsd": 63.88832449481173,
+        "maxDrawdownUsd": 56.166937467754096,
+        "longestLosingStreak": 7
+      },
+      "middle": {
+        "n": 73,
+        "winRate": 0.3972602739726027,
+        "wilsonLower": 0.3083539724579746,
+        "wilsonUpper": 0.49350994244681223,
+        "pf": 0.8908925203983583,
+        "expectancyUsd": -0.5584583512115112,
+        "expectancyR": 0.23150684931506843,
+        "pnlUsd": -40.76745963844032,
+        "maxDrawdownUsd": 88.19894523066517,
+        "longestLosingStreak": 10
+      },
+      "bottom": {
+        "n": 25,
+        "winRate": 0.52,
+        "wilsonLower": 0.3619119575578382,
+        "wilsonUpper": 0.6741819022019198,
+        "pf": 1.4978223751630604,
+        "expectancyUsd": 1.8444755359942213,
+        "expectancyR": 0.612,
+        "pnlUsd": 46.11188839985553,
+        "maxDrawdownUsd": 25.6641224104994,
+        "longestLosingStreak": 3
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1773154800000,
+          "outcome": "SL",
+          "pnl": -6.066791277258574,
+          "predicted": 0.9115198850631714
+        },
+        {
+          "entryTimestampUtc": 1772555400000,
+          "outcome": "SL",
+          "pnl": -10.038840206185546,
+          "predicted": 0.8474344611167908
+        },
+        {
+          "entryTimestampUtc": 1773617400000,
+          "outcome": "TP",
+          "pnl": 12.983575129533603,
+          "predicted": 0.8401692509651184
+        },
+        {
+          "entryTimestampUtc": 1773615600000,
+          "outcome": "TP",
+          "pnl": 12.890600000000044,
+          "predicted": 0.8373488783836365
+        },
+        {
+          "entryTimestampUtc": 1772555400000,
+          "outcome": "SL",
+          "pnl": -9.62700000000002,
+          "predicted": 0.8168905973434448
+        },
+        {
+          "entryTimestampUtc": 1773716400000,
+          "outcome": "SL",
+          "pnl": -9.203848920863306,
+          "predicted": 0.8168467283248901
+        },
+        {
+          "entryTimestampUtc": 1773369000000,
+          "outcome": "TP",
+          "pnl": 14.352127659574418,
+          "predicted": 0.8128740191459656
+        },
+        {
+          "entryTimestampUtc": 1773616500000,
+          "outcome": "TP",
+          "pnl": 13.3266964285714,
+          "predicted": 0.782557487487793
+        },
+        {
+          "entryTimestampUtc": 1772762400000,
+          "outcome": "SL",
+          "pnl": -10.236428571428558,
+          "predicted": 0.7797408699989319
+        },
+        {
+          "entryTimestampUtc": 1772528400000,
+          "outcome": "TP",
+          "pnl": 12.873760890609788,
+          "predicted": 0.7763307094573975
+        },
+        {
+          "entryTimestampUtc": 1773675900000,
+          "outcome": "TP",
+          "pnl": 13.956411290322523,
+          "predicted": 0.759343147277832
+        },
+        {
+          "entryTimestampUtc": 1774369800000,
+          "outcome": "TP",
+          "pnl": 9.947689015691845,
+          "predicted": 0.7387385368347168
+        },
+        {
+          "entryTimestampUtc": 1773765000000,
+          "outcome": "TP",
+          "pnl": 9.20431818181817,
+          "predicted": 0.7374032735824585
+        },
+        {
+          "entryTimestampUtc": 1772555400000,
+          "outcome": "SL",
+          "pnl": -5.7919354838709705,
+          "predicted": 0.7188504934310913
+        },
+        {
+          "entryTimestampUtc": 1772331300000,
+          "outcome": "TP",
+          "pnl": 9.578795180722905,
+          "predicted": 0.6917028427124023
+        },
+        {
+          "entryTimestampUtc": 1774856700000,
+          "outcome": "TP",
+          "pnl": 8.82804347826096,
+          "predicted": 0.6914969086647034
+        },
+        {
+          "entryTimestampUtc": 1772524800000,
+          "outcome": "SL",
+          "pnl": -5.925240793201129,
+          "predicted": 0.6872284412384033
+        },
+        {
+          "entryTimestampUtc": 1774403100000,
+          "outcome": "SL",
+          "pnl": -6.668921161825729,
+          "predicted": 0.6845896244049072
+        },
+        {
+          "entryTimestampUtc": 1774263600000,
+          "outcome": "SL",
+          "pnl": -6.43396226415094,
+          "predicted": 0.6696926951408386
+        },
+        {
+          "entryTimestampUtc": 1773375300000,
+          "outcome": "SL",
+          "pnl": -6.039173553719008,
+          "predicted": 0.6636273264884949
+        },
+        {
+          "entryTimestampUtc": 1772379000000,
+          "outcome": "TP",
+          "pnl": 9.202635983263626,
+          "predicted": 0.6504189968109131
+        },
+        {
+          "entryTimestampUtc": 1774881900000,
+          "outcome": "TP",
+          "pnl": 13.974520123838994,
+          "predicted": 0.6401697993278503
+        },
+        {
+          "entryTimestampUtc": 1773099900000,
+          "outcome": "SL",
+          "pnl": -5.8561940298507595,
+          "predicted": 0.6274051070213318
+        },
+        {
+          "entryTimestampUtc": 1773028800000,
+          "outcome": "SL",
+          "pnl": -8.549747899159666,
+          "predicted": 0.6238963007926941
+        },
+        {
+          "entryTimestampUtc": 1773935100000,
+          "outcome": "TP",
+          "pnl": 13.207235294117655,
+          "predicted": 0.6222958564758301
+        }
+      ]
+    },
+    {
+      "optionLabel": "C (toi gian, 4 feature)",
+      "foldIndex": 1,
+      "testMonth": "2026-03",
+      "top": {
+        "n": 25,
+        "winRate": 0.52,
+        "wilsonLower": 0.3619119575578382,
+        "wilsonUpper": 0.6741819022019198,
+        "pf": 1.5413035294607014,
+        "expectancyUsd": 2.17727223975865,
+        "expectancyR": 0.6119999999999999,
+        "pnlUsd": 54.43180599396626,
+        "maxDrawdownUsd": 49.65167459181644,
+        "longestLosingStreak": 5
+      },
+      "middle": {
+        "n": 73,
+        "winRate": 0.3972602739726027,
+        "wilsonLower": 0.3083539724579746,
+        "wilsonUpper": 0.49350994244681223,
+        "pf": 0.9697015405156791,
+        "expectancyUsd": -0.14411573562229277,
+        "expectancyR": 0.23150684931506849,
+        "pnlUsd": -10.520448700427373,
+        "maxDrawdownUsd": 93.14954790280635,
+        "longestLosingStreak": 7
+      },
+      "bottom": {
+        "n": 25,
+        "winRate": 0.52,
+        "wilsonLower": 0.3619119575578382,
+        "wilsonUpper": 0.6741819022019198,
+        "pf": 1.232463885291763,
+        "expectancyUsd": 1.0128558385075215,
+        "expectancyR": 0.612,
+        "pnlUsd": 25.321395962688037,
+        "maxDrawdownUsd": 33.41098330627598,
+        "longestLosingStreak": 3
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1773154800000,
+          "outcome": "SL",
+          "pnl": -6.066791277258574,
+          "predicted": 0.9033551216125488
+        },
+        {
+          "entryTimestampUtc": 1773369000000,
+          "outcome": "TP",
+          "pnl": 14.352127659574418,
+          "predicted": 0.9009644389152527
+        },
+        {
+          "entryTimestampUtc": 1772555400000,
+          "outcome": "SL",
+          "pnl": -5.7919354838709705,
+          "predicted": 0.8803397417068481
+        },
+        {
+          "entryTimestampUtc": 1774369800000,
+          "outcome": "TP",
+          "pnl": 9.947689015691845,
+          "predicted": 0.8603299260139465
+        },
+        {
+          "entryTimestampUtc": 1773617400000,
+          "outcome": "TP",
+          "pnl": 12.983575129533603,
+          "predicted": 0.8601085543632507
+        },
+        {
+          "entryTimestampUtc": 1772555400000,
+          "outcome": "SL",
+          "pnl": -10.038840206185546,
+          "predicted": 0.8514657020568848
+        },
+        {
+          "entryTimestampUtc": 1773616500000,
+          "outcome": "TP",
+          "pnl": 13.3266964285714,
+          "predicted": 0.8265802264213562
+        },
+        {
+          "entryTimestampUtc": 1773615600000,
+          "outcome": "TP",
+          "pnl": 12.890600000000044,
+          "predicted": 0.8249375224113464
+        },
+        {
+          "entryTimestampUtc": 1772640000000,
+          "outcome": "TP",
+          "pnl": 14.410147058823558,
+          "predicted": 0.7977256178855896
+        },
+        {
+          "entryTimestampUtc": 1772555400000,
+          "outcome": "SL",
+          "pnl": -9.62700000000002,
+          "predicted": 0.7835820913314819
+        },
+        {
+          "entryTimestampUtc": 1773675900000,
+          "outcome": "TP",
+          "pnl": 13.956411290322523,
+          "predicted": 0.7697747349739075
+        },
+        {
+          "entryTimestampUtc": 1773716400000,
+          "outcome": "SL",
+          "pnl": -9.203848920863306,
+          "predicted": 0.7689564228057861
+        },
+        {
+          "entryTimestampUtc": 1773028800000,
+          "outcome": "SL",
+          "pnl": -8.549747899159666,
+          "predicted": 0.7564848065376282
+        },
+        {
+          "entryTimestampUtc": 1774832400000,
+          "outcome": "SL",
+          "pnl": -5.4446541617819495,
+          "predicted": 0.7551144957542419
+        },
+        {
+          "entryTimestampUtc": 1773765000000,
+          "outcome": "TP",
+          "pnl": 9.20431818181817,
+          "predicted": 0.7542965412139893
+        },
+        {
+          "entryTimestampUtc": 1772336700000,
+          "outcome": "SL",
+          "pnl": -8.246619718309859,
+          "predicted": 0.7257540225982666
+        },
+        {
+          "entryTimestampUtc": 1773166500000,
+          "outcome": "SL",
+          "pnl": -8.704626168224292,
+          "predicted": 0.7057806253433228
+        },
+        {
+          "entryTimestampUtc": 1773250200000,
+          "outcome": "SL",
+          "pnl": -9.866488140780383,
+          "predicted": 0.6913486123085022
+        },
+        {
+          "entryTimestampUtc": 1772415900000,
+          "outcome": "SL",
+          "pnl": -10.071734693877504,
+          "predicted": 0.6885191202163696
+        },
+        {
+          "entryTimestampUtc": 1773945000000,
+          "outcome": "TP",
+          "pnl": 9.28407407407411,
+          "predicted": 0.683252215385437
+        },
+        {
+          "entryTimestampUtc": 1773328500000,
+          "outcome": "SL",
+          "pnl": -8.944615384615387,
+          "predicted": 0.6687890291213989
+        },
+        {
+          "entryTimestampUtc": 1773935100000,
+          "outcome": "TP",
+          "pnl": 13.207235294117655,
+          "predicted": 0.6674368977546692
+        },
+        {
+          "entryTimestampUtc": 1774278000000,
+          "outcome": "TP",
+          "pnl": 9.5792565947242,
+          "predicted": 0.665160596370697
+        },
+        {
+          "entryTimestampUtc": 1772555400000,
+          "outcome": "TP",
+          "pnl": 12.822538860103702,
+          "predicted": 0.6534509062767029
+        },
+        {
+          "entryTimestampUtc": 1772733600000,
+          "outcome": "TP",
+          "pnl": 9.024038461538503,
+          "predicted": 0.6368842124938965
+        }
+      ]
+    },
+    {
+      "optionLabel": "D (v2 + regularization)",
+      "foldIndex": 1,
+      "testMonth": "2026-03",
+      "top": {
+        "n": 25,
+        "winRate": 0.52,
+        "wilsonLower": 0.3619119575578382,
+        "wilsonUpper": 0.6741819022019198,
+        "pf": 1.6860946164116584,
+        "expectancyUsd": 2.5214147958304043,
+        "expectancyR": 0.612,
+        "pnlUsd": 63.035369895760105,
+        "maxDrawdownUsd": 48.48502486647478,
+        "longestLosingStreak": 6
+      },
+      "middle": {
+        "n": 73,
+        "winRate": 0.4246575342465753,
+        "wilsonLower": 0.3338684728190262,
+        "wilsonUpper": 0.520831731444484,
+        "pf": 0.990018694769414,
+        "expectancyUsd": -0.04843500574208821,
+        "expectancyR": 0.31643835616438387,
+        "pnlUsd": -3.535755419172439,
+        "maxDrawdownUsd": 92.58787711062652,
+        "longestLosingStreak": 8
+      },
+      "bottom": {
+        "n": 25,
+        "winRate": 0.44,
+        "wilsonLower": 0.29062985029617305,
+        "wilsonUpper": 0.6010885704245531,
+        "pf": 1.0880055855964543,
+        "expectancyUsd": 0.3893255511855704,
+        "expectancyR": 0.36399999999999993,
+        "pnlUsd": 9.73313877963926,
+        "maxDrawdownUsd": 27.94750683469162,
+        "longestLosingStreak": 3
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1772528400000,
+          "outcome": "TP",
+          "pnl": 12.873760890609788,
+          "predicted": 0.8929233551025391
+        },
+        {
+          "entryTimestampUtc": 1773369000000,
+          "outcome": "TP",
+          "pnl": 14.352127659574418,
+          "predicted": 0.8625997304916382
+        },
+        {
+          "entryTimestampUtc": 1773716400000,
+          "outcome": "SL",
+          "pnl": -9.203848920863306,
+          "predicted": 0.8577502369880676
+        },
+        {
+          "entryTimestampUtc": 1773154800000,
+          "outcome": "SL",
+          "pnl": -6.066791277258574,
+          "predicted": 0.855452835559845
+        },
+        {
+          "entryTimestampUtc": 1772555400000,
+          "outcome": "SL",
+          "pnl": -10.038840206185546,
+          "predicted": 0.8499682545661926
+        },
+        {
+          "entryTimestampUtc": 1772555400000,
+          "outcome": "SL",
+          "pnl": -9.62700000000002,
+          "predicted": 0.8013197183609009
+        },
+        {
+          "entryTimestampUtc": 1772331300000,
+          "outcome": "TP",
+          "pnl": 9.578795180722905,
+          "predicted": 0.7643674612045288
+        },
+        {
+          "entryTimestampUtc": 1773617400000,
+          "outcome": "TP",
+          "pnl": 12.983575129533603,
+          "predicted": 0.7538027763366699
+        },
+        {
+          "entryTimestampUtc": 1774278000000,
+          "outcome": "TP",
+          "pnl": 9.5792565947242,
+          "predicted": 0.7506576180458069
+        },
+        {
+          "entryTimestampUtc": 1774856700000,
+          "outcome": "TP",
+          "pnl": 8.82804347826096,
+          "predicted": 0.7442085146903992
+        },
+        {
+          "entryTimestampUtc": 1773935100000,
+          "outcome": "TP",
+          "pnl": 13.207235294117655,
+          "predicted": 0.7340819239616394
+        },
+        {
+          "entryTimestampUtc": 1773616500000,
+          "outcome": "TP",
+          "pnl": 13.3266964285714,
+          "predicted": 0.7150172591209412
+        },
+        {
+          "entryTimestampUtc": 1773765000000,
+          "outcome": "TP",
+          "pnl": 9.20431818181817,
+          "predicted": 0.711851179599762
+        },
+        {
+          "entryTimestampUtc": 1774403100000,
+          "outcome": "SL",
+          "pnl": -6.668921161825729,
+          "predicted": 0.7044774293899536
+        },
+        {
+          "entryTimestampUtc": 1773028800000,
+          "outcome": "SL",
+          "pnl": -8.549747899159666,
+          "predicted": 0.7012534141540527
+        },
+        {
+          "entryTimestampUtc": 1773675900000,
+          "outcome": "TP",
+          "pnl": 13.956411290322523,
+          "predicted": 0.6931084394454956
+        },
+        {
+          "entryTimestampUtc": 1774263600000,
+          "outcome": "SL",
+          "pnl": -6.43396226415094,
+          "predicted": 0.6835291385650635
+        },
+        {
+          "entryTimestampUtc": 1774369800000,
+          "outcome": "TP",
+          "pnl": 9.947689015691845,
+          "predicted": 0.6790363192558289
+        },
+        {
+          "entryTimestampUtc": 1774881900000,
+          "outcome": "TP",
+          "pnl": 13.974520123838994,
+          "predicted": 0.6779721975326538
+        },
+        {
+          "entryTimestampUtc": 1772416800000,
+          "outcome": "TP",
+          "pnl": 13.098563009972843,
+          "predicted": 0.6777322888374329
+        },
+        {
+          "entryTimestampUtc": 1774832400000,
+          "outcome": "SL",
+          "pnl": -5.4446541617819495,
+          "predicted": 0.677444577217102
+        },
+        {
+          "entryTimestampUtc": 1772555400000,
+          "outcome": "SL",
+          "pnl": -5.7919354838709705,
+          "predicted": 0.673953652381897
+        },
+        {
+          "entryTimestampUtc": 1773375300000,
+          "outcome": "SL",
+          "pnl": -6.039173553719008,
+          "predicted": 0.6618525385856628
+        },
+        {
+          "entryTimestampUtc": 1772823600000,
+          "outcome": "SL",
+          "pnl": -8.410710000000002,
+          "predicted": 0.6580396890640259
+        },
+        {
+          "entryTimestampUtc": 1774969200000,
+          "outcome": "SL",
+          "pnl": -9.600037453183495,
+          "predicted": 0.6509188413619995
+        }
+      ]
+    },
+    {
+      "optionLabel": "A (v1, 8 feature)",
+      "foldIndex": 2,
+      "testMonth": "2026-04",
+      "top": {
+        "n": 13,
+        "winRate": 0.8461538461538461,
+        "wilsonLower": 0.6253365134021732,
+        "wilsonUpper": 0.9477095595532418,
+        "pf": 8.245912027407226,
+        "expectancyUsd": 9.432264229616216,
+        "expectancyR": 1.6230769230769235,
+        "pnlUsd": 122.61943498501081,
+        "maxDrawdownUsd": 10.435934111759849,
+        "longestLosingStreak": 1
+      },
+      "middle": {
+        "n": 37,
+        "winRate": 0.5135135135135135,
+        "wilsonLower": 0.382118744435196,
+        "wilsonUpper": 0.6430666557131769,
+        "pf": 1.2994504188384002,
+        "expectancyUsd": 1.2708764118111489,
+        "expectancyR": 0.591891891891892,
+        "pnlUsd": 47.02242723701251,
+        "maxDrawdownUsd": 61.096823207162885,
+        "longestLosingStreak": 8
+      },
+      "bottom": {
+        "n": 13,
+        "winRate": 0.38461538461538464,
+        "wilsonLower": 0.20159260258306821,
+        "wilsonUpper": 0.6073920397651268,
+        "pf": 0.9416280844018702,
+        "expectancyUsd": -0.2959878867766647,
+        "expectancyR": 0.19230769230769235,
+        "pnlUsd": -3.847842528096641,
+        "maxDrawdownUsd": 23.88314977830118,
+        "longestLosingStreak": 2
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1776700800000,
+          "outcome": "TP",
+          "pnl": 13.512000000000015,
+          "predicted": 0.7699637413024902
+        },
+        {
+          "entryTimestampUtc": 1775751300000,
+          "outcome": "TP",
+          "pnl": 13.041395061728426,
+          "predicted": 0.7600474953651428
+        },
+        {
+          "entryTimestampUtc": 1775686500000,
+          "outcome": "TP",
+          "pnl": 9.290126582278447,
+          "predicted": 0.7555080056190491
+        },
+        {
+          "entryTimestampUtc": 1776055500000,
+          "outcome": "TP",
+          "pnl": 8.893515624999946,
+          "predicted": 0.7405421733856201
+        },
+        {
+          "entryTimestampUtc": 1776829500000,
+          "outcome": "TP",
+          "pnl": 13.483421052631595,
+          "predicted": 0.72116619348526
+        },
+        {
+          "entryTimestampUtc": 1775752200000,
+          "outcome": "TP",
+          "pnl": 12.99500000000004,
+          "predicted": 0.7177566289901733
+        },
+        {
+          "entryTimestampUtc": 1775106000000,
+          "outcome": "TP",
+          "pnl": 13.515681818181834,
+          "predicted": 0.6803334951400757
+        },
+        {
+          "entryTimestampUtc": 1776089700000,
+          "outcome": "TP",
+          "pnl": 13.134069083782306,
+          "predicted": 0.6698922514915466
+        },
+        {
+          "entryTimestampUtc": 1776089700000,
+          "outcome": "TP",
+          "pnl": 13.407169811320717,
+          "predicted": 0.6646252870559692
+        },
+        {
+          "entryTimestampUtc": 1776503700000,
+          "outcome": "SL",
+          "pnl": -6.486633333333348,
+          "predicted": 0.662740170955658
+        },
+        {
+          "entryTimestampUtc": 1776432600000,
+          "outcome": "TP",
+          "pnl": 14.435211630474816,
+          "predicted": 0.6548076868057251
+        },
+        {
+          "entryTimestampUtc": 1776369600000,
+          "outcome": "SL",
+          "pnl": -10.435934111759853,
+          "predicted": 0.6387434601783752
+        },
+        {
+          "entryTimestampUtc": 1776831300000,
+          "outcome": "TP",
+          "pnl": 13.834411764705871,
+          "predicted": 0.6213827729225159
+        }
+      ]
+    },
+    {
+      "optionLabel": "B (v2, 14 feature)",
+      "foldIndex": 2,
+      "testMonth": "2026-04",
+      "top": {
+        "n": 13,
+        "winRate": 0.7692307692307693,
+        "wilsonLower": 0.5419342471169866,
+        "wilsonUpper": 0.9037682540705585,
+        "pf": 3.989697737438944,
+        "expectancyUsd": 6.789169825399342,
+        "expectancyR": 1.3846153846153846,
+        "pnlUsd": 88.25920773019145,
+        "maxDrawdownUsd": 10.258999999999986,
+        "longestLosingStreak": 1
+      },
+      "middle": {
+        "n": 37,
+        "winRate": 0.4864864864864865,
+        "wilsonLower": 0.35693334428682316,
+        "wilsonUpper": 0.6178812555648041,
+        "pf": 1.3438969302548631,
+        "expectancyUsd": 1.4490120753010693,
+        "expectancyR": 0.5081081081081081,
+        "pnlUsd": 53.61344678613956,
+        "maxDrawdownUsd": 49.38769480881777,
+        "longestLosingStreak": 7
+      },
+      "bottom": {
+        "n": 13,
+        "winRate": 0.5384615384615384,
+        "wilsonLower": 0.3248195589589245,
+        "wilsonUpper": 0.7388522269250104,
+        "pf": 1.4393255211249085,
+        "expectancyUsd": 1.8401050136612027,
+        "expectancyR": 0.6692307692307692,
+        "pnlUsd": 23.921365177595636,
+        "maxDrawdownUsd": 27.52685300861084,
+        "longestLosingStreak": 3
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1775751300000,
+          "outcome": "TP",
+          "pnl": 13.041395061728426,
+          "predicted": 0.8348025679588318
+        },
+        {
+          "entryTimestampUtc": 1775752200000,
+          "outcome": "TP",
+          "pnl": 12.99500000000004,
+          "predicted": 0.8050497770309448
+        },
+        {
+          "entryTimestampUtc": 1776700800000,
+          "outcome": "TP",
+          "pnl": 13.512000000000015,
+          "predicted": 0.7976624965667725
+        },
+        {
+          "entryTimestampUtc": 1775686500000,
+          "outcome": "TP",
+          "pnl": 9.290126582278447,
+          "predicted": 0.6448103189468384
+        },
+        {
+          "entryTimestampUtc": 1776055500000,
+          "outcome": "TP",
+          "pnl": 8.893515624999946,
+          "predicted": 0.6437040567398071
+        },
+        {
+          "entryTimestampUtc": 1777252500000,
+          "outcome": "TP",
+          "pnl": 12.974361702127606,
+          "predicted": 0.6093385815620422
+        },
+        {
+          "entryTimestampUtc": 1776645900000,
+          "outcome": "SL",
+          "pnl": -9.284577464788713,
+          "predicted": 0.5866515636444092
+        },
+        {
+          "entryTimestampUtc": 1775065500000,
+          "outcome": "TP",
+          "pnl": 9.434011627906948,
+          "predicted": 0.5711209774017334
+        },
+        {
+          "entryTimestampUtc": 1776432600000,
+          "outcome": "TP",
+          "pnl": 14.435211630474816,
+          "predicted": 0.5609567165374756
+        },
+        {
+          "entryTimestampUtc": 1776096000000,
+          "outcome": "SL",
+          "pnl": -10.258999999999983,
+          "predicted": 0.5597524642944336
+        },
+        {
+          "entryTimestampUtc": 1775106000000,
+          "outcome": "TP",
+          "pnl": 13.515681818181834,
+          "predicted": 0.5531175136566162
+        },
+        {
+          "entryTimestampUtc": 1776698100000,
+          "outcome": "TP",
+          "pnl": 9.689017681728862,
+          "predicted": 0.5512356162071228
+        },
+        {
+          "entryTimestampUtc": 1777252500000,
+          "outcome": "SL",
+          "pnl": -9.977536534446783,
+          "predicted": 0.548015296459198
+        }
+      ]
+    },
+    {
+      "optionLabel": "C (toi gian, 4 feature)",
+      "foldIndex": 2,
+      "testMonth": "2026-04",
+      "top": {
+        "n": 13,
+        "winRate": 0.8461538461538461,
+        "wilsonLower": 0.6253365134021732,
+        "wilsonUpper": 0.9477095595532418,
+        "pf": 6.751532303428069,
+        "expectancyUsd": 8.95316104518253,
+        "expectancyR": 1.623076923076923,
+        "pnlUsd": 116.39109358737288,
+        "maxDrawdownUsd": 10.258999999999986,
+        "longestLosingStreak": 1
+      },
+      "middle": {
+        "n": 37,
+        "winRate": 0.5135135135135135,
+        "wilsonLower": 0.382118744435196,
+        "wilsonUpper": 0.6430666557131769,
+        "pf": 1.4295362477029052,
+        "expectancyUsd": 1.7999054854064316,
+        "expectancyR": 0.5918918918918921,
+        "pnlUsd": 66.59650296003797,
+        "maxDrawdownUsd": 35.71999951610946,
+        "longestLosingStreak": 4
+      },
+      "bottom": {
+        "n": 13,
+        "winRate": 0.38461538461538464,
+        "wilsonLower": 0.20159260258306821,
+        "wilsonUpper": 0.6073920397651268,
+        "pf": 0.7338115092315405,
+        "expectancyUsd": -1.3225828348833988,
+        "expectancyR": 0.19230769230769232,
+        "pnlUsd": -17.193576853484185,
+        "maxDrawdownUsd": 30.464073636900828,
+        "longestLosingStreak": 4
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1775686500000,
+          "outcome": "TP",
+          "pnl": 9.290126582278447,
+          "predicted": 0.911283016204834
+        },
+        {
+          "entryTimestampUtc": 1776700800000,
+          "outcome": "TP",
+          "pnl": 13.512000000000015,
+          "predicted": 0.7983545064926147
+        },
+        {
+          "entryTimestampUtc": 1777320000000,
+          "outcome": "TP",
+          "pnl": 13.79150847457625,
+          "predicted": 0.7816014289855957
+        },
+        {
+          "entryTimestampUtc": 1777252500000,
+          "outcome": "SL",
+          "pnl": -9.977536534446783,
+          "predicted": 0.7800971865653992
+        },
+        {
+          "entryTimestampUtc": 1775752200000,
+          "outcome": "TP",
+          "pnl": 12.99500000000004,
+          "predicted": 0.7800533771514893
+        },
+        {
+          "entryTimestampUtc": 1777252500000,
+          "outcome": "TP",
+          "pnl": 12.974361702127606,
+          "predicted": 0.7739474177360535
+        },
+        {
+          "entryTimestampUtc": 1776089700000,
+          "outcome": "TP",
+          "pnl": 13.407169811320717,
+          "predicted": 0.7427675127983093
+        },
+        {
+          "entryTimestampUtc": 1776700800000,
+          "outcome": "TP",
+          "pnl": 12.979419148412603,
+          "predicted": 0.7028250694274902
+        },
+        {
+          "entryTimestampUtc": 1775751300000,
+          "outcome": "TP",
+          "pnl": 13.041395061728426,
+          "predicted": 0.6978966593742371
+        },
+        {
+          "entryTimestampUtc": 1776096000000,
+          "outcome": "SL",
+          "pnl": -10.258999999999983,
+          "predicted": 0.6819629669189453
+        },
+        {
+          "entryTimestampUtc": 1776089700000,
+          "outcome": "TP",
+          "pnl": 13.134069083782306,
+          "predicted": 0.6536185145378113
+        },
+        {
+          "entryTimestampUtc": 1777495500000,
+          "outcome": "TP",
+          "pnl": 12.803135813148744,
+          "predicted": 0.6038005948066711
+        },
+        {
+          "entryTimestampUtc": 1777246200000,
+          "outcome": "TP",
+          "pnl": 8.699444444444504,
+          "predicted": 0.5922824740409851
+        }
+      ]
+    },
+    {
+      "optionLabel": "D (v2 + regularization)",
+      "foldIndex": 2,
+      "testMonth": "2026-04",
+      "top": {
+        "n": 13,
+        "winRate": 0.6923076923076923,
+        "wilsonLower": 0.46477431472301467,
+        "wilsonUpper": 0.8535846146966602,
+        "pf": 2.829282906127457,
+        "expectancyUsd": 5.554392264521754,
+        "expectancyR": 1.146153846153846,
+        "pnlUsd": 72.2070994387828,
+        "maxDrawdownUsd": 19.26568857589986,
+        "longestLosingStreak": 2
+      },
+      "middle": {
+        "n": 37,
+        "winRate": 0.6216216216216216,
+        "wilsonLower": 0.48646503369246774,
+        "wilsonUpper": 0.7402035676428881,
+        "pf": 2.3170147384545756,
+        "expectancyUsd": 4.1235602948509635,
+        "expectancyR": 0.9270270270270276,
+        "pnlUsd": 152.57173090948567,
+        "maxDrawdownUsd": 41.8254713075392,
+        "longestLosingStreak": 5
+      },
+      "bottom": {
+        "n": 13,
+        "winRate": 0.23076923076923078,
+        "wilsonLower": 0.09623174592944161,
+        "wilsonUpper": 0.45806575288301343,
+        "pf": 0.30238037726155986,
+        "expectancyUsd": -4.537293127257057,
+        "expectancyR": -0.2846153846153846,
+        "pnlUsd": -58.98481065434175,
+        "maxDrawdownUsd": 58.98481065434176,
+        "longestLosingStreak": 6
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1775751300000,
+          "outcome": "TP",
+          "pnl": 13.041395061728426,
+          "predicted": 0.858928918838501
+        },
+        {
+          "entryTimestampUtc": 1777252500000,
+          "outcome": "SL",
+          "pnl": -9.977536534446783,
+          "predicted": 0.747875452041626
+        },
+        {
+          "entryTimestampUtc": 1775686500000,
+          "outcome": "TP",
+          "pnl": 9.290126582278447,
+          "predicted": 0.7433612942695618
+        },
+        {
+          "entryTimestampUtc": 1775752200000,
+          "outcome": "TP",
+          "pnl": 12.99500000000004,
+          "predicted": 0.742388129234314
+        },
+        {
+          "entryTimestampUtc": 1776700800000,
+          "outcome": "TP",
+          "pnl": 13.512000000000015,
+          "predicted": 0.6501932144165039
+        },
+        {
+          "entryTimestampUtc": 1776370500000,
+          "outcome": "SL",
+          "pnl": -9.981111111111149,
+          "predicted": 0.643345296382904
+        },
+        {
+          "entryTimestampUtc": 1777320000000,
+          "outcome": "TP",
+          "pnl": 13.79150847457625,
+          "predicted": 0.6326584219932556
+        },
+        {
+          "entryTimestampUtc": 1777252500000,
+          "outcome": "TP",
+          "pnl": 12.974361702127606,
+          "predicted": 0.6227989792823792
+        },
+        {
+          "entryTimestampUtc": 1776089700000,
+          "outcome": "TP",
+          "pnl": 13.407169811320717,
+          "predicted": 0.5985730290412903
+        },
+        {
+          "entryTimestampUtc": 1776700800000,
+          "outcome": "TP",
+          "pnl": 12.979419148412603,
+          "predicted": 0.5974364876747131
+        },
+        {
+          "entryTimestampUtc": 1776645900000,
+          "outcome": "SL",
+          "pnl": -9.284577464788713,
+          "predicted": 0.5943343043327332
+        },
+        {
+          "entryTimestampUtc": 1776698100000,
+          "outcome": "TP",
+          "pnl": 9.689017681728862,
+          "predicted": 0.5794046521186829
+        },
+        {
+          "entryTimestampUtc": 1775671200000,
+          "outcome": "SL",
+          "pnl": -10.229673913043515,
+          "predicted": 0.5701332688331604
+        }
+      ]
+    },
+    {
+      "optionLabel": "A (v1, 8 feature)",
+      "foldIndex": 3,
+      "testMonth": "2026-05",
+      "top": {
+        "n": 13,
+        "winRate": 0.6923076923076923,
+        "wilsonLower": 0.46477431472301467,
+        "wilsonUpper": 0.8535846146966602,
+        "pf": 3.1067310070030096,
+        "expectancyUsd": 5.091380502820803,
+        "expectancyR": 1.146153846153846,
+        "pnlUsd": 66.18794653667044,
+        "maxDrawdownUsd": 16.168202858277112,
+        "longestLosingStreak": 2
+      },
+      "middle": {
+        "n": 39,
+        "winRate": 0.5897435897435898,
+        "wilsonLower": 0.45850421290250115,
+        "wilsonUpper": 0.7093391820098509,
+        "pf": 2.0513142580556742,
+        "expectancyUsd": 3.0742380614156435,
+        "expectancyR": 0.8282051282051287,
+        "pnlUsd": 119.8952843952101,
+        "maxDrawdownUsd": 40.00448792492753,
+        "longestLosingStreak": 6
+      },
+      "bottom": {
+        "n": 13,
+        "winRate": 0.23076923076923078,
+        "wilsonLower": 0.09623174592944161,
+        "wilsonUpper": 0.45806575288301343,
+        "pf": 0.37574170749412716,
+        "expectancyUsd": -3.5163386795669,
+        "expectancyR": -0.2846153846153846,
+        "pnlUsd": -45.7124028343697,
+        "maxDrawdownUsd": 45.7124028343697,
+        "longestLosingStreak": 5
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1780025400000,
+          "outcome": "TP",
+          "pnl": 13.916716867469853,
+          "predicted": 0.8716063499450684
+        },
+        {
+          "entryTimestampUtc": 1779317100000,
+          "outcome": "TP",
+          "pnl": 9.378858350951372,
+          "predicted": 0.8268833756446838
+        },
+        {
+          "entryTimestampUtc": 1779650100000,
+          "outcome": "SL",
+          "pnl": -6.378930131004372,
+          "predicted": 0.8075871467590332
+        },
+        {
+          "entryTimestampUtc": 1779858900000,
+          "outcome": "TP",
+          "pnl": 9.655742296918746,
+          "predicted": 0.7812275290489197
+        },
+        {
+          "entryTimestampUtc": 1779136200000,
+          "outcome": "TP",
+          "pnl": 9.197171428571368,
+          "predicted": 0.762050449848175
+        },
+        {
+          "entryTimestampUtc": 1779696900000,
+          "outcome": "TP",
+          "pnl": 9.556219879518085,
+          "predicted": 0.7602550387382507
+        },
+        {
+          "entryTimestampUtc": 1779351300000,
+          "outcome": "TP",
+          "pnl": 9.559707792207782,
+          "predicted": 0.7120311856269836
+        },
+        {
+          "entryTimestampUtc": 1778915700000,
+          "outcome": "TP",
+          "pnl": 9.382180851063794,
+          "predicted": 0.641368567943573
+        },
+        {
+          "entryTimestampUtc": 1777860900000,
+          "outcome": "SL",
+          "pnl": -8.906666666666657,
+          "predicted": 0.6389818787574768
+        },
+        {
+          "entryTimestampUtc": 1779867000000,
+          "outcome": "TP",
+          "pnl": 13.517992788461598,
+          "predicted": 0.6308981776237488
+        },
+        {
+          "entryTimestampUtc": 1779718500000,
+          "outcome": "SL",
+          "pnl": -6.3424999999999905,
+          "predicted": 0.6294311881065369
+        },
+        {
+          "entryTimestampUtc": 1778514300000,
+          "outcome": "TP",
+          "pnl": 13.440725806451596,
+          "predicted": 0.6189188361167908
+        },
+        {
+          "entryTimestampUtc": 1779551100000,
+          "outcome": "SL",
+          "pnl": -9.789272727272738,
+          "predicted": 0.6028122305870056
+        }
+      ]
+    },
+    {
+      "optionLabel": "B (v2, 14 feature)",
+      "foldIndex": 3,
+      "testMonth": "2026-05",
+      "top": {
+        "n": 13,
+        "winRate": 0.7692307692307693,
+        "wilsonLower": 0.5419342471169866,
+        "wilsonUpper": 0.9037682540705585,
+        "pf": 4.711424714234663,
+        "expectancyUsd": 6.218832920601595,
+        "expectancyR": 1.3846153846153846,
+        "pnlUsd": 80.84482796782073,
+        "maxDrawdownUsd": 9.735524193548386,
+        "longestLosingStreak": 1
+      },
+      "middle": {
+        "n": 39,
+        "winRate": 0.5641025641025641,
+        "wilsonLower": 0.4335761487151112,
+        "wilsonUpper": 0.6863119905079974,
+        "pf": 1.8237458829872282,
+        "expectancyUsd": 2.5997911510888034,
+        "expectancyR": 0.7487179487179491,
+        "pnlUsd": 101.39185489246333,
+        "maxDrawdownUsd": 22.45492402790886,
+        "longestLosingStreak": 3
+      },
+      "bottom": {
+        "n": 13,
+        "winRate": 0.23076923076923078,
+        "wilsonLower": 0.09623174592944161,
+        "wilsonUpper": 0.45806575288301343,
+        "pf": 0.43285289221587636,
+        "expectancyUsd": -3.220450366367174,
+        "expectancyR": -0.2846153846153846,
+        "pnlUsd": -41.86585476277326,
+        "maxDrawdownUsd": 47.63629575728649,
+        "longestLosingStreak": 5
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1779317100000,
+          "outcome": "TP",
+          "pnl": 9.378858350951372,
+          "predicted": 0.9106832146644592
+        },
+        {
+          "entryTimestampUtc": 1780025400000,
+          "outcome": "TP",
+          "pnl": 13.916716867469853,
+          "predicted": 0.9017769694328308
+        },
+        {
+          "entryTimestampUtc": 1780120800000,
+          "outcome": "TP",
+          "pnl": 9.141239495798374,
+          "predicted": 0.8582392334938049
+        },
+        {
+          "entryTimestampUtc": 1779136200000,
+          "outcome": "TP",
+          "pnl": 9.197171428571368,
+          "predicted": 0.8451970815658569
+        },
+        {
+          "entryTimestampUtc": 1779858900000,
+          "outcome": "TP",
+          "pnl": 9.655742296918746,
+          "predicted": 0.8421699404716492
+        },
+        {
+          "entryTimestampUtc": 1779487200000,
+          "outcome": "SL",
+          "pnl": -9.735524193548388,
+          "predicted": 0.78751140832901
+        },
+        {
+          "entryTimestampUtc": 1779550200000,
+          "outcome": "TP",
+          "pnl": 9.96540845070421,
+          "predicted": 0.7594570517539978
+        },
+        {
+          "entryTimestampUtc": 1778915700000,
+          "outcome": "TP",
+          "pnl": 9.382180851063794,
+          "predicted": 0.7529787421226501
+        },
+        {
+          "entryTimestampUtc": 1779696900000,
+          "outcome": "TP",
+          "pnl": 9.556219879518085,
+          "predicted": 0.7343799471855164
+        },
+        {
+          "entryTimestampUtc": 1779650100000,
+          "outcome": "SL",
+          "pnl": -6.378930131004372,
+          "predicted": 0.7326529026031494
+        },
+        {
+          "entryTimestampUtc": 1779351300000,
+          "outcome": "TP",
+          "pnl": 9.559707792207782,
+          "predicted": 0.7175022959709167
+        },
+        {
+          "entryTimestampUtc": 1778292000000,
+          "outcome": "TP",
+          "pnl": 12.874276315789608,
+          "predicted": 0.6942804455757141
+        },
+        {
+          "entryTimestampUtc": 1779958800000,
+          "outcome": "SL",
+          "pnl": -5.668239436619715,
+          "predicted": 0.6818411946296692
+        }
+      ]
+    },
+    {
+      "optionLabel": "C (toi gian, 4 feature)",
+      "foldIndex": 3,
+      "testMonth": "2026-05",
+      "top": {
+        "n": 13,
+        "winRate": 0.7692307692307693,
+        "wilsonLower": 0.5419342471169866,
+        "wilsonUpper": 0.9037682540705585,
+        "pf": 4.588368293024508,
+        "expectancyUsd": 6.120800391384089,
+        "expectancyR": 1.3846153846153846,
+        "pnlUsd": 79.57040508799315,
+        "maxDrawdownUsd": 15.795606758832566,
+        "longestLosingStreak": 2
+      },
+      "middle": {
+        "n": 39,
+        "winRate": 0.5128205128205128,
+        "wilsonLower": 0.3846775519239781,
+        "wilsonUpper": 0.6393000759206436,
+        "pf": 1.4760078244283192,
+        "expectancyUsd": 1.7056733903703798,
+        "expectancyR": 0.58974358974359,
+        "pnlUsd": 66.52126222444481,
+        "maxDrawdownUsd": 25.497546942026666,
+        "longestLosingStreak": 4
+      },
+      "bottom": {
+        "n": 13,
+        "winRate": 0.38461538461538464,
+        "wilsonLower": 0.20159260258306821,
+        "wilsonUpper": 0.6073920397651268,
+        "pf": 0.8992181248080364,
+        "expectancyUsd": -0.4400645549943978,
+        "expectancyR": 0.19230769230769232,
+        "pnlUsd": -5.720839214927171,
+        "maxDrawdownUsd": 22.425030054569532,
+        "longestLosingStreak": 3
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1780025400000,
+          "outcome": "TP",
+          "pnl": 13.916716867469853,
+          "predicted": 0.8455494046211243
+        },
+        {
+          "entryTimestampUtc": 1780120800000,
+          "outcome": "TP",
+          "pnl": 9.141239495798374,
+          "predicted": 0.8079623579978943
+        },
+        {
+          "entryTimestampUtc": 1779351300000,
+          "outcome": "TP",
+          "pnl": 9.559707792207782,
+          "predicted": 0.7998012900352478
+        },
+        {
+          "entryTimestampUtc": 1779136200000,
+          "outcome": "TP",
+          "pnl": 9.197171428571368,
+          "predicted": 0.768860936164856
+        },
+        {
+          "entryTimestampUtc": 1779650100000,
+          "outcome": "SL",
+          "pnl": -6.378930131004372,
+          "predicted": 0.728460431098938
+        },
+        {
+          "entryTimestampUtc": 1778256900000,
+          "outcome": "TP",
+          "pnl": 8.56395454545455,
+          "predicted": 0.7268829941749573
+        },
+        {
+          "entryTimestampUtc": 1779858900000,
+          "outcome": "TP",
+          "pnl": 9.655742296918746,
+          "predicted": 0.7255859375
+        },
+        {
+          "entryTimestampUtc": 1778994000000,
+          "outcome": "TP",
+          "pnl": 9.28896848137537,
+          "predicted": 0.6720850467681885
+        },
+        {
+          "entryTimestampUtc": 1779317100000,
+          "outcome": "TP",
+          "pnl": 9.378858350951372,
+          "predicted": 0.651462733745575
+        },
+        {
+          "entryTimestampUtc": 1777820400000,
+          "outcome": "SL",
+          "pnl": -6.888940092165909,
+          "predicted": 0.6314058303833008
+        },
+        {
+          "entryTimestampUtc": 1779573600000,
+          "outcome": "TP",
+          "pnl": 13.889181818181726,
+          "predicted": 0.6218472719192505
+        },
+        {
+          "entryTimestampUtc": 1777860900000,
+          "outcome": "SL",
+          "pnl": -8.906666666666657,
+          "predicted": 0.6102994680404663
+        },
+        {
+          "entryTimestampUtc": 1779993000000,
+          "outcome": "TP",
+          "pnl": 9.153400900900941,
+          "predicted": 0.6034809350967407
+        }
+      ]
+    },
+    {
+      "optionLabel": "D (v2 + regularization)",
+      "foldIndex": 3,
+      "testMonth": "2026-05",
+      "top": {
+        "n": 13,
+        "winRate": 0.7692307692307693,
+        "wilsonLower": 0.5419342471169866,
+        "wilsonUpper": 0.9037682540705585,
+        "pf": 4.348401335083937,
+        "expectancyUsd": 5.742154211426605,
+        "expectancyR": 1.3846153846153848,
+        "pnlUsd": 74.64800474854587,
+        "maxDrawdownUsd": 16.11445432455276,
+        "longestLosingStreak": 2
+      },
+      "middle": {
+        "n": 39,
+        "winRate": 0.5128205128205128,
+        "wilsonLower": 0.3846775519239781,
+        "wilsonUpper": 0.6393000759206436,
+        "pf": 1.5380957422036203,
+        "expectancyUsd": 1.933901665576656,
+        "expectancyR": 0.58974358974359,
+        "pnlUsd": 75.42216495748958,
+        "maxDrawdownUsd": 34.38924130144949,
+        "longestLosingStreak": 5
+      },
+      "bottom": {
+        "n": 13,
+        "winRate": 0.38461538461538464,
+        "wilsonLower": 0.20159260258306821,
+        "wilsonUpper": 0.6073920397651268,
+        "pf": 0.8275021723566216,
+        "expectancyUsd": -0.7461032006557441,
+        "expectancyR": 0.19230769230769232,
+        "pnlUsd": -9.699341608524673,
+        "maxDrawdownUsd": 25.115455487593202,
+        "longestLosingStreak": 3
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1778915700000,
+          "outcome": "TP",
+          "pnl": 9.382180851063794,
+          "predicted": 0.8711195588111877
+        },
+        {
+          "entryTimestampUtc": 1780120800000,
+          "outcome": "TP",
+          "pnl": 9.141239495798374,
+          "predicted": 0.8516393899917603
+        },
+        {
+          "entryTimestampUtc": 1779136200000,
+          "outcome": "TP",
+          "pnl": 9.197171428571368,
+          "predicted": 0.8342949748039246
+        },
+        {
+          "entryTimestampUtc": 1779858900000,
+          "outcome": "TP",
+          "pnl": 9.655742296918746,
+          "predicted": 0.7904836535453796
+        },
+        {
+          "entryTimestampUtc": 1779317100000,
+          "outcome": "TP",
+          "pnl": 9.378858350951372,
+          "predicted": 0.7671688795089722
+        },
+        {
+          "entryTimestampUtc": 1780025400000,
+          "outcome": "TP",
+          "pnl": 13.916716867469853,
+          "predicted": 0.7639421224594116
+        },
+        {
+          "entryTimestampUtc": 1778256900000,
+          "outcome": "TP",
+          "pnl": 8.56395454545455,
+          "predicted": 0.7507107257843018
+        },
+        {
+          "entryTimestampUtc": 1779351300000,
+          "outcome": "TP",
+          "pnl": 9.559707792207782,
+          "predicted": 0.7232738733291626
+        },
+        {
+          "entryTimestampUtc": 1779080400000,
+          "outcome": "SL",
+          "pnl": -6.179170984455973,
+          "predicted": 0.701298177242279
+        },
+        {
+          "entryTimestampUtc": 1779487200000,
+          "outcome": "SL",
+          "pnl": -9.735524193548388,
+          "predicted": 0.7002766132354736
+        },
+        {
+          "entryTimestampUtc": 1779032700000,
+          "outcome": "TP",
+          "pnl": 9.326249999999998,
+          "predicted": 0.672396719455719
+        },
+        {
+          "entryTimestampUtc": 1778040900000,
+          "outcome": "TP",
+          "pnl": 8.819808429118778,
+          "predicted": 0.6260638236999512
+        },
+        {
+          "entryTimestampUtc": 1779650100000,
+          "outcome": "SL",
+          "pnl": -6.378930131004372,
+          "predicted": 0.6242241859436035
+        }
+      ]
+    },
+    {
+      "optionLabel": "A (v1, 8 feature)",
+      "foldIndex": 4,
+      "testMonth": "2026-06",
+      "top": {
+        "n": 32,
+        "winRate": 0.65625,
+        "wilsonLower": 0.5108986479199504,
+        "wilsonUpper": 0.7772397589379303,
+        "pf": 2.984387756513415,
+        "expectancyUsd": 5.400257487803109,
+        "expectancyR": 1.0343750000000003,
+        "pnlUsd": 172.80823960969948,
+        "maxDrawdownUsd": 27.712304684788904,
+        "longestLosingStreak": 3
+      },
+      "middle": {
+        "n": 94,
+        "winRate": 0.5106382978723404,
+        "wilsonLower": 0.42672724563357456,
+        "wilsonUpper": 0.5939540920495062,
+        "pf": 1.5310972837165309,
+        "expectancyUsd": 2.1208263631209245,
+        "expectancyR": 0.5829787234042558,
+        "pnlUsd": 199.3576781333669,
+        "maxDrawdownUsd": 47.804376076363674,
+        "longestLosingStreak": 5
+      },
+      "bottom": {
+        "n": 32,
+        "winRate": 0.5,
+        "wilsonLower": 0.3603960082458403,
+        "wilsonUpper": 0.6396039917541597,
+        "pf": 1.4719883562371363,
+        "expectancyUsd": 1.8914240202161128,
+        "expectancyR": 0.55,
+        "pnlUsd": 60.52556864691561,
+        "maxDrawdownUsd": 69.81383336356905,
+        "longestLosingStreak": 6
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1780623000000,
+          "outcome": "TP",
+          "pnl": 9.30385714285712,
+          "predicted": 0.9202706813812256
+        },
+        {
+          "entryTimestampUtc": 1780533900000,
+          "outcome": "TP",
+          "pnl": 9.031234817813823,
+          "predicted": 0.9016401171684265
+        },
+        {
+          "entryTimestampUtc": 1781619300000,
+          "outcome": "TP",
+          "pnl": 13.204009216589945,
+          "predicted": 0.8859503269195557
+        },
+        {
+          "entryTimestampUtc": 1782764100000,
+          "outcome": "TP",
+          "pnl": 13.437435597189657,
+          "predicted": 0.8816256523132324
+        },
+        {
+          "entryTimestampUtc": 1781328600000,
+          "outcome": "SL",
+          "pnl": -5.843956204379559,
+          "predicted": 0.8644101023674011
+        },
+        {
+          "entryTimestampUtc": 1781322300000,
+          "outcome": "TP",
+          "pnl": 8.512491582491538,
+          "predicted": 0.861348032951355
+        },
+        {
+          "entryTimestampUtc": 1780713000000,
+          "outcome": "TP",
+          "pnl": 9.63234870317004,
+          "predicted": 0.857494056224823
+        },
+        {
+          "entryTimestampUtc": 1782144900000,
+          "outcome": "SL",
+          "pnl": -6.16495711835335,
+          "predicted": 0.8546946048736572
+        },
+        {
+          "entryTimestampUtc": 1782770400000,
+          "outcome": "SL",
+          "pnl": -6.366122448979606,
+          "predicted": 0.8542720675468445
+        },
+        {
+          "entryTimestampUtc": 1782738000000,
+          "outcome": "TP",
+          "pnl": 13.222070890315393,
+          "predicted": 0.8498689532279968
+        },
+        {
+          "entryTimestampUtc": 1780743600000,
+          "outcome": "SL",
+          "pnl": -9.293736263736287,
+          "predicted": 0.8404361009597778
+        },
+        {
+          "entryTimestampUtc": 1780703100000,
+          "outcome": "TP",
+          "pnl": 13.726906779661052,
+          "predicted": 0.8377087116241455
+        },
+        {
+          "entryTimestampUtc": 1780314300000,
+          "outcome": "TP",
+          "pnl": 8.92437229437229,
+          "predicted": 0.836336076259613
+        },
+        {
+          "entryTimestampUtc": 1780459200000,
+          "outcome": "SL",
+          "pnl": -9.014589041095881,
+          "predicted": 0.8363275527954102
+        },
+        {
+          "entryTimestampUtc": 1780883100000,
+          "outcome": "TP",
+          "pnl": 13.43023255813967,
+          "predicted": 0.8207574486732483
+        },
+        {
+          "entryTimestampUtc": 1780743600000,
+          "outcome": "SL",
+          "pnl": -8.732368421052623,
+          "predicted": 0.8058018684387207
+        },
+        {
+          "entryTimestampUtc": 1782153000000,
+          "outcome": "SL",
+          "pnl": -9.41558161350849,
+          "predicted": 0.7816039323806763
+        },
+        {
+          "entryTimestampUtc": 1780729200000,
+          "outcome": "SL",
+          "pnl": -9.686199999999982,
+          "predicted": 0.772423505783081
+        },
+        {
+          "entryTimestampUtc": 1782307800000,
+          "outcome": "TP",
+          "pnl": 13.014557522123944,
+          "predicted": 0.771844208240509
+        },
+        {
+          "entryTimestampUtc": 1780551000000,
+          "outcome": "TP",
+          "pnl": 13.064328358208876,
+          "predicted": 0.771267831325531
+        },
+        {
+          "entryTimestampUtc": 1780543800000,
+          "outcome": "TP",
+          "pnl": 13.260550458715553,
+          "predicted": 0.7661738395690918
+        },
+        {
+          "entryTimestampUtc": 1780862400000,
+          "outcome": "SL",
+          "pnl": -9.614347826086986,
+          "predicted": 0.7644681334495544
+        },
+        {
+          "entryTimestampUtc": 1780703100000,
+          "outcome": "TP",
+          "pnl": 13.811044303797493,
+          "predicted": 0.7378494143486023
+        },
+        {
+          "entryTimestampUtc": 1782197100000,
+          "outcome": "TP",
+          "pnl": 13.352295774647937,
+          "predicted": 0.7294661402702332
+        },
+        {
+          "entryTimestampUtc": 1781561700000,
+          "outcome": "SL",
+          "pnl": -6.710353535353533,
+          "predicted": 0.7279464602470398
+        },
+        {
+          "entryTimestampUtc": 1780442100000,
+          "outcome": "TP",
+          "pnl": 13.657328159645266,
+          "predicted": 0.7260910272598267
+        },
+        {
+          "entryTimestampUtc": 1780635600000,
+          "outcome": "TP",
+          "pnl": 13.479333333333322,
+          "predicted": 0.7223143577575684
+        },
+        {
+          "entryTimestampUtc": 1782468900000,
+          "outcome": "TP",
+          "pnl": 12.77057142857141,
+          "predicted": 0.7095768451690674
+        },
+        {
+          "entryTimestampUtc": 1780544700000,
+          "outcome": "TP",
+          "pnl": 13.466808510638245,
+          "predicted": 0.7073614597320557
+        },
+        {
+          "entryTimestampUtc": 1780832700000,
+          "outcome": "TP",
+          "pnl": 14.11325000000002,
+          "predicted": 0.7047901153564453
+        },
+        {
+          "entryTimestampUtc": 1782206100000,
+          "outcome": "TP",
+          "pnl": 13.477119565217446,
+          "predicted": 0.6977146863937378
+        },
+        {
+          "entryTimestampUtc": 1780374600000,
+          "outcome": "SL",
+          "pnl": -6.2416949152542305,
+          "predicted": 0.6970909237861633
+        }
+      ]
+    },
+    {
+      "optionLabel": "B (v2, 14 feature)",
+      "foldIndex": 4,
+      "testMonth": "2026-06",
+      "top": {
+        "n": 32,
+        "winRate": 0.6875,
+        "wilsonLower": 0.5426438384792553,
+        "wilsonUpper": 0.8031222497502015,
+        "pf": 3.531145177427553,
+        "expectancyUsd": 6.21181252589731,
+        "expectancyR": 1.1312500000000005,
+        "pnlUsd": 198.7780008287139,
+        "maxDrawdownUsd": 28.59428408982326,
+        "longestLosingStreak": 3
+      },
+      "middle": {
+        "n": 94,
+        "winRate": 0.5106382978723404,
+        "wilsonLower": 0.42672724563357456,
+        "wilsonUpper": 0.5939540920495062,
+        "pf": 1.5175748313456778,
+        "expectancyUsd": 2.0452694961156164,
+        "expectancyR": 0.5829787234042557,
+        "pnlUsd": 192.25533263486795,
+        "maxDrawdownUsd": 57.81413217392458,
+        "longestLosingStreak": 6
+      },
+      "bottom": {
+        "n": 32,
+        "winRate": 0.46875,
+        "wilsonLower": 0.33183380229313175,
+        "wilsonUpper": 0.6105385163352921,
+        "pf": 1.2960744443740042,
+        "expectancyUsd": 1.3018172789500024,
+        "expectancyR": 0.4531249999999999,
+        "pnlUsd": 41.65815292640008,
+        "maxDrawdownUsd": 62.61102076748999,
+        "longestLosingStreak": 5
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1780713000000,
+          "outcome": "TP",
+          "pnl": 9.63234870317004,
+          "predicted": 0.9152058959007263
+        },
+        {
+          "entryTimestampUtc": 1781619300000,
+          "outcome": "TP",
+          "pnl": 13.204009216589945,
+          "predicted": 0.9140166640281677
+        },
+        {
+          "entryTimestampUtc": 1780623000000,
+          "outcome": "TP",
+          "pnl": 9.30385714285712,
+          "predicted": 0.9066095352172852
+        },
+        {
+          "entryTimestampUtc": 1782144900000,
+          "outcome": "SL",
+          "pnl": -6.16495711835335,
+          "predicted": 0.890185534954071
+        },
+        {
+          "entryTimestampUtc": 1780533900000,
+          "outcome": "TP",
+          "pnl": 9.031234817813823,
+          "predicted": 0.8872173428535461
+        },
+        {
+          "entryTimestampUtc": 1782206100000,
+          "outcome": "TP",
+          "pnl": 13.477119565217446,
+          "predicted": 0.886801540851593
+        },
+        {
+          "entryTimestampUtc": 1781322300000,
+          "outcome": "TP",
+          "pnl": 8.512491582491538,
+          "predicted": 0.8861767053604126
+        },
+        {
+          "entryTimestampUtc": 1780743600000,
+          "outcome": "SL",
+          "pnl": -9.293736263736287,
+          "predicted": 0.8834850192070007
+        },
+        {
+          "entryTimestampUtc": 1782764100000,
+          "outcome": "TP",
+          "pnl": 13.437435597189657,
+          "predicted": 0.8740113377571106
+        },
+        {
+          "entryTimestampUtc": 1780442100000,
+          "outcome": "TP",
+          "pnl": 13.657328159645266,
+          "predicted": 0.8518352508544922
+        },
+        {
+          "entryTimestampUtc": 1780314300000,
+          "outcome": "TP",
+          "pnl": 8.92437229437229,
+          "predicted": 0.8443220257759094
+        },
+        {
+          "entryTimestampUtc": 1780459200000,
+          "outcome": "SL",
+          "pnl": -9.014589041095881,
+          "predicted": 0.8288636803627014
+        },
+        {
+          "entryTimestampUtc": 1780551000000,
+          "outcome": "TP",
+          "pnl": 13.064328358208876,
+          "predicted": 0.8201492428779602
+        },
+        {
+          "entryTimestampUtc": 1780703100000,
+          "outcome": "TP",
+          "pnl": 13.726906779661052,
+          "predicted": 0.8165353536605835
+        },
+        {
+          "entryTimestampUtc": 1782307800000,
+          "outcome": "TP",
+          "pnl": 13.014557522123944,
+          "predicted": 0.8125174641609192
+        },
+        {
+          "entryTimestampUtc": 1780703100000,
+          "outcome": "SL",
+          "pnl": -8.7802,
+          "predicted": 0.8107171058654785
+        },
+        {
+          "entryTimestampUtc": 1780729200000,
+          "outcome": "SL",
+          "pnl": -9.686199999999982,
+          "predicted": 0.8006094694137573
+        },
+        {
+          "entryTimestampUtc": 1780676100000,
+          "outcome": "TP",
+          "pnl": 14.359722598105568,
+          "predicted": 0.7855914235115051
+        },
+        {
+          "entryTimestampUtc": 1781561700000,
+          "outcome": "SL",
+          "pnl": -6.710353535353533,
+          "predicted": 0.7822228670120239
+        },
+        {
+          "entryTimestampUtc": 1780862400000,
+          "outcome": "SL",
+          "pnl": -9.614347826086986,
+          "predicted": 0.7804049849510193
+        },
+        {
+          "entryTimestampUtc": 1780703100000,
+          "outcome": "TP",
+          "pnl": 14.284778761062004,
+          "predicted": 0.7541567087173462
+        },
+        {
+          "entryTimestampUtc": 1780461000000,
+          "outcome": "TP",
+          "pnl": 15.02464577656675,
+          "predicted": 0.7518653869628906
+        },
+        {
+          "entryTimestampUtc": 1782738000000,
+          "outcome": "TP",
+          "pnl": 13.222070890315393,
+          "predicted": 0.7467573285102844
+        },
+        {
+          "entryTimestampUtc": 1780374600000,
+          "outcome": "SL",
+          "pnl": -6.2416949152542305,
+          "predicted": 0.7456161379814148
+        },
+        {
+          "entryTimestampUtc": 1781525700000,
+          "outcome": "TP",
+          "pnl": 13.745833333333376,
+          "predicted": 0.7381007075309753
+        },
+        {
+          "entryTimestampUtc": 1780543800000,
+          "outcome": "TP",
+          "pnl": 13.260550458715553,
+          "predicted": 0.7283316254615784
+        },
+        {
+          "entryTimestampUtc": 1782770400000,
+          "outcome": "SL",
+          "pnl": -6.366122448979606,
+          "predicted": 0.7248486876487732
+        },
+        {
+          "entryTimestampUtc": 1780703100000,
+          "outcome": "TP",
+          "pnl": 13.811044303797493,
+          "predicted": 0.7217928767204285
+        },
+        {
+          "entryTimestampUtc": 1782480600000,
+          "outcome": "SL",
+          "pnl": -6.660631578947358,
+          "predicted": 0.7216911315917969
+        },
+        {
+          "entryTimestampUtc": 1780544700000,
+          "outcome": "TP",
+          "pnl": 13.466808510638245,
+          "predicted": 0.7151785492897034
+        },
+        {
+          "entryTimestampUtc": 1781536500000,
+          "outcome": "TP",
+          "pnl": 13.719156626506107,
+          "predicted": 0.7122439742088318
+        },
+        {
+          "entryTimestampUtc": 1780883100000,
+          "outcome": "TP",
+          "pnl": 13.43023255813967,
+          "predicted": 0.7077621817588806
+        }
+      ]
+    },
+    {
+      "optionLabel": "C (toi gian, 4 feature)",
+      "foldIndex": 4,
+      "testMonth": "2026-06",
+      "top": {
+        "n": 32,
+        "winRate": 0.6875,
+        "wilsonLower": 0.5426438384792553,
+        "wilsonUpper": 0.8031222497502015,
+        "pf": 3.2362084923859036,
+        "expectancyUsd": 5.6962114591915975,
+        "expectancyR": 1.1312500000000005,
+        "pnlUsd": 182.27876669413112,
+        "maxDrawdownUsd": 22.401619812942982,
+        "longestLosingStreak": 3
+      },
+      "middle": {
+        "n": 94,
+        "winRate": 0.5,
+        "wilsonLower": 0.4163681745757063,
+        "wilsonUpper": 0.5836318254242937,
+        "pf": 1.5050494297206527,
+        "expectancyUsd": 2.035779728072142,
+        "expectancyR": 0.5500000000000004,
+        "pnlUsd": 191.36329443878134,
+        "maxDrawdownUsd": 57.25796336320539,
+        "longestLosingStreak": 8
+      },
+      "bottom": {
+        "n": 32,
+        "winRate": 0.5,
+        "wilsonLower": 0.3603960082458403,
+        "wilsonUpper": 0.6396039917541597,
+        "pf": 1.4532637714402048,
+        "expectancyUsd": 1.845294539283418,
+        "expectancyR": 0.5499999999999999,
+        "pnlUsd": 59.04942525706937,
+        "maxDrawdownUsd": 39.489497012296724,
+        "longestLosingStreak": 4
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1781619300000,
+          "outcome": "TP",
+          "pnl": 13.204009216589945,
+          "predicted": 0.9421364665031433
+        },
+        {
+          "entryTimestampUtc": 1780533900000,
+          "outcome": "TP",
+          "pnl": 9.031234817813823,
+          "predicted": 0.9230561852455139
+        },
+        {
+          "entryTimestampUtc": 1781322300000,
+          "outcome": "TP",
+          "pnl": 8.512491582491538,
+          "predicted": 0.8919974565505981
+        },
+        {
+          "entryTimestampUtc": 1780314300000,
+          "outcome": "TP",
+          "pnl": 8.92437229437229,
+          "predicted": 0.8252493143081665
+        },
+        {
+          "entryTimestampUtc": 1782307800000,
+          "outcome": "TP",
+          "pnl": 13.014557522123944,
+          "predicted": 0.7985758185386658
+        },
+        {
+          "entryTimestampUtc": 1780862400000,
+          "outcome": "SL",
+          "pnl": -9.614347826086986,
+          "predicted": 0.7981155514717102
+        },
+        {
+          "entryTimestampUtc": 1782144900000,
+          "outcome": "SL",
+          "pnl": -6.16495711835335,
+          "predicted": 0.7981155514717102
+        },
+        {
+          "entryTimestampUtc": 1782153000000,
+          "outcome": "SL",
+          "pnl": -9.41558161350849,
+          "predicted": 0.7981155514717102
+        },
+        {
+          "entryTimestampUtc": 1780623000000,
+          "outcome": "TP",
+          "pnl": 9.30385714285712,
+          "predicted": 0.7976705431938171
+        },
+        {
+          "entryTimestampUtc": 1780551000000,
+          "outcome": "TP",
+          "pnl": 13.064328358208876,
+          "predicted": 0.7874821424484253
+        },
+        {
+          "entryTimestampUtc": 1782738000000,
+          "outcome": "TP",
+          "pnl": 13.222070890315393,
+          "predicted": 0.7766447067260742
+        },
+        {
+          "entryTimestampUtc": 1780703100000,
+          "outcome": "TP",
+          "pnl": 13.726906779661052,
+          "predicted": 0.7718238234519958
+        },
+        {
+          "entryTimestampUtc": 1780703100000,
+          "outcome": "SL",
+          "pnl": -8.7802,
+          "predicted": 0.7649815678596497
+        },
+        {
+          "entryTimestampUtc": 1780759800000,
+          "outcome": "TP",
+          "pnl": 9.212759381898433,
+          "predicted": 0.7599505186080933
+        },
+        {
+          "entryTimestampUtc": 1780883100000,
+          "outcome": "TP",
+          "pnl": 13.43023255813967,
+          "predicted": 0.7593292593955994
+        },
+        {
+          "entryTimestampUtc": 1780374600000,
+          "outcome": "SL",
+          "pnl": -6.2416949152542305,
+          "predicted": 0.7488810420036316
+        },
+        {
+          "entryTimestampUtc": 1782197100000,
+          "outcome": "TP",
+          "pnl": 13.352295774647937,
+          "predicted": 0.7368963956832886
+        },
+        {
+          "entryTimestampUtc": 1781838900000,
+          "outcome": "SL",
+          "pnl": -6.821081081081129,
+          "predicted": 0.7252011895179749
+        },
+        {
+          "entryTimestampUtc": 1782764100000,
+          "outcome": "TP",
+          "pnl": 13.437435597189657,
+          "predicted": 0.7222290635108948
+        },
+        {
+          "entryTimestampUtc": 1780510500000,
+          "outcome": "TP",
+          "pnl": 9.0364574898786,
+          "predicted": 0.7220860123634338
+        },
+        {
+          "entryTimestampUtc": 1780442100000,
+          "outcome": "TP",
+          "pnl": 13.657328159645266,
+          "predicted": 0.722009003162384
+        },
+        {
+          "entryTimestampUtc": 1780676100000,
+          "outcome": "TP",
+          "pnl": 14.359722598105568,
+          "predicted": 0.7163227796554565
+        },
+        {
+          "entryTimestampUtc": 1780543800000,
+          "outcome": "TP",
+          "pnl": 13.260550458715553,
+          "predicted": 0.7132054567337036
+        },
+        {
+          "entryTimestampUtc": 1780459200000,
+          "outcome": "SL",
+          "pnl": -9.014589041095881,
+          "predicted": 0.7008258104324341
+        },
+        {
+          "entryTimestampUtc": 1781287200000,
+          "outcome": "SL",
+          "pnl": -6.147284644194759,
+          "predicted": 0.6886985301971436
+        },
+        {
+          "entryTimestampUtc": 1780688700000,
+          "outcome": "SL",
+          "pnl": -10.018947879123946,
+          "predicted": 0.684897780418396
+        },
+        {
+          "entryTimestampUtc": 1781230500000,
+          "outcome": "TP",
+          "pnl": 9.018245614035127,
+          "predicted": 0.6794690489768982
+        },
+        {
+          "entryTimestampUtc": 1782206100000,
+          "outcome": "TP",
+          "pnl": 13.477119565217446,
+          "predicted": 0.6727022528648376
+        },
+        {
+          "entryTimestampUtc": 1781280000000,
+          "outcome": "TP",
+          "pnl": 13.053144385026723,
+          "predicted": 0.6674094796180725
+        },
+        {
+          "entryTimestampUtc": 1780648200000,
+          "outcome": "TP",
+          "pnl": 13.13815384615394,
+          "predicted": 0.6649629473686218
+        },
+        {
+          "entryTimestampUtc": 1780743600000,
+          "outcome": "SL",
+          "pnl": -9.293736263736287,
+          "predicted": 0.6643383502960205
+        },
+        {
+          "entryTimestampUtc": 1780759800000,
+          "outcome": "TP",
+          "pnl": 13.353913043478325,
+          "predicted": 0.6609700918197632
+        }
+      ]
+    },
+    {
+      "optionLabel": "D (v2 + regularization)",
+      "foldIndex": 4,
+      "testMonth": "2026-06",
+      "top": {
+        "n": 32,
+        "winRate": 0.59375,
+        "wilsonLower": 0.44911884164217797,
+        "wilsonUpper": 0.7237642024725505,
+        "pf": 2.2968966023423563,
+        "expectancyUsd": 4.110511385607862,
+        "expectancyR": 0.8406250000000004,
+        "pnlUsd": 131.53636433945158,
+        "maxDrawdownUsd": 21.60155748702288,
+        "longestLosingStreak": 2
+      },
+      "middle": {
+        "n": 94,
+        "winRate": 0.5319148936170213,
+        "wilsonLower": 0.4475559471076741,
+        "wilsonUpper": 0.6144880659415685,
+        "pf": 1.669651471660893,
+        "expectancyUsd": 2.564857021828227,
+        "expectancyR": 0.6489361702127665,
+        "pnlUsd": 241.09656005185334,
+        "maxDrawdownUsd": 56.72973241301543,
+        "longestLosingStreak": 6
+      },
+      "bottom": {
+        "n": 32,
+        "winRate": 0.5,
+        "wilsonLower": 0.3603960082458403,
+        "wilsonUpper": 0.6396039917541597,
+        "pf": 1.464735214303993,
+        "expectancyUsd": 1.8768300624586538,
+        "expectancyR": 0.55,
+        "pnlUsd": 60.05856199867692,
+        "maxDrawdownUsd": 54.20672620866361,
+        "longestLosingStreak": 5
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1780713000000,
+          "outcome": "TP",
+          "pnl": 9.63234870317004,
+          "predicted": 0.9372599720954895
+        },
+        {
+          "entryTimestampUtc": 1781322300000,
+          "outcome": "TP",
+          "pnl": 8.512491582491538,
+          "predicted": 0.916109561920166
+        },
+        {
+          "entryTimestampUtc": 1781619300000,
+          "outcome": "TP",
+          "pnl": 13.204009216589945,
+          "predicted": 0.8723508715629578
+        },
+        {
+          "entryTimestampUtc": 1782764100000,
+          "outcome": "TP",
+          "pnl": 13.437435597189657,
+          "predicted": 0.8709186315536499
+        },
+        {
+          "entryTimestampUtc": 1780743600000,
+          "outcome": "SL",
+          "pnl": -9.293736263736287,
+          "predicted": 0.8633204102516174
+        },
+        {
+          "entryTimestampUtc": 1780551000000,
+          "outcome": "TP",
+          "pnl": 13.064328358208876,
+          "predicted": 0.8573712110519409
+        },
+        {
+          "entryTimestampUtc": 1782144900000,
+          "outcome": "SL",
+          "pnl": -6.16495711835335,
+          "predicted": 0.8569462895393372
+        },
+        {
+          "entryTimestampUtc": 1782307800000,
+          "outcome": "TP",
+          "pnl": 13.014557522123944,
+          "predicted": 0.8555390238761902
+        },
+        {
+          "entryTimestampUtc": 1780543800000,
+          "outcome": "TP",
+          "pnl": 13.260550458715553,
+          "predicted": 0.8340203166007996
+        },
+        {
+          "entryTimestampUtc": 1780314300000,
+          "outcome": "TP",
+          "pnl": 8.92437229437229,
+          "predicted": 0.8312812447547913
+        },
+        {
+          "entryTimestampUtc": 1780623000000,
+          "outcome": "TP",
+          "pnl": 9.30385714285712,
+          "predicted": 0.8101196885108948
+        },
+        {
+          "entryTimestampUtc": 1782206100000,
+          "outcome": "TP",
+          "pnl": 13.477119565217446,
+          "predicted": 0.8085390329360962
+        },
+        {
+          "entryTimestampUtc": 1780459200000,
+          "outcome": "SL",
+          "pnl": -9.014589041095881,
+          "predicted": 0.8005279302597046
+        },
+        {
+          "entryTimestampUtc": 1780442100000,
+          "outcome": "TP",
+          "pnl": 13.657328159645266,
+          "predicted": 0.7994176745414734
+        },
+        {
+          "entryTimestampUtc": 1782738000000,
+          "outcome": "TP",
+          "pnl": 13.222070890315393,
+          "predicted": 0.796696662902832
+        },
+        {
+          "entryTimestampUtc": 1781561700000,
+          "outcome": "SL",
+          "pnl": -6.710353535353533,
+          "predicted": 0.7777223587036133
+        },
+        {
+          "entryTimestampUtc": 1780676100000,
+          "outcome": "TP",
+          "pnl": 14.359722598105568,
+          "predicted": 0.7553362250328064
+        },
+        {
+          "entryTimestampUtc": 1780533900000,
+          "outcome": "TP",
+          "pnl": 9.031234817813823,
+          "predicted": 0.7547507882118225
+        },
+        {
+          "entryTimestampUtc": 1781525700000,
+          "outcome": "TP",
+          "pnl": 13.745833333333376,
+          "predicted": 0.7509286999702454
+        },
+        {
+          "entryTimestampUtc": 1782197100000,
+          "outcome": "TP",
+          "pnl": 13.352295774647937,
+          "predicted": 0.7452005743980408
+        },
+        {
+          "entryTimestampUtc": 1780759800000,
+          "outcome": "TP",
+          "pnl": 13.353913043478325,
+          "predicted": 0.7429168820381165
+        },
+        {
+          "entryTimestampUtc": 1780729200000,
+          "outcome": "SL",
+          "pnl": -9.686199999999982,
+          "predicted": 0.7399517297744751
+        },
+        {
+          "entryTimestampUtc": 1782738000000,
+          "outcome": "TP",
+          "pnl": 13.225673382820784,
+          "predicted": 0.7394377589225769
+        },
+        {
+          "entryTimestampUtc": 1782093600000,
+          "outcome": "TP",
+          "pnl": 13.181162790697813,
+          "predicted": 0.7386958003044128
+        },
+        {
+          "entryTimestampUtc": 1780542000000,
+          "outcome": "SL",
+          "pnl": -10.14727941176465,
+          "predicted": 0.7300480008125305
+        },
+        {
+          "entryTimestampUtc": 1781060400000,
+          "outcome": "SL",
+          "pnl": -6.361186440677954,
+          "predicted": 0.7259885668754578
+        },
+        {
+          "entryTimestampUtc": 1781856000000,
+          "outcome": "SL",
+          "pnl": -6.753707571801587,
+          "predicted": 0.7209145426750183
+        },
+        {
+          "entryTimestampUtc": 1781328600000,
+          "outcome": "SL",
+          "pnl": -5.843956204379559,
+          "predicted": 0.7126198410987854
+        },
+        {
+          "entryTimestampUtc": 1780862400000,
+          "outcome": "SL",
+          "pnl": -9.614347826086986,
+          "predicted": 0.7101910710334778
+        },
+        {
+          "entryTimestampUtc": 1780374600000,
+          "outcome": "SL",
+          "pnl": -6.2416949152542305,
+          "predicted": 0.708990216255188
+        },
+        {
+          "entryTimestampUtc": 1781663400000,
+          "outcome": "SL",
+          "pnl": -9.837307692307684,
+          "predicted": 0.7039554715156555
+        },
+        {
+          "entryTimestampUtc": 1780317900000,
+          "outcome": "SL",
+          "pnl": -5.754624871531347,
+          "predicted": 0.6981602907180786
+        }
+      ]
+    },
+    {
+      "optionLabel": "A (v1, 8 feature)",
+      "foldIndex": 5,
+      "testMonth": "2026-07",
+      "top": {
+        "n": 11,
+        "winRate": 0.6363636363636364,
+        "wilsonLower": 0.3940262610699527,
+        "wilsonUpper": 0.8248632714792696,
+        "pf": 2.3194906974851706,
+        "expectancyUsd": 4.384783719937965,
+        "expectancyR": 0.9727272727272727,
+        "pnlUsd": 48.23262091931761,
+        "maxDrawdownUsd": 20.00386690943845,
+        "longestLosingStreak": 2
+      },
+      "middle": {
+        "n": 32,
+        "winRate": 0.34375,
+        "wilsonLower": 0.2227602410620698,
+        "wilsonUpper": 0.48910135208004957,
+        "pf": 0.8428957227087699,
+        "expectancyUsd": -0.8167379961918861,
+        "expectancyR": 0.06562500000000003,
+        "pnlUsd": -26.135615878140356,
+        "maxDrawdownUsd": 76.12398025636625,
+        "longestLosingStreak": 7
+      },
+      "bottom": {
+        "n": 11,
+        "winRate": 0.45454545454545453,
+        "wilsonLower": 0.2421049651421108,
+        "wilsonUpper": 0.6849318573414819,
+        "pf": 0.993400445722731,
+        "expectancyUsd": -0.03310758040036645,
+        "expectancyR": 0.4090909090909091,
+        "pnlUsd": -0.364183384404031,
+        "maxDrawdownUsd": 39.14514226276396,
+        "longestLosingStreak": 4
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1785163500000,
+          "outcome": "TP",
+          "pnl": 13.779900000000016,
+          "predicted": 0.8733846545219421
+        },
+        {
+          "entryTimestampUtc": 1784123100000,
+          "outcome": "TP",
+          "pnl": 12.921610169491645,
+          "predicted": 0.8478558659553528
+        },
+        {
+          "entryTimestampUtc": 1783813500000,
+          "outcome": "TP",
+          "pnl": 13.428599999999957,
+          "predicted": 0.7351053953170776
+        },
+        {
+          "entryTimestampUtc": 1784123100000,
+          "outcome": "SL",
+          "pnl": -9.932187499999978,
+          "predicted": 0.7317111492156982
+        },
+        {
+          "entryTimestampUtc": 1784536200000,
+          "outcome": "TP",
+          "pnl": 13.172925138632266,
+          "predicted": 0.6496860980987549
+        },
+        {
+          "entryTimestampUtc": 1783102500000,
+          "outcome": "TP",
+          "pnl": 8.512796610169428,
+          "predicted": 0.6441170573234558
+        },
+        {
+          "entryTimestampUtc": 1784123100000,
+          "outcome": "SL",
+          "pnl": -10.07167940943847,
+          "predicted": 0.6420050859451294
+        },
+        {
+          "entryTimestampUtc": 1783503000000,
+          "outcome": "SL",
+          "pnl": -9.779788732394332,
+          "predicted": 0.6324054598808289
+        },
+        {
+          "entryTimestampUtc": 1784691900000,
+          "outcome": "TP",
+          "pnl": 9.292899999999971,
+          "predicted": 0.6300039887428284
+        },
+        {
+          "entryTimestampUtc": 1783571400000,
+          "outcome": "SL",
+          "pnl": -6.770312499999998,
+          "predicted": 0.606074333190918
+        },
+        {
+          "entryTimestampUtc": 1784564100000,
+          "outcome": "TP",
+          "pnl": 13.677857142857114,
+          "predicted": 0.6059476137161255
+        }
+      ]
+    },
+    {
+      "optionLabel": "B (v2, 14 feature)",
+      "foldIndex": 5,
+      "testMonth": "2026-07",
+      "top": {
+        "n": 11,
+        "winRate": 0.45454545454545453,
+        "wilsonLower": 0.2421049651421108,
+        "wilsonUpper": 0.6849318573414819,
+        "pf": 1.225276302817768,
+        "expectancyUsd": 1.1195402714169918,
+        "expectancyR": 0.4090909090909091,
+        "pnlUsd": 12.31494298558691,
+        "maxDrawdownUsd": 34.78812366752176,
+        "longestLosingStreak": 4
+      },
+      "middle": {
+        "n": 32,
+        "winRate": 0.4375,
+        "wilsonLower": 0.3037776070112922,
+        "wilsonUpper": 0.5809670302455555,
+        "pf": 1.1565454121643128,
+        "expectancyUsd": 0.7078831041482097,
+        "expectancyR": 0.35624999999999996,
+        "pnlUsd": 22.65225933274271,
+        "maxDrawdownUsd": 66.5795261757073,
+        "longestLosingStreak": 7
+      },
+      "bottom": {
+        "n": 11,
+        "winRate": 0.36363636363636365,
+        "wilsonLower": 0.1751367285207303,
+        "wilsonUpper": 0.6059737389300472,
+        "pf": 0.7746517131520264,
+        "expectancyUsd": -1.2031255146869466,
+        "expectancyR": 0.12727272727272732,
+        "pnlUsd": -13.234380661556413,
+        "maxDrawdownUsd": 35.493259719526336,
+        "longestLosingStreak": 4
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1785163500000,
+          "outcome": "TP",
+          "pnl": 13.779900000000016,
+          "predicted": 0.9007777571678162
+        },
+        {
+          "entryTimestampUtc": 1784123100000,
+          "outcome": "TP",
+          "pnl": 12.921610169491645,
+          "predicted": 0.81889408826828
+        },
+        {
+          "entryTimestampUtc": 1783813500000,
+          "outcome": "TP",
+          "pnl": 13.428599999999957,
+          "predicted": 0.7464876174926758
+        },
+        {
+          "entryTimestampUtc": 1784123100000,
+          "outcome": "SL",
+          "pnl": -9.932187499999978,
+          "predicted": 0.7399433255195618
+        },
+        {
+          "entryTimestampUtc": 1783437300000,
+          "outcome": "SL",
+          "pnl": -9.360833333333309,
+          "predicted": 0.6987180113792419
+        },
+        {
+          "entryTimestampUtc": 1784536200000,
+          "outcome": "TP",
+          "pnl": 13.172925138632266,
+          "predicted": 0.6808730959892273
+        },
+        {
+          "entryTimestampUtc": 1784564100000,
+          "outcome": "TP",
+          "pnl": 13.677857142857114,
+          "predicted": 0.6611829400062561
+        },
+        {
+          "entryTimestampUtc": 1783439100000,
+          "outcome": "SL",
+          "pnl": -8.779642857142852,
+          "predicted": 0.6601924896240234
+        },
+        {
+          "entryTimestampUtc": 1782918000000,
+          "outcome": "SL",
+          "pnl": -10.050241935483879,
+          "predicted": 0.6281539797782898
+        },
+        {
+          "entryTimestampUtc": 1784558700000,
+          "outcome": "SL",
+          "pnl": -9.945638297872346,
+          "predicted": 0.6251904368400574
+        },
+        {
+          "entryTimestampUtc": 1782978300000,
+          "outcome": "SL",
+          "pnl": -6.597405541561719,
+          "predicted": 0.601193904876709
+        }
+      ]
+    },
+    {
+      "optionLabel": "C (toi gian, 4 feature)",
+      "foldIndex": 5,
+      "testMonth": "2026-07",
+      "top": {
+        "n": 11,
+        "winRate": 0.6363636363636364,
+        "wilsonLower": 0.3940262610699527,
+        "wilsonUpper": 0.8248632714792696,
+        "pf": 2.337561168030685,
+        "expectancyUsd": 4.850082377134689,
+        "expectancyR": 0.9727272727272727,
+        "pnlUsd": 53.350906148481585,
+        "maxDrawdownUsd": 19.877825797872323,
+        "longestLosingStreak": 2
+      },
+      "middle": {
+        "n": 32,
+        "winRate": 0.40625,
+        "wilsonLower": 0.27623579752744953,
+        "wilsonUpper": 0.550881158357822,
+        "pf": 1.0078681214954872,
+        "expectancyUsd": 0.03767542152178849,
+        "expectancyR": 0.2593749999999999,
+        "pnlUsd": 1.2056134886972316,
+        "maxDrawdownUsd": 95.24416874943012,
+        "longestLosingStreak": 9
+      },
+      "bottom": {
+        "n": 11,
+        "winRate": 0.2727272727272727,
+        "wilsonLower": 0.11469412885053898,
+        "wilsonUpper": 0.5204899835674236,
+        "pf": 0.49487296112634743,
+        "expectancyUsd": -2.9839725436732363,
+        "expectancyR": -0.15454545454545457,
+        "pnlUsd": -32.8236979804056,
+        "maxDrawdownUsd": 52.078481970303876,
+        "longestLosingStreak": 6
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1784123100000,
+          "outcome": "TP",
+          "pnl": 12.921610169491645,
+          "predicted": 0.8001276850700378
+        },
+        {
+          "entryTimestampUtc": 1783300500000,
+          "outcome": "SL",
+          "pnl": -9.728181818181831,
+          "predicted": 0.7775838971138
+        },
+        {
+          "entryTimestampUtc": 1784564100000,
+          "outcome": "TP",
+          "pnl": 13.677857142857114,
+          "predicted": 0.752071738243103
+        },
+        {
+          "entryTimestampUtc": 1785163500000,
+          "outcome": "TP",
+          "pnl": 13.779900000000016,
+          "predicted": 0.7380379438400269
+        },
+        {
+          "entryTimestampUtc": 1784123100000,
+          "outcome": "SL",
+          "pnl": -9.932187499999978,
+          "predicted": 0.7207942605018616
+        },
+        {
+          "entryTimestampUtc": 1785348900000,
+          "outcome": "SL",
+          "pnl": -10.28069620253165,
+          "predicted": 0.7133184671401978
+        },
+        {
+          "entryTimestampUtc": 1785356100000,
+          "outcome": "TP",
+          "pnl": 13.07158536585365,
+          "predicted": 0.7028159499168396
+        },
+        {
+          "entryTimestampUtc": 1783045800000,
+          "outcome": "TP",
+          "pnl": 12.809511834319473,
+          "predicted": 0.6718822121620178
+        },
+        {
+          "entryTimestampUtc": 1783813500000,
+          "outcome": "TP",
+          "pnl": 13.428599999999957,
+          "predicted": 0.6694799065589905
+        },
+        {
+          "entryTimestampUtc": 1783013400000,
+          "outcome": "TP",
+          "pnl": 13.54854545454554,
+          "predicted": 0.6475380659103394
+        },
+        {
+          "entryTimestampUtc": 1784558700000,
+          "outcome": "SL",
+          "pnl": -9.945638297872346,
+          "predicted": 0.6400762796401978
+        }
+      ]
+    },
+    {
+      "optionLabel": "D (v2 + regularization)",
+      "foldIndex": 5,
+      "testMonth": "2026-07",
+      "top": {
+        "n": 11,
+        "winRate": 0.7272727272727273,
+        "wilsonLower": 0.47951001643257635,
+        "wilsonUpper": 0.885305871149461,
+        "pf": 3.9316276802663954,
+        "expectancyUsd": 6.633471293476732,
+        "expectancyR": 1.2545454545454544,
+        "pnlUsd": 72.96818422824406,
+        "maxDrawdownUsd": 9.932187499999978,
+        "longestLosingStreak": 1
+      },
+      "middle": {
+        "n": 32,
+        "winRate": 0.3125,
+        "wilsonLower": 0.19687775024979853,
+        "wilsonUpper": 0.4573561615207447,
+        "pf": 0.662862290675979,
+        "expectancyUsd": -1.9664291371227485,
+        "expectancyR": -0.03124999999999996,
+        "pnlUsd": -62.92573238792795,
+        "maxDrawdownUsd": 100.14397169967559,
+        "longestLosingStreak": 9
+      },
+      "bottom": {
+        "n": 11,
+        "winRate": 0.45454545454545453,
+        "wilsonLower": 0.2421049651421108,
+        "wilsonUpper": 0.6849318573414819,
+        "pf": 1.2510902826527457,
+        "expectancyUsd": 1.0627608924051934,
+        "expectancyR": 0.4090909090909091,
+        "pnlUsd": 11.690369816457128,
+        "maxDrawdownUsd": 33.154807775285676,
+        "longestLosingStreak": 4
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1785163500000,
+          "outcome": "TP",
+          "pnl": 13.779900000000016,
+          "predicted": 0.8553197979927063
+        },
+        {
+          "entryTimestampUtc": 1784123100000,
+          "outcome": "TP",
+          "pnl": 12.921610169491645,
+          "predicted": 0.837732195854187
+        },
+        {
+          "entryTimestampUtc": 1784536200000,
+          "outcome": "TP",
+          "pnl": 13.172925138632266,
+          "predicted": 0.7679750323295593
+        },
+        {
+          "entryTimestampUtc": 1783437300000,
+          "outcome": "SL",
+          "pnl": -9.360833333333309,
+          "predicted": 0.7410629987716675
+        },
+        {
+          "entryTimestampUtc": 1785366900000,
+          "outcome": "SL",
+          "pnl": -5.5969693654267,
+          "predicted": 0.7339915037155151
+        },
+        {
+          "entryTimestampUtc": 1784123100000,
+          "outcome": "SL",
+          "pnl": -9.932187499999978,
+          "predicted": 0.7327160239219666
+        },
+        {
+          "entryTimestampUtc": 1783813500000,
+          "outcome": "TP",
+          "pnl": 13.428599999999957,
+          "predicted": 0.7124550342559814
+        },
+        {
+          "entryTimestampUtc": 1785356100000,
+          "outcome": "TP",
+          "pnl": 13.07158536585365,
+          "predicted": 0.6877508163452148
+        },
+        {
+          "entryTimestampUtc": 1784564100000,
+          "outcome": "TP",
+          "pnl": 13.677857142857114,
+          "predicted": 0.6757899522781372
+        },
+        {
+          "entryTimestampUtc": 1783102500000,
+          "outcome": "TP",
+          "pnl": 8.512796610169428,
+          "predicted": 0.6330296993255615
+        },
+        {
+          "entryTimestampUtc": 1784691900000,
+          "outcome": "TP",
+          "pnl": 9.292899999999971,
+          "predicted": 0.6327261924743652
+        }
+      ]
+    },
+    {
+      "optionLabel": "A (v1, 8 feature)",
+      "foldIndex": 6,
+      "testMonth": "2026-08",
+      "top": {
+        "n": 11,
+        "winRate": 0.7272727272727273,
+        "wilsonLower": 0.47951001643257635,
+        "wilsonUpper": 0.885305871149461,
+        "pf": 3.1977024469115887,
+        "expectancyUsd": 5.398384559472726,
+        "expectancyR": 1.2545454545454544,
+        "pnlUsd": 59.38223015419999,
+        "maxDrawdownUsd": 10.8196047385471,
+        "longestLosingStreak": 1
+      },
+      "middle": {
+        "n": 33,
+        "winRate": 0.5151515151515151,
+        "wilsonLower": 0.37642667083582027,
+        "wilsonUpper": 0.6515801847743076,
+        "pf": 1.5512636040066574,
+        "expectancyUsd": 2.1905968540573153,
+        "expectancyR": 0.596969696969697,
+        "pnlUsd": 72.28969618389141,
+        "maxDrawdownUsd": 34.862924580495395,
+        "longestLosingStreak": 5
+      },
+      "bottom": {
+        "n": 11,
+        "winRate": 0.6363636363636364,
+        "wilsonLower": 0.3940262610699527,
+        "wilsonUpper": 0.8248632714792696,
+        "pf": 2.983782766467713,
+        "expectancyUsd": 5.601947261196771,
+        "expectancyR": 0.9727272727272727,
+        "pnlUsd": 61.621419873164484,
+        "maxDrawdownUsd": 16.412242618492627,
+        "longestLosingStreak": 2
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1787319000000,
+          "outcome": "TP",
+          "pnl": 9.111542750929319,
+          "predicted": 0.9365467429161072
+        },
+        {
+          "entryTimestampUtc": 1787401800000,
+          "outcome": "TP",
+          "pnl": 13.933048780487843,
+          "predicted": 0.9060139060020447
+        },
+        {
+          "entryTimestampUtc": 1787374800000,
+          "outcome": "SL",
+          "pnl": -6.305918367346952,
+          "predicted": 0.8389302492141724
+        },
+        {
+          "entryTimestampUtc": 1787619600000,
+          "outcome": "TP",
+          "pnl": 14.02034883720932,
+          "predicted": 0.8054909110069275
+        },
+        {
+          "entryTimestampUtc": 1786203000000,
+          "outcome": "SL",
+          "pnl": -10.428846153846148,
+          "predicted": 0.8033009767532349
+        },
+        {
+          "entryTimestampUtc": 1787572800000,
+          "outcome": "TP",
+          "pnl": 8.54444444444438,
+          "predicted": 0.7855619788169861
+        },
+        {
+          "entryTimestampUtc": 1787302800000,
+          "outcome": "SL",
+          "pnl": -10.285376552795006,
+          "predicted": 0.7816724181175232
+        },
+        {
+          "entryTimestampUtc": 1787437800000,
+          "outcome": "TP",
+          "pnl": 8.850924369747926,
+          "predicted": 0.7713518738746643
+        },
+        {
+          "entryTimestampUtc": 1786033800000,
+          "outcome": "TP",
+          "pnl": 12.941785714285887,
+          "predicted": 0.7552521824836731
+        },
+        {
+          "entryTimestampUtc": 1787219100000,
+          "outcome": "TP",
+          "pnl": 9.894617968094053,
+          "predicted": 0.7117965221405029
+        },
+        {
+          "entryTimestampUtc": 1787421600000,
+          "outcome": "TP",
+          "pnl": 9.105658362989356,
+          "predicted": 0.709662675857544
+        }
+      ]
+    },
+    {
+      "optionLabel": "B (v2, 14 feature)",
+      "foldIndex": 6,
+      "testMonth": "2026-08",
+      "top": {
+        "n": 11,
+        "winRate": 0.7272727272727273,
+        "wilsonLower": 0.47951001643257635,
+        "wilsonUpper": 0.885305871149461,
+        "pf": 3.474342669184596,
+        "expectancyUsd": 6.201167558234892,
+        "expectancyR": 1.2545454545454544,
+        "pnlUsd": 68.21284314058381,
+        "maxDrawdownUsd": 17.6734484885471,
+        "longestLosingStreak": 2
+      },
+      "middle": {
+        "n": 33,
+        "winRate": 0.5757575757575758,
+        "wilsonLower": 0.43384991734662126,
+        "wilsonUpper": 0.7061843607040186,
+        "pf": 2.001443827205977,
+        "expectancyUsd": 3.3699119484854014,
+        "expectancyR": 0.7848484848484851,
+        "pnlUsd": 111.20709430001824,
+        "maxDrawdownUsd": 26.39260924610865,
+        "longestLosingStreak": 4
+      },
+      "bottom": {
+        "n": 11,
+        "winRate": 0.45454545454545453,
+        "wilsonLower": 0.2421049651421108,
+        "wilsonUpper": 0.6849318573414819,
+        "pf": 1.2741648625654833,
+        "expectancyUsd": 1.261218979150347,
+        "expectancyR": 0.4090909090909091,
+        "pnlUsd": 13.873408770653816,
+        "maxDrawdownUsd": 20.841690914139086,
+        "longestLosingStreak": 2
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1787401800000,
+          "outcome": "TP",
+          "pnl": 13.933048780487843,
+          "predicted": 0.8793038725852966
+        },
+        {
+          "entryTimestampUtc": 1786203000000,
+          "outcome": "SL",
+          "pnl": -10.428846153846148,
+          "predicted": 0.8667740225791931
+        },
+        {
+          "entryTimestampUtc": 1787437800000,
+          "outcome": "TP",
+          "pnl": 8.850924369747926,
+          "predicted": 0.7748628854751587
+        },
+        {
+          "entryTimestampUtc": 1786033800000,
+          "outcome": "TP",
+          "pnl": 12.941785714285887,
+          "predicted": 0.7744999527931213
+        },
+        {
+          "entryTimestampUtc": 1787319000000,
+          "outcome": "TP",
+          "pnl": 9.111542750929319,
+          "predicted": 0.7372938394546509
+        },
+        {
+          "entryTimestampUtc": 1787038200000,
+          "outcome": "SL",
+          "pnl": -6.8538437499999985,
+          "predicted": 0.7341508865356445
+        },
+        {
+          "entryTimestampUtc": 1787302800000,
+          "outcome": "SL",
+          "pnl": -10.285376552795006,
+          "predicted": 0.673204243183136
+        },
+        {
+          "entryTimestampUtc": 1787619600000,
+          "outcome": "TP",
+          "pnl": 14.02034883720932,
+          "predicted": 0.6438645124435425
+        },
+        {
+          "entryTimestampUtc": 1787590800000,
+          "outcome": "TP",
+          "pnl": 14.071941176470668,
+          "predicted": 0.6238465905189514
+        },
+        {
+          "entryTimestampUtc": 1787350500000,
+          "outcome": "TP",
+          "pnl": 12.956699999999959,
+          "predicted": 0.6233092546463013
+        },
+        {
+          "entryTimestampUtc": 1787219100000,
+          "outcome": "TP",
+          "pnl": 9.894617968094053,
+          "predicted": 0.5975659489631653
+        }
+      ]
+    },
+    {
+      "optionLabel": "C (toi gian, 4 feature)",
+      "foldIndex": 6,
+      "testMonth": "2026-08",
+      "top": {
+        "n": 11,
+        "winRate": 0.7272727272727273,
+        "wilsonLower": 0.47951001643257635,
+        "wilsonUpper": 0.885305871149461,
+        "pf": 3.35140874862997,
+        "expectancyUsd": 5.817363434692448,
+        "expectancyR": 1.2545454545454544,
+        "pnlUsd": 63.990997781616926,
+        "maxDrawdownUsd": 18.10235522359373,
+        "longestLosingStreak": 2
+      },
+      "middle": {
+        "n": 33,
+        "winRate": 0.48484848484848486,
+        "wilsonLower": 0.3484198152256923,
+        "wilsonUpper": 0.6235733291641797,
+        "pf": 1.3889503644949208,
+        "expectancyUsd": 1.6184112529142738,
+        "expectancyR": 0.5030303030303032,
+        "pnlUsd": 53.40757134617103,
+        "maxDrawdownUsd": 39.48366538548918,
+        "longestLosingStreak": 6
+      },
+      "bottom": {
+        "n": 11,
+        "winRate": 0.7272727272727273,
+        "wilsonLower": 0.47951001643257635,
+        "wilsonUpper": 0.885305871149461,
+        "pf": 4.073743989523522,
+        "expectancyUsd": 6.899525189406174,
+        "expectancyR": 1.2545454545454544,
+        "pnlUsd": 75.89477708346791,
+        "maxDrawdownUsd": 24.69131370151385,
+        "longestLosingStreak": 3
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1787401800000,
+          "outcome": "TP",
+          "pnl": 13.933048780487843,
+          "predicted": 0.9668553471565247
+        },
+        {
+          "entryTimestampUtc": 1787319000000,
+          "outcome": "TP",
+          "pnl": 9.111542750929319,
+          "predicted": 0.9564512968063354
+        },
+        {
+          "entryTimestampUtc": 1787374800000,
+          "outcome": "SL",
+          "pnl": -6.305918367346952,
+          "predicted": 0.9090676307678223
+        },
+        {
+          "entryTimestampUtc": 1787619600000,
+          "outcome": "TP",
+          "pnl": 14.02034883720932,
+          "predicted": 0.8310126066207886
+        },
+        {
+          "entryTimestampUtc": 1787327100000,
+          "outcome": "SL",
+          "pnl": -10.479133453329949,
+          "predicted": 0.8012804388999939
+        },
+        {
+          "entryTimestampUtc": 1787402700000,
+          "outcome": "TP",
+          "pnl": 9.021746641074817,
+          "predicted": 0.7418068647384644
+        },
+        {
+          "entryTimestampUtc": 1787421600000,
+          "outcome": "TP",
+          "pnl": 9.105658362989356,
+          "predicted": 0.7179932594299316
+        },
+        {
+          "entryTimestampUtc": 1787572800000,
+          "outcome": "TP",
+          "pnl": 8.54444444444438,
+          "predicted": 0.7088809609413147
+        },
+        {
+          "entryTimestampUtc": 1786203000000,
+          "outcome": "SL",
+          "pnl": -10.428846153846148,
+          "predicted": 0.7088271975517273
+        },
+        {
+          "entryTimestampUtc": 1786033800000,
+          "outcome": "TP",
+          "pnl": 12.941785714285887,
+          "predicted": 0.6835005879402161
+        },
+        {
+          "entryTimestampUtc": 1787434200000,
+          "outcome": "TP",
+          "pnl": 14.526320224719058,
+          "predicted": 0.667563796043396
+        }
+      ]
+    },
+    {
+      "optionLabel": "D (v2 + regularization)",
+      "foldIndex": 6,
+      "testMonth": "2026-08",
+      "top": {
+        "n": 11,
+        "winRate": 0.45454545454545453,
+        "wilsonLower": 0.2421049651421108,
+        "wilsonUpper": 0.6849318573414819,
+        "pf": 1.1512569861225084,
+        "expectancyUsd": 0.7036131042277667,
+        "expectancyR": 0.4090909090909091,
+        "pnlUsd": 7.7397441465054335,
+        "maxDrawdownUsd": 42.05795589448689,
+        "longestLosingStreak": 4
+      },
+      "middle": {
+        "n": 33,
+        "winRate": 0.7272727272727273,
+        "wilsonLower": 0.5862528685961469,
+        "wilsonUpper": 0.8338499655557726,
+        "pf": 4.159131086587586,
+        "expectancyUsd": 6.50989580039805,
+        "expectancyR": 1.254545454545455,
+        "pnlUsd": 214.82656141313566,
+        "maxDrawdownUsd": 21.889031840404527,
+        "longestLosingStreak": 3
+      },
+      "bottom": {
+        "n": 11,
+        "winRate": 0.2727272727272727,
+        "wilsonLower": 0.11469412885053898,
+        "wilsonUpper": 0.5204899835674236,
+        "pf": 0.5820893378237179,
+        "expectancyUsd": -2.6611781225804787,
+        "expectancyR": -0.1545454545454545,
+        "pnlUsd": -29.272959348385264,
+        "maxDrawdownUsd": 31.16713277460425,
+        "longestLosingStreak": 3
+      },
+      "topTrades": [
+        {
+          "entryTimestampUtc": 1787401800000,
+          "outcome": "TP",
+          "pnl": 13.933048780487843,
+          "predicted": 0.8696903586387634
+        },
+        {
+          "entryTimestampUtc": 1786203000000,
+          "outcome": "SL",
+          "pnl": -10.428846153846148,
+          "predicted": 0.8594924211502075
+        },
+        {
+          "entryTimestampUtc": 1787319000000,
+          "outcome": "TP",
+          "pnl": 9.111542750929319,
+          "predicted": 0.7604246735572815
+        },
+        {
+          "entryTimestampUtc": 1787038200000,
+          "outcome": "SL",
+          "pnl": -6.8538437499999985,
+          "predicted": 0.6960411071777344
+        },
+        {
+          "entryTimestampUtc": 1786033800000,
+          "outcome": "TP",
+          "pnl": 12.941785714285887,
+          "predicted": 0.6671186685562134
+        },
+        {
+          "entryTimestampUtc": 1787374800000,
+          "outcome": "SL",
+          "pnl": -6.305918367346952,
+          "predicted": 0.6507225632667542
+        },
+        {
+          "entryTimestampUtc": 1787302800000,
+          "outcome": "SL",
+          "pnl": -10.285376552795006,
+          "predicted": 0.6407195925712585
+        },
+        {
+          "entryTimestampUtc": 1787590800000,
+          "outcome": "TP",
+          "pnl": 14.071941176470668,
+          "predicted": 0.6315457820892334
+        },
+        {
+          "entryTimestampUtc": 1787327100000,
+          "outcome": "SL",
+          "pnl": -10.479133453329949,
+          "predicted": 0.6170215606689453
+        },
+        {
+          "entryTimestampUtc": 1787437800000,
+          "outcome": "TP",
+          "pnl": 8.850924369747926,
+          "predicted": 0.5923680067062378
+        },
+        {
+          "entryTimestampUtc": 1786979700000,
+          "outcome": "SL",
+          "pnl": -6.816380368098157,
+          "predicted": 0.5753771662712097
+        }
+      ]
+    }
+  ]
+}
