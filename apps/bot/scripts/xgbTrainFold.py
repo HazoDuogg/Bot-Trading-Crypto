@@ -16,6 +16,12 @@ xgbWalkForwardAuditV2.ts can reuse this same trainer for both the v1-subset comp
 and the full v2 run, without duplicating the training code. Backward compatible: RT-058's
 xgbWalkForwardAudit.ts calls this with exactly 2 args (train/test paths only) and is
 untouched, so it keeps using the original 8-feature FEATURE_COLUMNS default below.
+
+TICKET-RT-063: optional 5th CLI arg (integer random_state) added so
+topTailRobustnessSeed.ts can vary ONLY the algorithm's randomness (Part B) while every other
+caller keeps the original behavior. Backward compatible: every RT-058..062 call site passes
+at most 4 args, so `random_state` keeps defaulting to 42 exactly as before — this default is
+NOT changed for any existing call.
 """
 import json
 import sys
@@ -47,6 +53,7 @@ def load(path: str) -> pd.DataFrame:
 def main() -> None:
     train_path, test_path = sys.argv[1], sys.argv[2]
     feature_columns = sys.argv[3].split(",") if len(sys.argv) > 3 and sys.argv[3] else FEATURE_COLUMNS
+    random_state = int(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4] else 42
     train_df = load(train_path)
     test_df = load(test_path)
 
@@ -60,7 +67,7 @@ def main() -> None:
         max_depth=3,
         learning_rate=0.1,
         eval_metric="logloss",
-        random_state=42,
+        random_state=random_state,
     )
     model.fit(X_train, y_train)
 
