@@ -22,3 +22,42 @@ export function computeAtr(candles: Candle[], period: number): number[] {
   }
   return atrValues;
 }
+
+// TICKET-RT-065 Part B: incremental ATR tracker — same true-range + Wilder-smoothing algorithm as
+// computeAtr() above (verified numerically identical in atr.test.ts, step for step, against a
+// growing-prefix computeAtr() call), fed one candle at a time. computeAtr() itself is untouched —
+// purely additive, no existing call site needs to change.
+export interface AtrTracker {
+  // Returns the ATR value once `period` true ranges have been fed (aligned to computeAtr()'s first
+  // returned value, candles.slice(period)); null before that (including the very first candle, which
+  // only seeds prevClose and produces no true range yet — mirrors computeAtr()'s loop starting at i=1).
+  next(candle: Candle): number | null;
+}
+
+export function createAtrTracker(period: number): AtrTracker {
+  let prevClose: number | null = null;
+  const trueRangeSeedBuffer: number[] = [];
+  let atr = 0;
+  let seeded = false;
+
+  return {
+    next(candle: Candle): number | null {
+      if (prevClose === null) {
+        prevClose = candle.close;
+        return null;
+      }
+      const tr = Math.max(candle.high - candle.low, Math.abs(candle.high - prevClose), Math.abs(candle.low - prevClose));
+      prevClose = candle.close;
+
+      if (!seeded) {
+        trueRangeSeedBuffer.push(tr);
+        if (trueRangeSeedBuffer.length < period) return null;
+        atr = trueRangeSeedBuffer.reduce((a, b) => a + b, 0) / period;
+        seeded = true;
+        return atr;
+      }
+      atr = (atr * (period - 1) + tr) / period;
+      return atr;
+    },
+  };
+}
