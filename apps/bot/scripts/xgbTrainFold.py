@@ -22,6 +22,11 @@ topTailRobustnessSeed.ts can vary ONLY the algorithm's randomness (Part B) while
 caller keeps the original behavior. Backward compatible: every RT-058..062 call site passes
 at most 4 args, so `random_state` keeps defaulting to 42 exactly as before — this default is
 NOT changed for any existing call.
+
+TICKET-RT-064: optional 6th CLI arg ("subsample,colsample_bytree", e.g. "0.8,0.8") added so
+rt064QuintileCompare.ts/rt064RobustnessCompare.ts can test Option D (v2 + regularization)
+without touching any other caller. Backward compatible: every RT-058..063 call site passes at
+most 5 args, so both default to 1.0 (XGBoost's own default, i.e. off) exactly as before.
 """
 import json
 import sys
@@ -54,6 +59,11 @@ def main() -> None:
     train_path, test_path = sys.argv[1], sys.argv[2]
     feature_columns = sys.argv[3].split(",") if len(sys.argv) > 3 and sys.argv[3] else FEATURE_COLUMNS
     random_state = int(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4] else 42
+    if len(sys.argv) > 5 and sys.argv[5]:
+        subsample_str, colsample_str = sys.argv[5].split(",")
+        subsample, colsample_bytree = float(subsample_str), float(colsample_str)
+    else:
+        subsample, colsample_bytree = 1.0, 1.0
     train_df = load(train_path)
     test_df = load(test_path)
 
@@ -68,6 +78,8 @@ def main() -> None:
         learning_rate=0.1,
         eval_metric="logloss",
         random_state=random_state,
+        subsample=subsample,
+        colsample_bytree=colsample_bytree,
     )
     model.fit(X_train, y_train)
 
