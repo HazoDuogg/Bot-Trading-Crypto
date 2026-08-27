@@ -1,0 +1,23 @@
+{
+  "trainN": 3468,
+  "featureColumns": [
+    "fvgGapSizePct",
+    "keyZoneDistancePct",
+    "atrH1Pct",
+    "slPct"
+  ],
+  "topThreshold": 0.6060611009597778,
+  "bottomThreshold": 0.4003695249557495,
+  "meanScore": 0.5034229159355164,
+  "minScore": 0.10826952010393143,
+  "maxScore": 0.9638091921806335,
+  "modelPath": "apps/bot/data/models/softVetoModelC.json",
+  "trainedAtUtc": "2026-08-27T03:52:33.290Z",
+  "trainedFrom": "apps/bot/data/xgbAuditDatasetThreeYear.csv",
+  "xgboostHyperparams": {
+    "n_estimators": 100,
+    "max_depth": 3,
+    "learning_rate": 0.1,
+    "random_state": 42
+  }
+}
