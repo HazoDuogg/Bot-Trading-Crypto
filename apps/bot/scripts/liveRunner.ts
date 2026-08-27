@@ -127,7 +127,15 @@ async function main() {
   }
   logLine('Catch-up xong.\n');
 
-  await emit(telegramConfig, logger, fromEngineStartup({ symbols: SYMBOLS, baseUrl, isRestart: process.env.LIVE_ENGINE_RESTART === '1' }), true);
+  // TICKET-RT-072: real balance for the startup message — never blocks startup if this fails
+  // (network blip etc.), just logs and falls back to "khong lay duoc" in the Telegram message.
+  let startupBalanceUsdt: number | null = null;
+  try {
+    startupBalanceUsdt = await orderClient.getAvailableBalanceUsdt();
+  } catch (err) {
+    console.error('  LOI khi lay balance that cho tin nhan khoi dong (bo qua, van khoi dong binh thuong):', err);
+  }
+  await emit(telegramConfig, logger, fromEngineStartup({ symbols: SYMBOLS, baseUrl, isRestart: process.env.LIVE_ENGINE_RESTART === '1', balanceUsdt: startupBalanceUsdt }), true);
 
   // --- Live polling loop (single M15-cadence schedule — see RT-067's file comment for why H1 is
   // polled at the same cadence instead of two independent timers) ---

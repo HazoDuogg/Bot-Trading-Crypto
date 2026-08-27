@@ -39,6 +39,11 @@ export interface LiveEventRecord {
   resultReasonText?: string; // Part D: "ket qua (...) + ly do"
   note?: string; // Part D: "ghi chu su kien dac biet (loi API, huy lenh do timeout, v.v.)"
   raw: unknown; // the full underlying event object, for programmatic analysis beyond the display fields
+  // TICKET-RT-072: ENGINE_STARTUP-only — real USDT balance at startup time (via
+  // client.getAvailableBalanceUsdt(), same source as everywhere else, never hard-coded/computed).
+  // null means the fetch failed (formatEventMessage shows "khong lay duoc" instead of blocking
+  // startup). Unused/undefined for every other eventKind.
+  startupBalanceUsdt?: number | null;
 }
 
 function describeEntryReason(direction: Direction, gapLow: number, gapHigh: number, regime: RegimeSnapshot, breaksKeyZone: boolean): string {
@@ -51,7 +56,7 @@ function describeEntryReason(direction: Direction, gapLow: number, gapHigh: numb
   );
 }
 
-export function fromEngineStartup(input: { symbols: string[]; baseUrl: string; isRestart: boolean }): LiveEventRecord {
+export function fromEngineStartup(input: { symbols: string[]; baseUrl: string; isRestart: boolean; balanceUsdt: number | null }): LiveEventRecord {
   return {
     timestampUtc: new Date().toISOString(),
     symbol: 'ALL',
@@ -59,6 +64,7 @@ export function fromEngineStartup(input: { symbols: string[]; baseUrl: string; i
     eventKind: 'ENGINE_STARTUP',
     note: `${input.isRestart ? 'Restart' : 'Khoi dong lan dau'}. Symbols: ${input.symbols.join(', ')}. Endpoint: ${input.baseUrl}.`,
     raw: input,
+    startupBalanceUsdt: input.balanceUsdt,
   };
 }
 

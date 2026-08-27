@@ -9,6 +9,45 @@ loadEnv({ path: path.join(REPO_ROOT_DIR, '.env') });
 
 import { describe, it, expect } from 'vitest';
 import { BinanceOrderClient, TestnetSafetyError, roundDownToStep, roundToTick } from './binanceOrderClient.js';
+import { BinanceHttpError } from './binanceRestPollingFeed.js';
+import type { OrderInfo } from './exchangeOrderClient.js';
+
+// TICKET-RT-071: confirmed via real testnet calls that the Algo Order API has a brief eventual-
+// consistency window in BOTH directions — GET /fapi/v1/algoOrder?algoId=... can throw -2013 "Order
+// does not exist" for a few hundred ms right after PLACEMENT (not just after cancellation), before
+// settling. This doesn't affect production (SymbolOrderLifecycle only ever polls getOrder() on the
+// next M15 candle, minutes later — never immediately after placing), so this retries briefly rather
+// than asserting instantly.
+async function getOrderWithRetry(client: BinanceOrderClient, symbol: string, orderId: number, maxAttempts = 5): Promise<OrderInfo> {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      return await client.getOrder(symbol, orderId);
+    } catch (err) {
+      if (err instanceof BinanceHttpError && err.message.includes('-2013') && i < maxAttempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('unreachable');
+}
+
+// TICKET-RT-071: confirmed via real testnet calls that a just-canceled ALGO order is NOT queryable
+// right after cancellation — GET /fapi/v1/algoOrder?algoId=... throws -2013 "Order does not exist"
+// immediately (unlike the old /fapi/v1/order endpoint, which still returns the order with
+// status=CANCELED). This doesn't affect production (SymbolOrderLifecycle never calls getOrder()
+// on an id right after canceling it), so this polls getOpenOrders() instead — the thing production
+// actually relies on (reconciliation) — until the id is no longer listed as open.
+async function pollUntilNotOpen(client: BinanceOrderClient, symbol: string, orderId: number, maxAttempts = 5): Promise<OrderInfo[]> {
+  let last: OrderInfo[] = [];
+  for (let i = 0; i < maxAttempts; i++) {
+    last = await client.getOpenOrders(symbol);
+    if (!last.some((o) => o.orderId === orderId)) return last;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return last;
+}
 
 describe('roundDownToStep / roundToTick (pure)', () => {
   it('rounds quantity DOWN to the LOT_SIZE step (never up — never risk over-sizing)', () => {
@@ -105,5 +144,76 @@ describe.skipIf(!hasCredentials)('BinanceOrderClient (integration, real Binance 
     const placed = await client.placeLimitEntryOrder('XRPUSDT', 'LONG', quantity, price);
     await client.cancelOrder('XRPUSDT', placed.orderId);
     await expect(client.cancelOrder('XRPUSDT', placed.orderId)).resolves.not.toThrow();
+  }, 30000);
+
+  // TICKET-RT-071 HOTFIX: STOP_MARKET/TAKE_PROFIT_MARKET with closePosition=true is REJECTED by
+  // Binance (real, verified: -4509 "Time in Force (TIF) GTE can only be used with open positions")
+  // when the account is flat on that symbol — true both before and after this hotfix, and exactly
+  // matches production usage (SymbolOrderLifecycle only ever calls placeStopMarketCloseOrder/
+  // placeTakeProfitMarketCloseOrder AFTER the entry order has FILLED, so a real position always
+  // exists by then). To test the real endpoint honestly this opens a REAL tiny XRPUSDT position
+  // first (a LIMIT BUY priced to cross the book and fill immediately as taker), places both close
+  // legs through the new Algo Order API against that real position, verifies them, cancels both,
+  // then flattens the position again (LIMIT SELL crossing the book) — leaving the account exactly
+  // as it started.
+  it('opens a real tiny position, places REAL STOP_MARKET+TAKE_PROFIT_MARKET close orders via the Algo Order API, verifies+cancels them, and flattens the position again', async () => {
+    const filters = await client.getSymbolFilters('XRPUSDT');
+    const priceRes = await fetch(`${process.env.BINANCE_TESTNET_URL}/fapi/v1/ticker/price?symbol=XRPUSDT`);
+    const markPrice = Number(((await priceRes.json()) as { price: string }).price);
+    expect(markPrice).toBeGreaterThan(0);
+
+    const minQtyForNotional = filters.minNotional > 0 ? filters.minNotional / markPrice : filters.stepSize;
+    const quantity = roundDownToStep(Math.max(minQtyForNotional * 1.1, filters.stepSize), filters.stepSize);
+
+    // Cross the book (2% above mark) so this LIMIT order fills immediately as a taker order —
+    // opens a REAL tiny LONG position, same as a real ENTRY_FILLED in production.
+    const entryPrice = roundToTick(markPrice * 1.02, filters.tickSize);
+    const entry = await client.placeLimitEntryOrder('XRPUSDT', 'LONG', quantity, entryPrice);
+    const filledEntry = await client.getOrder('XRPUSDT', entry.orderId);
+    expect(filledEntry.status).toBe('FILLED');
+
+    try {
+      const slPrice = roundToTick(markPrice * 0.5, filters.tickSize); // far below — never triggers
+      const tpPrice = roundToTick(markPrice * 2, filters.tickSize); // far above — never triggers
+
+      const slPlaced = await client.placeStopMarketCloseOrder('XRPUSDT', 'LONG', slPrice);
+      expect(slPlaced.status).toBe('NEW');
+      expect(slPlaced.symbol).toBe('XRPUSDT');
+      expect(slPlaced.orderId).toBeGreaterThan(0);
+
+      const tpPlaced = await client.placeTakeProfitMarketCloseOrder('XRPUSDT', 'LONG', tpPrice);
+      expect(tpPlaced.status).toBe('NEW');
+      expect(tpPlaced.orderId).toBeGreaterThan(0);
+      expect(tpPlaced.orderId).not.toBe(slPlaced.orderId);
+
+      // getOrder() routes both through the new algoId-based query path — proves the response is
+      // getOrder()-compatible (algoStatus mapped back to the same OrderStatus vocabulary).
+      const slQueried = await getOrderWithRetry(client, 'XRPUSDT', slPlaced.orderId);
+      expect(slQueried.status).toBe('NEW');
+      expect(slQueried.orderId).toBe(slPlaced.orderId);
+      const tpQueried = await getOrderWithRetry(client, 'XRPUSDT', tpPlaced.orderId);
+      expect(tpQueried.status).toBe('NEW');
+
+      // getOpenOrders() must see both (merged from /fapi/v1/openAlgoOrders, since they no longer
+      // show up in /fapi/v1/openOrders post-migration).
+      const open = await client.getOpenOrders('XRPUSDT');
+      expect(open.some((o) => o.orderId === slPlaced.orderId)).toBe(true);
+      expect(open.some((o) => o.orderId === tpPlaced.orderId)).toBe(true);
+
+      await client.cancelOrder('XRPUSDT', slPlaced.orderId);
+      const openAfterSlCancel = await pollUntilNotOpen(client, 'XRPUSDT', slPlaced.orderId);
+      expect(openAfterSlCancel.some((o) => o.orderId === slPlaced.orderId)).toBe(false);
+
+      await client.cancelOrder('XRPUSDT', tpPlaced.orderId);
+      const openAfterTpCancel = await pollUntilNotOpen(client, 'XRPUSDT', tpPlaced.orderId);
+      expect(openAfterTpCancel.some((o) => o.orderId === tpPlaced.orderId)).toBe(false);
+
+      // Idempotent cancel on an already-canceled ALGO order must not throw.
+      await expect(client.cancelOrder('XRPUSDT', slPlaced.orderId)).resolves.not.toThrow();
+    } finally {
+      // Always flatten the real position this test opened, even if an assertion above failed.
+      const closePrice = roundToTick(markPrice * 0.98, filters.tickSize); // crosses below -> fills as taker
+      await client.placeLimitEntryOrder('XRPUSDT', 'SHORT', quantity, closePrice);
+    }
   }, 30000);
 });
