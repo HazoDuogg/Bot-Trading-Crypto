@@ -85,11 +85,6 @@ describe('retryWithBackoff', () => {
   });
 });
 
-// Integration tests against the REAL Binance Futures Testnet public endpoints (no API key needed
-// for market data) — per the ticket's own verification method ("Claude Code tu test bang
-// testnet... doc du lieu cong khai"). Not mocked, matching this repo's established convention of
-// testing against real external tooling rather than mocking it (see softVeto.test.ts's real
-// Python/XGBoost calls, RT-066).
 describe('BinanceRestPollingFeed (integration, real Binance Futures Testnet)', () => {
   const feed = new BinanceRestPollingFeed('https://testnet.binancefuture.com');
 
@@ -118,8 +113,6 @@ describe('BinanceRestPollingFeed (integration, real Binance Futures Testnet)', (
     const cursor = batch[batch.length - 2].openTime; // second-to-last candle's openTime
     const since = await feed.getClosedCandlesSince('BTCUSDT', '15m', cursor);
     for (const c of since) expect(c.openTime).toBeGreaterThan(cursor);
-    // The last candle of the original batch must reappear (it's after the cursor) — confirms no
-    // candle is silently skipped at the cursor boundary.
     expect(since.some((c) => c.openTime === batch[batch.length - 1].openTime)).toBe(true);
   }, 15000);
 

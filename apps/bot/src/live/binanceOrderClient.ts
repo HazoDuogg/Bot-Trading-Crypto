@@ -3,49 +3,12 @@ import type { Direction } from '../entry/types.js';
 import type { ExchangeOrderClient, OrderInfo, OrderStatus, SymbolFilters } from './exchangeOrderClient.js';
 import { retryWithBackoff, BinanceHttpError, type RetryOptions } from './binanceRestPollingFeed.js';
 
-// TICKET-RT-068: Binance Futures implementation of ExchangeOrderClient — signed (HMAC-SHA256)
-// requests for balance/leverage/orders, alongside the existing public (unsigned)
-// BinanceRestPollingFeed for market data. First code in this repo that places real orders (even
-// though every current caller only ever points it at testnet).
-//
-// SAFETY GUARD (defense-in-depth beyond "the env var happens to say testnet"): by default this
-// class REFUSES to construct against a baseUrl that doesn't contain "testnet" — a deliberate,
-// explicit opt-out (`allowNonTestnet: true`) is required to ever point it elsewhere, so a
-// misconfigured env var alone can never silently enable real trading. Per the ticket: "Khong tu
-// dong chuyen sang mainnet — van dung LIVE_EXCHANGE_BASE_URL tro testnet."
-export class TestnetSafetyError extends Error {}
+export class TestnetSafetyError extends Error { }
 
 export interface BinanceOrderClientOptions extends RetryOptions {
   allowNonTestnet?: boolean;
 }
 
-// TICKET-RT-071 HOTFIX: effective 2025-12-09 Binance migrated conditional orders (STOP_MARKET,
-// TAKE_PROFIT_MARKET, STOP, TAKE_PROFIT, TRAILING_STOP_MARKET) off /fapi/v1/order onto a separate
-// Algo Order API (/fapi/v1/algoOrder, /fapi/v1/openAlgoOrders, /fapi/v1/allAlgoOrders) — the old
-// endpoint now rejects them with -4120 STOP_ORDER_SWITCH_ALGO. Verified against the live docs
-// (developers.binance.com/docs/derivatives/usds-margined-futures/trade/rest-api/New-Algo-Order,
-// .../Query-Algo-Order, .../Cancel-Algo-Order, .../Current-All-Algo-Open-Orders) on 2026-08-27:
-//   - place: POST /fapi/v1/algoOrder, algoType=CONDITIONAL, triggerPrice (NOT stopPrice) is the
-//     trigger, response id field is `algoId` (NOT orderId).
-//   - query: GET /fapi/v1/algoOrder?algoId=... — response has `algoStatus` (NOT status; confirmed
-//     values from the docs: NEW/CANCELED/EXPIRED/TRIGGERED/FINISHED — "active, CANCELED, TRIGGERED,
-//     or FINISHED" per Query-All-Algo-Orders' own description, "active" == algoStatus "NEW") plus
-//     `actualOrderId`/`actualPrice`/`actualQty` (empty/0 until the condition triggers, then the
-//     real underlying order's id/avgPrice/filled qty — these do NOT appear on the placement
-//     response, only on query/list responses).
-//   - cancel: DELETE /fapi/v1/algoOrder?algoId=...
-// LIMIT entry orders are unaffected (still /fapi/v1/order) — only the two close-order placers, plus
-// getOrder/cancelOrder/getOpenOrders which must now know whether a given id is an algo id.
-// Per the ticket's "khong doi ExchangeOrderClient interface neu tranh duoc": OrderInfo.orderId is
-// reused to carry algoId for these legs (both are plain numbers from the caller's point of view),
-// and this class tracks which ids it minted via the algo endpoint in `algoOrderIds` so
-// getOrder/cancelOrder route to the right endpoint. This is sufficient (not a fragile guess)
-// because every id ever passed back into getOrder/cancelOrder by SymbolOrderLifecycle for these
-// legs was itself returned by THIS instance's placeStopMarketCloseOrder/
-// placeTakeProfitMarketCloseOrder earlier in the same process lifetime (state resets to IDLE on
-// restart, per orderLifecycle.ts's own architecture note, so a stale post-restart algo id is never
-// looked up this way) — see liveRunner.ts's reconciliation, which only reads
-// getOpenOrders().length and never calls getOrder/cancelOrder on ids sourced from it.
 function parseAlgoOrderInfo(raw: unknown): OrderInfo {
   const r = raw as Record<string, unknown>;
   const actualPrice = Number(r.actualPrice ?? 0);
@@ -107,7 +70,7 @@ export class BinanceOrderClient implements ExchangeOrderClient {
     if (!options.allowNonTestnet && !baseUrl.includes('testnet')) {
       throw new TestnetSafetyError(
         `CORRECTION_REQUIRED: BinanceOrderClient duoc khoi tao voi baseUrl="${baseUrl}", khong chua "testnet". ` +
-          `Tu choi khoi tao de tranh vo tinh dat lenh that — truyen { allowNonTestnet: true } neu day THAT SU la chu y (chi khi da duoc xac nhan ro rang chuyen sang mainnet).`,
+        `Tu choi khoi tao de tranh vo tinh dat lenh that — truyen { allowNonTestnet: true } neu day THAT SU la chu y (chi khi da duoc xac nhan ro rang chuyen sang mainnet).`,
       );
     }
     this.retryOptions = options;
@@ -153,7 +116,7 @@ export class BinanceOrderClient implements ExchangeOrderClient {
     // so filters can never mismatch between testnet/mainnet.
     const res = await fetch(new URL('/fapi/v1/exchangeInfo', this.baseUrl));
     if (!res.ok) throw new Error(`Binance exchangeInfo request failed: ${res.status} ${await res.text()}`);
-    const info = (await res.json()) as { symbols: { symbol: string; filters: { filterType: string; [k: string]: unknown }[] }[] };
+    const info = (await res.json()) as { symbols: { symbol: string; filters: { filterType: string;[k: string]: unknown }[] }[] };
     const symbolInfo = info.symbols.find((s) => s.symbol === symbol);
     if (!symbolInfo) throw new Error(`CORRECTION_REQUIRED: ${symbol} khong co trong exchangeInfo cua ${this.baseUrl}.`);
     const lotSize = symbolInfo.filters.find((f) => f.filterType === 'LOT_SIZE');

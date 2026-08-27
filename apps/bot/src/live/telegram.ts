@@ -1,10 +1,5 @@
 import type { LiveEventRecord } from './eventRecord.js';
 
-// TICKET-RT-067 Part D, superseded by TICKET-RT-068 Part D ("Telegram format v2 — phu du vong
-// doi"): bot token/chat id come ONLY from environment variables (TELEGRAM_BOT_TOKEN_ENC,
-// TELEGRAM_CHAT_ID) — never hard-coded, never committed. TELEGRAM_CHAT_ID may be a single id or a
-// comma-separated list — sends to every id in the list.
-
 export interface TelegramConfig {
   botToken: string;
   chatIds: string[];
@@ -28,9 +23,6 @@ export interface SendResult {
   error?: string;
 }
 
-// Sends to every configured chat id independently — one chat failing (e.g. bot blocked by that
-// user) never prevents delivery to the others. Never throws; the caller (liveRunner) must keep
-// running even if Telegram itself is unreachable, per the ticket's "khong crash toan bo process".
 export async function sendTelegramMessage(config: TelegramConfig, text: string): Promise<SendResult[]> {
   const results: SendResult[] = [];
   for (const chatId of config.chatIds) {
@@ -53,11 +45,6 @@ export async function sendTelegramMessage(config: TelegramConfig, text: string):
   }
   return results;
 }
-
-// --- Message formatting v2 (TICKET-RT-068 Part D) ---
-// ONE formatter for every event kind, built from the SAME LiveEventRecord that Part E logs to
-// JSONL — the ticket's explicit field list: thoi gian, tai san, chien luoc, regime, Entry/SL/TP,
-// R:R, ly do vao lenh, ket qua (+ PnL that + ly do), ghi chu su kien dac biet.
 
 const EVENT_EMOJI: Record<LiveEventRecord['eventKind'], string> = {
   ENGINE_STARTUP: '🟢',
@@ -85,8 +72,7 @@ export function formatEventMessage(record: LiveEventRecord): string {
   const lines: string[] = [];
   lines.push(`${EVENT_EMOJI[record.eventKind]} <b>${EVENT_TITLE[record.eventKind]}</b>`);
   lines.push(`🕐 ${record.timestampUtc}`);
-  // TICKET-RT-072: ENGINE_STARTUP isn't tied to one symbol — show the real account balance
-  // instead of the "ALL" placeholder. Every other event kind is untouched (still shows symbol).
+
   if (record.eventKind === 'ENGINE_STARTUP') {
     const balanceText = record.startupBalanceUsdt !== undefined && record.startupBalanceUsdt !== null ? `${record.startupBalanceUsdt.toFixed(2)} USDT` : '(không lấy được)';
     lines.push(`💰 Balance: ${balanceText}`);
