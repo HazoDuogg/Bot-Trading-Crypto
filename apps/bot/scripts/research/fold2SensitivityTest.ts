@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { loadAllSymbolData, runInstrumentedSimulation, type ClosedTradeInternal } from './xgbFeatureAuditV3.js';
-import { DEFAULT_FVG_STRATEGY_CONFIG } from '../src/entry/fvgStrategyConfig.js';
+import { DEFAULT_FVG_STRATEGY_CONFIG } from '../../src/entry/fvgStrategyConfig.js';
 
 // TICKET-RT-062 Part B: Fold 2 leave-one-out sensitivity test.
 //
@@ -118,7 +118,7 @@ function mulberry32(seed: number): () => number {
 
 async function main() {
   const reportPath = path.resolve(process.cwd(), 'apps/bot/reports/RT-062-report.md');
-  const scriptPath = path.resolve(process.cwd(), 'apps/bot/scripts/xgbTrainFold.py');
+  const scriptPath = path.resolve(process.cwd(), 'apps/bot/scripts/research/xgbTrainFold.py');
   const dataDir = path.resolve(process.cwd(), 'apps/bot/data');
   const targetR = DEFAULT_FVG_STRATEGY_CONFIG.targetRMultiple;
 

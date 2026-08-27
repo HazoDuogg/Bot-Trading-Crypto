@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { loadAllSymbolData, checkGridsAlignExactly, runInstrumentedSimulation, type ClosedTradeInternal } from './rt065FeatureAuditThreeYear.js';
-import { DEFAULT_FVG_STRATEGY_CONFIG } from '../src/entry/fvgStrategyConfig.js';
+import { DEFAULT_FVG_STRATEGY_CONFIG } from '../../src/entry/fvgStrategyConfig.js';
 
 // TICKET-RT-065 Part D step 2 (quintile): repeats RT-064's methodology (purge, expanding
 // monthly-window walk-forward, Top 20%/Middle 60%/Bottom 20% PF/Expectancy) on the 3-year dataset,
@@ -184,7 +184,7 @@ export interface FoldPerOptionA {
 async function main() {
   const reportPath = path.resolve(process.cwd(), 'apps/bot/reports/RT-065-report.md');
   const jsonPath = path.resolve(process.cwd(), 'apps/bot/data/rt065PartDQuintile.json');
-  const scriptPath = path.resolve(process.cwd(), 'apps/bot/scripts/xgbTrainFold.py');
+  const scriptPath = path.resolve(process.cwd(), 'apps/bot/scripts/research/xgbTrainFold.py');
   const dataDir = path.resolve(process.cwd(), 'apps/bot/data');
   const targetR = DEFAULT_FVG_STRATEGY_CONFIG.targetRMultiple;
 

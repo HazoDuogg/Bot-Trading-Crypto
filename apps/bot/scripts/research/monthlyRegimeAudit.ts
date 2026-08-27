@@ -1,7 +1,7 @@
 import { readFile, appendFile } from 'node:fs/promises';
 import path from 'node:path';
 import { loadAllSymbolData, runInstrumentedSimulation } from './xgbFeatureAuditV2.js';
-import { DEFAULT_FVG_STRATEGY_CONFIG } from '../src/entry/fvgStrategyConfig.js';
+import { DEFAULT_FVG_STRATEGY_CONFIG } from '../../src/entry/fvgStrategyConfig.js';
 
 // TICKET-RT-059 Part B: month-by-month PF/winrate regime audit over the RT-058 dataset
 // (apps/bot/data/xgbAuditDataset.csv) — no NEW backtest/detection logic, no production code

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { loadAllSymbolData, runInstrumentedSimulation, type ClosedTradeInternal } from './xgbFeatureAuditV3.js';
-import { DEFAULT_FVG_STRATEGY_CONFIG } from '../src/entry/fvgStrategyConfig.js';
+import { DEFAULT_FVG_STRATEGY_CONFIG } from '../../src/entry/fvgStrategyConfig.js';
 
 // TICKET-RT-064 Part A: quintile PF/expectancy quality, 4 options side by side.
 // Audit-only. Does not touch production. Does not modify RT-058..063 (imports xgbFeatureAuditV3.ts,
@@ -182,7 +182,7 @@ function splitTopMiddleBottom(predictions: GroupTrade[]): { top: GroupTrade[]; m
 async function main() {
   const reportPath = path.resolve(process.cwd(), 'apps/bot/reports/RT-064-report.md');
   const jsonPath = path.resolve(process.cwd(), 'apps/bot/data/rt064PartA.json');
-  const scriptPath = path.resolve(process.cwd(), 'apps/bot/scripts/xgbTrainFold.py');
+  const scriptPath = path.resolve(process.cwd(), 'apps/bot/scripts/research/xgbTrainFold.py');
   const dataDir = path.resolve(process.cwd(), 'apps/bot/data');
   const targetR = DEFAULT_FVG_STRATEGY_CONFIG.targetRMultiple;
 

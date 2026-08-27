@@ -1,26 +1,26 @@
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { checkNoTradeZone } from '../src/noTradeZone/noTradeZone.js';
-import type { Candle } from '../src/noTradeZone/types.js';
-import { classifyTrendH1 } from '../src/trend/trendH1.js';
-import { computeEma } from '../src/regime/ema.js';
-import { detectFvg, DEFAULT_FVG_CONFIG } from '../src/entry/fvg.js';
-import { DEFAULT_FVG_STRATEGY_CONFIG } from '../src/entry/fvgStrategyConfig.js';
-import type { Direction } from '../src/entry/types.js';
-import { calculatePositionSize } from '../src/positionSizing/positionSizing.js';
-import { DEFAULT_MAX_MARGIN_PCT } from '../src/positionSizing/types.js';
-import { computeAtr } from '../src/noTradeZone/atr.js';
-import { findKeyZones } from '../src/zones/keyZones.js';
-import type { KeyZone } from '../src/zones/keyZones.js';
-import { DEFAULT_REGIME_CONFIG } from '../src/regime/types.js';
-import { resolveRiskPct } from '../src/positionSizing/riskConfig.js';
+import { checkNoTradeZone } from '../../src/noTradeZone/noTradeZone.js';
+import type { Candle } from '../../src/noTradeZone/types.js';
+import { classifyTrendH1 } from '../../src/trend/trendH1.js';
+import { computeEma } from '../../src/regime/ema.js';
+import { detectFvg, DEFAULT_FVG_CONFIG } from '../../src/entry/fvg.js';
+import { DEFAULT_FVG_STRATEGY_CONFIG } from '../../src/entry/fvgStrategyConfig.js';
+import type { Direction } from '../../src/entry/types.js';
+import { calculatePositionSize } from '../../src/positionSizing/positionSizing.js';
+import { DEFAULT_MAX_MARGIN_PCT } from '../../src/positionSizing/types.js';
+import { computeAtr } from '../../src/noTradeZone/atr.js';
+import { findKeyZones } from '../../src/zones/keyZones.js';
+import type { KeyZone } from '../../src/zones/keyZones.js';
+import { DEFAULT_REGIME_CONFIG } from '../../src/regime/types.js';
+import { resolveRiskPct } from '../../src/positionSizing/riskConfig.js';
 import {
   admitPosition,
   closePosition,
   EMPTY_EXPOSURE_STATE,
   DEFAULT_EXPOSURE_TRACKER_CONFIG,
   type ExposureTrackerState,
-} from '../src/positionSizing/exposureTracker.js';
+} from '../../src/positionSizing/exposureTracker.js';
 import {
   loadAllSymbolData,
   runSimulation,
@@ -28,7 +28,7 @@ import {
   BALANCE,
   SYMBOLS,
   type SymbolData,
-} from './simulateOneYearNearLive.js';
+} from '../simulateOneYearNearLive.js';
 
 // TICKET-RT-058: proof-of-concept feature audit. This script does NOT touch entryRouter, fvg.ts,
 // positionSizing/*, or any other production file. It reruns the EXACT RT-056/057 confirmed backtest

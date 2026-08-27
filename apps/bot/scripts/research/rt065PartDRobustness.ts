@@ -3,22 +3,18 @@ import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { loadAllSymbolData, runInstrumentedSimulation, type ClosedTradeInternal } from './xgbFeatureAuditV3.js';
-import { DEFAULT_FVG_STRATEGY_CONFIG } from '../src/entry/fvgStrategyConfig.js';
+import { loadAllSymbolData, checkGridsAlignExactly, runInstrumentedSimulation, type ClosedTradeInternal } from './rt065FeatureAuditThreeYear.js';
+import { DEFAULT_FVG_STRATEGY_CONFIG } from '../../src/entry/fvgStrategyConfig.js';
 
-// TICKET-RT-064 Part B: data-perturbation robustness of Top-20%, 4 options side by side.
-// Audit-only. Does not touch production. Does not modify RT-058..063.
-//
-// Same method as RT-063 Part A (bootstrap-resample the purged train set, with replacement, same
-// size, random_state=42 fixed — only the DATA changes; same mulberry32(iteration) seeding, iteration
-// 0..29, reset per fold). The SAME 30 resampled row-selections are reused across all 4 options within
-// a given fold (only the feature-column subset written to CSV differs per option) — a fair,
-// apples-to-apples perturbation, not 4 independently-randomized resamples.
+// TICKET-RT-065 Part D step 3 (robustness): repeats RT-064's bootstrap-resample robustness test on
+// the 3-year dataset, options A/B/C (D dropped, per ticket). Same method as RT-063 Part A / RT-064
+// Part B: 30 bootstrap resamples per fold (mulberry32(iteration), reset per fold), same 30
+// resampled row-selections shared across all 3 options within a fold. ~30 folds this time (vs
+// RT-064's 6), so this is the long-running step — budget accordingly.
 
 interface OptionConfig {
   label: string;
   featureColumns: string[];
-  subsampleColsample?: string;
 }
 const V1_FEATURES = ['distanceFromEma200H1Pct', 'slPct', 'fvgGapSizePct', 'waitedCandlesCount', 'breaksKeyZone', 'atrH1Pct', 'hourOfDayUtc', 'dayOfWeekUtc'];
 const V2_FEATURES = [...V1_FEATURES, 'trendAgeH1Candles', 'atrPercentileH1', 'momentumM15Pct3Candles', 'keyZoneDistancePct', 'rollingWinRateSameSymbol20', 'concurrentOpenPositionsCount'];
@@ -27,7 +23,6 @@ const OPTIONS: OptionConfig[] = [
   { label: 'A (v1, 8 feature)', featureColumns: V1_FEATURES },
   { label: 'B (v2, 14 feature)', featureColumns: V2_FEATURES },
   { label: 'C (toi gian, 4 feature)', featureColumns: MINIMAL_FEATURES },
-  { label: 'D (v2 + regularization)', featureColumns: V2_FEATURES, subsampleColsample: '0.8,0.8' },
 ];
 
 const CSV_COLUMNS = [
@@ -49,7 +44,6 @@ const CSV_COLUMNS = [
   'concurrentOpenPositionsCount',
   'won',
 ] as const;
-
 function cell(v: unknown): string {
   if (v === null || v === undefined || (typeof v === 'number' && Number.isNaN(v))) return '';
   return String(v);
@@ -78,10 +72,8 @@ interface TrainResult {
   featureImportance: Record<string, number>;
   predictions: { symbol: string; predicted: number; won: boolean }[];
 }
-function trainFold(pythonExe: string, scriptPath: string, trainPath: string, testPath: string, featureColumns: string[], randomState: number | undefined, subsampleColsample: string | undefined): TrainResult {
-  const args = [scriptPath, trainPath, testPath, featureColumns.join(','), String(randomState ?? 42)];
-  if (subsampleColsample !== undefined) args.push(subsampleColsample);
-  const stdout = execFileSync(pythonExe, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+function trainFold(pythonExe: string, scriptPath: string, trainPath: string, testPath: string, featureColumns: string[]): TrainResult {
+  const stdout = execFileSync(pythonExe, [scriptPath, trainPath, testPath, featureColumns.join(','), '42'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   return JSON.parse(stdout);
 }
 function findPython(): string {
@@ -153,7 +145,6 @@ function spearman(xs: number[], ys: number[]): number {
   if (varX === 0 || varY === 0) return NaN;
   return cov / Math.sqrt(varX * varY);
 }
-
 function mean(a: number[]): number {
   return a.reduce((x, y) => x + y, 0) / a.length;
 }
@@ -184,24 +175,24 @@ interface FoldPerOptionA {
   top: { n: number; pf: number; winRate: number };
   topTrades: GroupTrade[];
 }
-
 function computePooledPf(trades: GroupTrade[]): number {
-  const grossProfit = trades.filter((t) => t.pnl > 0).reduce((s, t) => s + t.pnl, 0);
-  const grossLoss = trades.filter((t) => t.pnl < 0).reduce((s, t) => s + Math.abs(t.pnl), 0);
-  return grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
+  const gp = trades.filter((t) => t.pnl > 0).reduce((s, t) => s + t.pnl, 0);
+  const gl = trades.filter((t) => t.pnl < 0).reduce((s, t) => s + Math.abs(t.pnl), 0);
+  return gl > 0 ? gp / gl : gp > 0 ? Infinity : 0;
 }
 
 async function main() {
-  const reportPath = path.resolve(process.cwd(), 'apps/bot/reports/RT-064-report.md');
-  const jsonPathA = path.resolve(process.cwd(), 'apps/bot/data/rt064PartA.json');
-  const jsonPath = path.resolve(process.cwd(), 'apps/bot/data/rt064PartB.json');
-  const scriptPath = path.resolve(process.cwd(), 'apps/bot/scripts/xgbTrainFold.py');
+  const reportPath = path.resolve(process.cwd(), 'apps/bot/reports/RT-065-report.md');
+  const jsonPathA = path.resolve(process.cwd(), 'apps/bot/data/rt065PartDQuintile.json');
+  const jsonPath = path.resolve(process.cwd(), 'apps/bot/data/rt065PartDRobustness.json');
+  const scriptPath = path.resolve(process.cwd(), 'apps/bot/scripts/research/xgbTrainFold.py');
   const dataDir = path.resolve(process.cwd(), 'apps/bot/data');
   const targetR = DEFAULT_FVG_STRATEGY_CONFIG.targetRMultiple;
 
-  console.log('Dang load du lieu va chay mirrored simulation (xgbFeatureAuditV3, tu-kiem-tra)...');
-  const allData = await loadAllSymbolData(dataDir);
-  const { closed } = runInstrumentedSimulation(allData, targetR);
+  console.log('Dang load du lieu 3 nam va chay mirrored simulation (tu-kiem-tra)...');
+  const allData = await loadAllSymbolData(dataDir, '3y');
+  const grid = checkGridsAlignExactly(allData);
+  const { closed } = runInstrumentedSimulation(allData, grid, targetR);
 
   let totalPnl = 0;
   let grossProfit = 0;
@@ -212,10 +203,10 @@ async function main() {
     else if (t.pnl < 0) grossLoss += Math.abs(t.pnl);
   }
   const totalPf = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0;
-  const matches = closed.length === 1217 && Math.abs(totalPnl - 2628.76) < 0.01 && Math.abs(totalPf - 1.551) < 0.001;
-  console.log(`n=${closed.length}  PnL=$${totalPnl.toFixed(2)}  PF=${totalPf.toFixed(3)}  (doi chieu RT-056/057: n=1217, PnL=$2628.76, PF=1.551)`);
+  console.log(`n=${closed.length}  PnL=$${totalPnl.toFixed(2)}  PF=${totalPf.toFixed(3)}  (doi chieu RT-065 Part C: n=3468, PnL=$6638.77, PF=1.429)`);
+  const matches = closed.length === 3468 && Math.abs(totalPnl - 6638.77) < 0.01 && Math.abs(totalPf - 1.429) < 0.001;
   if (!matches) {
-    console.error('CORRECTION_REQUIRED: mirrored simulation (RT-064) KHONG khop RT-056/057 da chot — DUNG lai.');
+    console.error('CORRECTION_REQUIRED: mirrored simulation KHONG khop RT-065 Part C — DUNG lai.');
     process.exitCode = 1;
     return;
   }
@@ -223,14 +214,14 @@ async function main() {
 
   const monthsPresent = Array.from(new Set(closed.map((t) => monthKey(t.features.entryTimestampUtc)))).sort();
   const K = monthsPresent.length;
-  const lastTestMonth = Math.min(K, 12);
+  console.log(`${K} thang -> ${K - 6} fold.\n`);
 
   const pythonExe = findPython();
-  const tmpDir = await mkdtemp(path.join(tmpdir(), 'rt064-robust-'));
+  const tmpDir = await mkdtemp(path.join(tmpdir(), 'rt065-robust-'));
   const allResults: OptionFoldResult[] = [];
 
   try {
-    for (let testMonthIdx = 7; testMonthIdx <= lastTestMonth; testMonthIdx++) {
+    for (let testMonthIdx = 7; testMonthIdx <= K; testMonthIdx++) {
       const foldIndex = testMonthIdx - 6;
       const trainMonthIndices = Array.from({ length: testMonthIdx - 1 }, (_, i) => i + 1);
       const trainMonths = trainMonthIndices.map((idx) => monthsPresent[idx - 1]);
@@ -241,9 +232,8 @@ async function main() {
       const purgedTrain = trainCandidates.filter((t) => t.closeTime < testStart);
       const testTrades = closed.filter((t) => monthKey(t.features.entryTimestampUtc) === testMonth);
 
-      console.log(`Fold ${foldIndex}: train (sau purge) n=${purgedTrain.length}, test n=${testTrades.length}`);
       if (purgedTrain.length === 0 || testTrades.length === 0) {
-        console.log('  -> BO QUA.');
+        console.log(`Fold ${foldIndex} (${testMonth}): BO QUA.`);
         continue;
       }
 
@@ -252,15 +242,12 @@ async function main() {
       const baselineTrainPath = path.join(tmpDir, `fold${testMonthIdx}_baseline_train.csv`);
       await writeFile(baselineTrainPath, tradesToCsv(purgedTrain), 'utf8');
 
-      // Baseline per option (unperturbed).
       const baselines = OPTIONS.map((opt) => {
-        const result = trainFold(pythonExe, scriptPath, baselineTrainPath, testPath, opt.featureColumns, 42, opt.subsampleColsample);
+        const result = trainFold(pythonExe, scriptPath, baselineTrainPath, testPath, opt.featureColumns);
         const scores = result.predictions.map((p) => p.predicted);
         return { opt, scores, top: q1Indices(scores) };
       });
-      console.log(`  Baseline Top sizes: ${baselines.map((b) => `${b.opt.label}=${b.top.size}`).join(', ')}`);
 
-      // 30 SHARED bootstrap row-selections, reused across all 4 options (fair perturbation).
       const iterationsByOption: Record<string, IterationResult[]> = Object.fromEntries(OPTIONS.map((o) => [o.label, []]));
       for (let r = 0; r < 30; r++) {
         const rng = mulberry32(r);
@@ -270,7 +257,7 @@ async function main() {
         for (const base of baselines) {
           const trainPath = path.join(tmpDir, `fold${testMonthIdx}_boot${r}_${base.opt.label.slice(0, 1)}.csv`);
           writeFileSync(trainPath, resampledCsv, 'utf8');
-          const result = trainFold(pythonExe, scriptPath, trainPath, testPath, base.opt.featureColumns, 42, base.opt.subsampleColsample);
+          const result = trainFold(pythonExe, scriptPath, trainPath, testPath, base.opt.featureColumns);
           const noisyScores = result.predictions.map((p) => p.predicted);
           const noisyTop = q1Indices(noisyScores);
 
@@ -287,11 +274,13 @@ async function main() {
         }
       }
 
+      const logParts: string[] = [];
       for (const base of baselines) {
         const iters = iterationsByOption[base.opt.label];
-        console.log(`  [${base.opt.label}] Overlap% trung binh=${mean(iters.map((it) => it.overlapPct)).toFixed(1)}%`);
+        logParts.push(`[${base.opt.label}] Overlap=${mean(iters.map((it) => it.overlapPct)).toFixed(1)}%`);
         allResults.push({ optionLabel: base.opt.label, foldIndex, testMonth, baselineTopSize: base.top.size, iterations: iters });
       }
+      console.log(`Fold ${foldIndex} (${testMonth}): ${logParts.join('  ')}`);
     }
   } finally {
     await rm(tmpDir, { recursive: true, force: true });
@@ -301,35 +290,34 @@ async function main() {
   await writeFile(jsonPath, JSON.stringify({ results: allResults }, null, 2), 'utf8');
   console.log(`\nDa ghi ket qua tho vao ${jsonPath}`);
 
-  // --- Report ---
-  let md = '\n---\n\n## Part B — Robustness (nhieu du lieu, giong RT-063 Phan A), 4 phuong an\n\n';
-  md += 'Phuong phap: 30 lan bootstrap-resample train set sau purge (co hoan lai, cung kich thuoc goc, mulberry32(iteration) iteration=0..29, dung lai moi fold) — CUNG mot bo 30 lan resample duoc dung lai cho ca 4 phuong an trong 1 fold (chi khac cot feature). So voi Top-20% baseline (khong nhieu, random_state=42) cua chinh phuong an do.\n\n';
+  // --- Report: robustness summary + final Part C summary table ---
+  let md = '\n---\n\n## Part B (robustness, nhieu du lieu) — 3 phuong an, tat ca fold\n\n';
+  md += 'Phuong phap: 30 lan bootstrap-resample train set sau purge moi fold (mulberry32(iteration), dung lai cho ca 3 phuong an trong 1 fold). So voi Top-20% baseline (khong nhieu) cua chinh phuong an do.\n\n';
   for (const opt of OPTIONS) {
     md += `### ${opt.label}\n\n`;
-    md += '| Fold | Top size (baseline) | Overlap% (mean) | Overlap% (min-max) | Spearman (mean) | Spearman (min-max) |\n';
-    md += '|---|---|---|---|---|---|\n';
+    md += '| Fold | Thang test | Top size | Overlap% (mean) | Spearman (mean) |\n';
+    md += '|---|---|---|---|---|\n';
     const rows = allResults.filter((r) => r.optionLabel === opt.label);
     for (const r of rows) {
       const overlaps = r.iterations.map((it) => it.overlapPct);
       const rhos = r.iterations.map((it) => it.spearman).filter((x) => Number.isFinite(x));
-      md += `| ${r.foldIndex} | ${r.baselineTopSize} | ${mean(overlaps).toFixed(1)}% | ${Math.min(...overlaps).toFixed(1)}%-${Math.max(...overlaps).toFixed(1)}% | ${rhos.length > 0 ? mean(rhos).toFixed(3) : 'n/a'} | ${rhos.length > 0 ? `${Math.min(...rhos).toFixed(3)}-${Math.max(...rhos).toFixed(3)}` : 'n/a'} |\n`;
+      md += `| ${r.foldIndex} | ${r.testMonth} | ${r.baselineTopSize} | ${mean(overlaps).toFixed(1)}% | ${rhos.length > 0 ? mean(rhos).toFixed(3) : 'n/a'} |\n`;
     }
     md += '\n';
   }
-  md += '_(So lieu tho, khong tu ket luan phuong an nao "on dinh hon".)_\n';
 
-  // --- Part C: final summary table ---
+  // --- Final summary (Part C of RT-064's naming convention) ---
   let partA: { results: FoldPerOptionA[] } | null = null;
   try {
     partA = JSON.parse(await readFile(jsonPathA, 'utf8'));
-  } catch (err) {
-    console.error(`CANH BAO: khong doc duoc ${jsonPathA} — hay chay rt064QuintileCompare.ts (Part A) TRUOC. Bo qua Part C.`);
+  } catch {
+    console.error(`CANH BAO: khong doc duoc ${jsonPathA} — hay chay rt065PartDQuintile.ts TRUOC. Bo qua bang tong hop cuoi.`);
   }
 
   if (partA) {
-    md += '\n---\n\n## Part C — Tong hop: 1 dong / phuong an\n\n';
-    md += 'Khong tu chon "phuong an thang" — trinh bay so, de Vinh Tam/AI reviewer quyet dinh dua tren danh doi (PF cao nhat chua chac on dinh nhat).\n\n';
-    md += '| Phuong an | PF Top trung binh (pooled qua 6 fold) | Overlap% trung binh | Spearman trung binh |\n';
+    md += '\n---\n\n## Tong hop cuoi: 1 dong / phuong an (30 fold, 3 nam)\n\n';
+    md += 'Khong tu chon "phuong an thang" — trinh bay so, de Vinh Tam/AI reviewer quyet dinh.\n\n';
+    md += '| Phuong an | PF Top trung binh (pooled qua tat ca fold) | Overlap% trung binh | Spearman trung binh |\n';
     md += '|---|---|---|---|\n';
     for (const opt of OPTIONS) {
       const aRows = partA.results.filter((r) => r.optionLabel === opt.label);
@@ -338,16 +326,16 @@ async function main() {
 
       const bRows = allResults.filter((r) => r.optionLabel === opt.label);
       const perFoldOverlapMeans = bRows.map((r) => mean(r.iterations.map((it) => it.overlapPct)));
-      const perFoldSpearmanMeans = bRows.map((r) => {
-        const rhos = r.iterations.map((it) => it.spearman).filter((x) => Number.isFinite(x));
-        return rhos.length > 0 ? mean(rhos) : NaN;
-      }).filter((x) => Number.isFinite(x));
+      const perFoldSpearmanMeans = bRows
+        .map((r) => {
+          const rhos = r.iterations.map((it) => it.spearman).filter((x) => Number.isFinite(x));
+          return rhos.length > 0 ? mean(rhos) : NaN;
+        })
+        .filter((x) => Number.isFinite(x));
 
       md += `| ${opt.label} | ${Number.isFinite(pooledPf) ? pooledPf.toFixed(2) : 'inf'} | ${mean(perFoldOverlapMeans).toFixed(1)}% | ${perFoldSpearmanMeans.length > 0 ? mean(perFoldSpearmanMeans).toFixed(3) : 'n/a'} |\n`;
     }
-    md += '\n_(PF Top pooled: gop tat ca lenh Top-20% cua phuong an do qua ca 6 fold roi tinh 1 PF tong the — khong phai trung binh cua 6 PF rieng le. Overlap%/Spearman: trung binh cua 6 gia tri trung binh-theo-fold.)_\n';
-  } else {
-    md += '\n_(Khong co du lieu Part A de dung Part C.)_\n';
+    md += `\n_(So sanh voi RT-064 (1 nam, 6 fold): ky vong CI hep hon, phan biet A/B/C ro hon nho ${allResults.filter((r) => r.optionLabel === OPTIONS[0].label).length} fold thay vi 6.)_\n`;
   }
 
   const reportsDir = path.dirname(reportPath);
@@ -358,7 +346,7 @@ async function main() {
   } catch {
     await writeFile(reportPath, md, 'utf8');
   }
-  console.log(`\nDa ghi/append bao cao (Part B) vao ${reportPath}`);
+  console.log(`\nDa ghi/append bao cao vao ${reportPath}`);
 }
 
 main().catch((err) => {

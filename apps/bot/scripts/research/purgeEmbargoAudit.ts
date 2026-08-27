@@ -1,25 +1,25 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { checkNoTradeZone } from '../src/noTradeZone/noTradeZone.js';
-import type { Candle } from '../src/noTradeZone/types.js';
-import { classifyTrendH1 } from '../src/trend/trendH1.js';
-import { detectFvg, DEFAULT_FVG_CONFIG } from '../src/entry/fvg.js';
-import { DEFAULT_FVG_STRATEGY_CONFIG } from '../src/entry/fvgStrategyConfig.js';
-import type { Direction } from '../src/entry/types.js';
-import { calculatePositionSize } from '../src/positionSizing/positionSizing.js';
-import { DEFAULT_MAX_MARGIN_PCT } from '../src/positionSizing/types.js';
-import { computeAtr } from '../src/noTradeZone/atr.js';
-import { findKeyZones } from '../src/zones/keyZones.js';
-import type { KeyZone } from '../src/zones/keyZones.js';
-import { DEFAULT_REGIME_CONFIG } from '../src/regime/types.js';
-import { resolveRiskPct } from '../src/positionSizing/riskConfig.js';
+import { checkNoTradeZone } from '../../src/noTradeZone/noTradeZone.js';
+import type { Candle } from '../../src/noTradeZone/types.js';
+import { classifyTrendH1 } from '../../src/trend/trendH1.js';
+import { detectFvg, DEFAULT_FVG_CONFIG } from '../../src/entry/fvg.js';
+import { DEFAULT_FVG_STRATEGY_CONFIG } from '../../src/entry/fvgStrategyConfig.js';
+import type { Direction } from '../../src/entry/types.js';
+import { calculatePositionSize } from '../../src/positionSizing/positionSizing.js';
+import { DEFAULT_MAX_MARGIN_PCT } from '../../src/positionSizing/types.js';
+import { computeAtr } from '../../src/noTradeZone/atr.js';
+import { findKeyZones } from '../../src/zones/keyZones.js';
+import type { KeyZone } from '../../src/zones/keyZones.js';
+import { DEFAULT_REGIME_CONFIG } from '../../src/regime/types.js';
+import { resolveRiskPct } from '../../src/positionSizing/riskConfig.js';
 import {
   admitPosition,
   closePosition,
   EMPTY_EXPOSURE_STATE,
   DEFAULT_EXPOSURE_TRACKER_CONFIG,
   type ExposureTrackerState,
-} from '../src/positionSizing/exposureTracker.js';
+} from '../../src/positionSizing/exposureTracker.js';
 
 // TICKET-RT-060 Part A + B: purge/embargo boundary-straddle count + class imbalance check.
 // Audit-only. Does NOT modify/delete any RT-058 or RT-059 file (xgbFeatureAudit.ts,
@@ -434,7 +434,7 @@ async function main() {
 
   md += '### Xac minh khong ro ri qua rollingWinRateSameSymbol20 / concurrentOpenPositionsCount (doc code, khong chay lai)\n\n';
   md +=
-    'Ca 2 feature phu thuoc trang thai lenh khac deu duoc doc trong file apps/bot/scripts/xgbFeatureAuditV2.ts (RT-059, khong sua o ticket nay). ' +
+    'Ca 2 feature phu thuoc trang thai lenh khac deu duoc doc trong file apps/bot/scripts/research/xgbFeatureAuditV2.ts (RT-059, khong sua o ticket nay; duong dan da cap nhat sau RT-066 Phan A archive — noi dung file khong doi). ' +
     'Trich dan bang so dong hien tai cua file do:\n\n';
   md += '- **Vong lap chinh la mot duong di THOI GIAN THUC don le, khong phai theo thu tu mang:** `for (let i = 2; i < nCandles; i++) { for (const st of states) { ... } }` (xgbFeatureAuditV2.ts dong 210-211). `i` la chi so nen M15 tang dan don dieu — moi trang thai (mo/dong lenh, pastOutcomes, exposureState) chi duoc cap nhat khi vong lap di toi dung chi so `i` tuong ung voi thoi diem that. Khong co buoc nao trong file duyet lai theo "thu tu lenh trong mang ket qua" — mang `rows`/`closed` chi la NOI GHI output, khong phai nguon doc.\n';
   md +=

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { loadAllSymbolData, runInstrumentedSimulation, type ClosedTradeInternal } from './xgbFeatureAuditV3.js';
-import { DEFAULT_FVG_STRATEGY_CONFIG } from '../src/entry/fvgStrategyConfig.js';
+import { DEFAULT_FVG_STRATEGY_CONFIG } from '../../src/entry/fvgStrategyConfig.js';
 
 // TICKET-RT-063 Part C: is Q1 just fvgGapSizePct in disguise?
 // Audit-only. Does not touch production. Does not modify RT-058..062.
@@ -135,7 +135,7 @@ async function main() {
   const reportPath = path.resolve(process.cwd(), 'apps/bot/reports/RT-063-report.md');
   const jsonPathA = path.resolve(process.cwd(), 'apps/bot/data/rt063PartA.json');
   const jsonPathB = path.resolve(process.cwd(), 'apps/bot/data/rt063PartB.json');
-  const scriptPath = path.resolve(process.cwd(), 'apps/bot/scripts/xgbTrainFold.py');
+  const scriptPath = path.resolve(process.cwd(), 'apps/bot/scripts/research/xgbTrainFold.py');
   const dataDir = path.resolve(process.cwd(), 'apps/bot/data');
   const targetR = DEFAULT_FVG_STRATEGY_CONFIG.targetRMultiple;
 
