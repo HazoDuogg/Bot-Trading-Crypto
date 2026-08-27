@@ -147,7 +147,7 @@ function findPython(): string {
 async function main() {
   const csvPath = path.resolve(process.cwd(), 'apps/bot/data/xgbAuditDataset.csv');
   const reportPath = path.resolve(process.cwd(), 'apps/bot/reports/RT-058-xgb-audit-report.md');
-  const scriptPath = path.resolve(process.cwd(), 'apps/bot/scripts/xgbTrainFold.py');
+  const scriptPath = path.resolve(process.cwd(), 'apps/bot/scripts/research/xgbTrainFold.py');
 
   console.log(`Dang doc ${csvPath}...`);
   const rows = parseCsv(await readFile(csvPath, 'utf8'));

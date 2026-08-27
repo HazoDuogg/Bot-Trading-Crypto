@@ -1,39 +1,57 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { checkNoTradeZone } from '../src/noTradeZone/noTradeZone.js';
-import type { Candle } from '../src/noTradeZone/types.js';
-import { classifyTrendH1 } from '../src/trend/trendH1.js';
-import { detectFvg, DEFAULT_FVG_CONFIG } from '../src/entry/fvg.js';
-import { DEFAULT_FVG_STRATEGY_CONFIG } from '../src/entry/fvgStrategyConfig.js';
-import type { Direction } from '../src/entry/types.js';
-import { calculatePositionSize } from '../src/positionSizing/positionSizing.js';
-import { DEFAULT_MAX_MARGIN_PCT } from '../src/positionSizing/types.js';
-import { computeAtr } from '../src/noTradeZone/atr.js';
-import { findKeyZones } from '../src/zones/keyZones.js';
-import type { KeyZone } from '../src/zones/keyZones.js';
-import { DEFAULT_REGIME_CONFIG } from '../src/regime/types.js';
-import { resolveRiskPct } from '../src/positionSizing/riskConfig.js';
+import { checkNoTradeZone } from '../../src/noTradeZone/noTradeZone.js';
+import type { Candle } from '../../src/noTradeZone/types.js';
+import { classifyTrendH1 } from '../../src/trend/trendH1.js';
+import { detectFvg, DEFAULT_FVG_CONFIG } from '../../src/entry/fvg.js';
+import { DEFAULT_FVG_STRATEGY_CONFIG } from '../../src/entry/fvgStrategyConfig.js';
+import type { Direction } from '../../src/entry/types.js';
+import { calculatePositionSize } from '../../src/positionSizing/positionSizing.js';
+import { DEFAULT_MAX_MARGIN_PCT } from '../../src/positionSizing/types.js';
+import { computeAtr } from '../../src/noTradeZone/atr.js';
+import { findKeyZones } from '../../src/zones/keyZones.js';
+import type { KeyZone } from '../../src/zones/keyZones.js';
+import { DEFAULT_REGIME_CONFIG } from '../../src/regime/types.js';
+import { resolveRiskPct } from '../../src/positionSizing/riskConfig.js';
 import {
   admitPosition,
   closePosition,
   EMPTY_EXPOSURE_STATE,
   DEFAULT_EXPOSURE_TRACKER_CONFIG,
   type ExposureTrackerState,
-} from '../src/positionSizing/exposureTracker.js';
+} from '../../src/positionSizing/exposureTracker.js';
 
-// TICKET-RT-061 Part A step 1: identical to xgbFeatureAuditV2.ts (RT-059, frozen — NOT modified,
-// NOT imported, to avoid both editing a frozen file and re-triggering its own compute), plus one
-// addition: each trade's `closeTime` (the M15 candle-close timestamp at which SL/TP actually
-// touched — same definition RT-058's original xgbFeatureAudit.ts and RT-060's purgeEmbargoAudit.ts
-// both used) is now captured and (a) exported on the internal ClosedTradeInternal record for
-// xgbWalkForwardAuditV3.ts to purge trains with, and (b) written as an extra CSV column. `pnl` is
-// also carried on ClosedTradeInternal (as V2 already did) — needed by RT-061 Part B's $-based
-// group metrics (winrate/PF/expectancy/drawdown/losing-streak), NOT written to the CSV since it
-// isn't one of the ticket's specified "14 feature + won + closeTime" columns.
+// TICKET-RT-059 Part A: feature set v2 (8 RT-058 features unchanged + 6 new). Deliberately does NOT
+// import from scripts/simulateOneYearNearLive.ts — that module runs its own main() as an import
+// side-effect (discovered in RT-058: every import re-ran the RT-051 sim and printed its full report),
+// wasting ~2x compute for no benefit here. Instead this script is fully self-contained: its own CSV
+// reader, its own structural mirror of runSimulation()'s loop, importing ONLY pure production
+// functions from src/ (detectFvg, classifyTrendH1, checkNoTradeZone, calculatePositionSize,
+// admitPosition/closePosition, resolveRiskPct, computeAtr, findKeyZones) — none of them modified.
+// Self-check at the end compares this run's own n/PnL/PF/maxDD against the RT-056/057 confirmed
+// constants directly (n=1217, PnL=$2628.76, PF=1.551, maxDD=1.24%) — no second simulation run needed,
+// since RT-058 already proved this exact structural mirror reproduces them.
 //
-// Self-check at the end reproduces the RT-056/057 confirmed constants directly, same as
-// xgbFeatureAudit.ts/xgbFeatureAuditV2.ts before it.
+// No-look-ahead for the 6 new features (verified by construction, not just by inspection):
+//   - trendAgeH1Candles: derived from an incremental EMA200-H1 tracker fed one H1 close at a time,
+//     in the SAME `while` cursor-advance loop that gates h1Window (checkpoint 6, RT-051) — it only
+//     ever sees H1 candles already inside h1Window at the time of the fill, never a future one.
+//   - atrPercentileH1: computeAtr(h1Window, 14) computed at FILL time from h1Window only, then the
+//     percentile is taken over that same array's own history — no candle past the fill's h1Window.
+//   - momentumM15Pct3Candles: captured at FVG DETECTION time (index i, same detection call already
+//     using m15All[i-2..i]) using m15All[i-4..i-1].close — strictly earlier than the detection candle
+//     itself, and detection always happens at or before the fill index.
+//   - keyZoneDistancePct: findKeyZones(h1Window, atrH1, ...) computed at FILL time from h1Window only.
+//   - rollingWinRateSameSymbol20: built from a per-symbol outcome history array that is appended to
+//     ONLY when that symbol's trade actually CLOSES (the `if (st.open) {...}` branch). Because a
+//     symbol's detection is hard-skipped entirely while it has an open position (checkpoint 1, RT-051
+//     — unchanged here), every trade in a symbol's history is guaranteed already closed before the
+//     next same-symbol trade can even be detected, let alone filled — so reading this array at fill
+//     time can never include the in-flight trade itself or anything not yet resolved.
+//   - concurrentOpenPositionsCount: read from exposureState.openPositions.length BEFORE admitting the
+//     current candidate (the pre-admission state), so it reflects positions open on OTHER symbols at
+//     the exact instant of this fill, never including itself.
 
 const FVG_KEY_ZONE_CONFIG = {
   swingPivotWidth: DEFAULT_REGIME_CONFIG.swingPivotWidth,
@@ -54,7 +72,7 @@ const FLOOR_PCT = DEFAULT_FVG_STRATEGY_CONFIG.minSlPctFloor;
 const MAX_WAIT_CANDLES = DEFAULT_FVG_STRATEGY_CONFIG.maxWaitCandles;
 const MIN_CANDLE2_BODY_RATIO = DEFAULT_FVG_CONFIG.minCandle2BodyRatio;
 
-export const FEE_PCT_SUM = 0.05 + 0.05 + 0.05 + 0.05;
+export const FEE_PCT_SUM = 0.05 + 0.05 + 0.05 + 0.05; // identical constant to every RT-027+ script
 export const BALANCE = 500;
 const LEVERAGE: Record<string, number> = {
   BTCUSDT: 20,
@@ -106,9 +124,10 @@ interface PendingFvg {
   momentumM15Pct3Candles: number;
 }
 
-export interface FeatureRecordV2 {
+interface FeatureRecordV2 {
   symbol: string;
   entryTimestampUtc: number;
+  // 8 original RT-058 features, unchanged:
   distanceFromEma200H1Pct: number;
   slPct: number;
   fvgGapSizePct: number;
@@ -117,6 +136,7 @@ export interface FeatureRecordV2 {
   atrH1Pct: number;
   hourOfDayUtc: number;
   dayOfWeekUtc: number;
+  // 6 new v2 features:
   trendAgeH1Candles: number;
   atrPercentileH1: number;
   momentumM15Pct3Candles: number;
@@ -139,7 +159,6 @@ interface OpenTrade {
 }
 
 interface OutputRow extends FeatureRecordV2 {
-  closeTime: number;
   won: boolean;
 }
 
@@ -160,14 +179,13 @@ interface SymbolState {
   open: OpenTrade | null;
   nextId: number;
   ema200: Ema200Tracker;
-  pastOutcomes: boolean[];
+  pastOutcomes: boolean[]; // appended on close, oldest first — used for rollingWinRateSameSymbol20
 }
 
 export interface ClosedTradeInternal {
   symbol: string;
   outcome: Outcome;
   pnl: number;
-  closeTime: number;
   features: FeatureRecordV2;
 }
 
@@ -195,6 +213,9 @@ export function runInstrumentedSimulation(allData: SymbolData[], targetRMultiple
       const m15CloseTime = m15All[i].openTime + M15_MS;
 
       while (st.h1Cursor < h1All.length && h1All[st.h1Cursor].openTime + H1_MS <= m15CloseTime) {
+        // Feed the newly-closed H1 candle (index st.h1Cursor, BEFORE increment) into the incremental
+        // EMA200 tracker — mirrors computeEma()'s seed-then-forward algorithm exactly, one candle at a
+        // time, so trend-change detection never needs to rescan h1Window from scratch.
         const closePrice = h1All[st.h1Cursor].close;
         const tr = st.ema200;
         if (!tr.seeded) {
@@ -239,8 +260,8 @@ export function runInstrumentedSimulation(allData: SymbolData[], targetRMultiple
           const cost = (o.notional * FEE_PCT_SUM) / 100;
           const exitPrice = outcome === 'TP' ? o.tpPrice : o.slPrice;
           const pnl = o.qty * directedDelta(o.direction, o.entryPrice, exitPrice) - cost;
-          closed.push({ symbol, outcome, pnl, closeTime: m15CloseTime, features: o.features });
-          rows.push({ ...o.features, closeTime: m15CloseTime, won: outcome === 'TP' });
+          closed.push({ symbol, outcome, pnl, features: o.features });
+          rows.push({ ...o.features, won: outcome === 'TP' });
           st.pastOutcomes.push(outcome === 'TP');
           exposureState = closePosition(exposureState, o.id);
           st.open = null;
@@ -362,6 +383,9 @@ export function runInstrumentedSimulation(allData: SymbolData[], targetRMultiple
         const gapHigh = fvg.gapHigh;
         const breaksKeyZone = st.cachedZones.some((z) => z.price >= gapLow && z.price <= gapHigh);
 
+        // momentumM15Pct3Candles: % change over the 3 M15 candles immediately preceding the gap
+        // candle (m15All[i]) — i.e. close[i-1] vs close[i-4]. Detection index i is always <= the
+        // eventual fill index, so this never reads a candle the fill couldn't have known about.
         const momentumM15Pct3Candles = i - 4 >= 0 && m15All[i - 4].close !== 0 ? ((m15All[i - 1].close - m15All[i - 4].close) / m15All[i - 4].close) * 100 : NaN;
 
         st.pending = {
@@ -409,7 +433,6 @@ function computeMaxDrawdownPct(closed: ClosedTradeInternal[], startCapital: numb
 const CSV_COLUMNS: (keyof OutputRow)[] = [
   'symbol',
   'entryTimestampUtc',
-  'closeTime',
   'distanceFromEma200H1Pct',
   'slPct',
   'fvgGapSizePct',
@@ -446,7 +469,7 @@ async function main() {
   const allData = await loadAllSymbolData(dataDir);
   console.log(`Da load: n=${allData[0].m15All.length} nen M15/coin, 5 coin.`);
 
-  console.log('\nDang chay mirrored simulation (feature set v2 + closeTime, khong qua simulateOneYearNearLive.ts, khong sua xgbFeatureAuditV2.ts)...');
+  console.log('\nDang chay mirrored simulation (feature set v2, khong qua simulateOneYearNearLive.ts)...');
   const { rows, closed } = runInstrumentedSimulation(allData, targetR);
 
   const s = summarizeForCheck(closed);
@@ -456,17 +479,20 @@ async function main() {
 
   const matches = s.n === 1217 && Math.abs(s.pnl - 2628.76) < 0.01 && Math.abs(s.profitFactor - 1.551) < 0.001 && Math.abs(maxDD - 1.24) < 0.01;
   if (!matches) {
-    console.error('\nCORRECTION_REQUIRED: mirrored v3 loop KHONG khop voi con so RT-056/057 da chot — DUNG lai, khong ghi dataset.');
+    console.error('\nCORRECTION_REQUIRED: mirrored v2 loop KHONG khop voi con so RT-056/057 da chot — DUNG lai, khong ghi dataset.');
     process.exitCode = 1;
     return;
   }
-  console.log('\n-> KHOP 100%: feature-set-v2+closeTime trade set == RT-056/057 Config B da chot.');
+  console.log('\n-> KHOP 100%: feature-set-v2 trade set == RT-056/057 Config B da chot.');
 
-  const outPath = path.resolve(process.cwd(), 'apps/bot/data/xgbAuditDatasetV3.csv');
+  const outPath = path.resolve(process.cwd(), 'apps/bot/data/xgbAuditDatasetV2.csv');
   await writeFile(outPath, toCsv(rows), 'utf8');
-  console.log(`\nDa ghi ${rows.length} dong (14 feature + closeTime + won) vao ${outPath}`);
+  console.log(`\nDa ghi ${rows.length} dong (14 feature + won) vao ${outPath}`);
 }
 
+// Guard against the exact RT-058-discovered import side-effect (simulateOneYearNearLive.ts runs its
+// own main() just from being imported) — monthlyRegimeAudit.ts (RT-059 Part B) imports
+// runInstrumentedSimulation/loadAllSymbolData from this file, so main() below must NOT fire on import.
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   main().catch((err) => {
     console.error(err);

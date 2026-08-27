@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { loadAllSymbolData, runInstrumentedSimulation, type ClosedTradeInternal } from './xgbFeatureAuditV3.js';
-import { DEFAULT_FVG_STRATEGY_CONFIG } from '../src/entry/fvgStrategyConfig.js';
+import { DEFAULT_FVG_STRATEGY_CONFIG } from '../../src/entry/fvgStrategyConfig.js';
 
 // TICKET-RT-061 Part A step 2 + Part B: purge-corrected walk-forward (v1 8-feature + v2 14-feature,
 // same fold definition as RT-058/059) plus economic quintile validation on the purged v2 predictions.
@@ -187,7 +187,7 @@ function splitQuintiles(predictions: GroupTrade[]): { top: GroupTrade[]; middle:
 
 async function main() {
   const reportPath = path.resolve(process.cwd(), 'apps/bot/reports/RT-061-report.md');
-  const scriptPath = path.resolve(process.cwd(), 'apps/bot/scripts/xgbTrainFold.py');
+  const scriptPath = path.resolve(process.cwd(), 'apps/bot/scripts/research/xgbTrainFold.py');
   const dataDir = path.resolve(process.cwd(), 'apps/bot/data');
   const targetR = DEFAULT_FVG_STRATEGY_CONFIG.targetRMultiple;
 

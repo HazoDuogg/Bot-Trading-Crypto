@@ -1,25 +1,25 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { checkNoTradeZone } from '../src/noTradeZone/noTradeZone.js';
-import type { Candle } from '../src/noTradeZone/types.js';
-import { createEmaTracker } from '../src/regime/ema.js';
-import { createAtrTracker } from '../src/noTradeZone/atr.js';
-import { detectFvg, DEFAULT_FVG_CONFIG } from '../src/entry/fvg.js';
-import { DEFAULT_FVG_STRATEGY_CONFIG } from '../src/entry/fvgStrategyConfig.js';
-import type { Direction } from '../src/entry/types.js';
-import { calculatePositionSize } from '../src/positionSizing/positionSizing.js';
-import { DEFAULT_MAX_MARGIN_PCT } from '../src/positionSizing/types.js';
-import { findKeyZones } from '../src/zones/keyZones.js';
-import type { KeyZone } from '../src/zones/keyZones.js';
-import { DEFAULT_REGIME_CONFIG } from '../src/regime/types.js';
-import { resolveRiskPct } from '../src/positionSizing/riskConfig.js';
+import { checkNoTradeZone } from '../../src/noTradeZone/noTradeZone.js';
+import type { Candle } from '../../src/noTradeZone/types.js';
+import { createEmaTracker } from '../../src/regime/ema.js';
+import { createAtrTracker } from '../../src/noTradeZone/atr.js';
+import { detectFvg, DEFAULT_FVG_CONFIG } from '../../src/entry/fvg.js';
+import { DEFAULT_FVG_STRATEGY_CONFIG } from '../../src/entry/fvgStrategyConfig.js';
+import type { Direction } from '../../src/entry/types.js';
+import { calculatePositionSize } from '../../src/positionSizing/positionSizing.js';
+import { DEFAULT_MAX_MARGIN_PCT } from '../../src/positionSizing/types.js';
+import { findKeyZones } from '../../src/zones/keyZones.js';
+import type { KeyZone } from '../../src/zones/keyZones.js';
+import { DEFAULT_REGIME_CONFIG } from '../../src/regime/types.js';
+import { resolveRiskPct } from '../../src/positionSizing/riskConfig.js';
 import {
   admitPosition,
   closePosition,
   EMPTY_EXPOSURE_STATE,
   DEFAULT_EXPOSURE_TRACKER_CONFIG,
   type ExposureTrackerState,
-} from '../src/positionSizing/exposureTracker.js';
+} from '../../src/positionSizing/exposureTracker.js';
 
 // TICKET-RT-065 Part C: re-confirms the ORIGINAL production strategy (FVG H1+M15 entry,
 // targetR=2.10, risk 1.5%/HYPE-breaksKeyZone-split via resolveRiskPct — identical to
