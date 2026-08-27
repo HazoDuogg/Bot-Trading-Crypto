@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Candle } from '../noTradeZone/types.js';
-import { SymbolSignalEngine, type SignalEvent, type VirtualCloseEvent } from './signalEngine.js';
+import { SymbolSignalEngine } from './signalEngine.js';
 
 const H1_MS = 60 * 60 * 1000;
 const M15_MS = 15 * 60 * 1000;
@@ -13,155 +13,101 @@ function m15(i: number, open: number, high: number, low: number, close: number):
   return { openTime: BASE_TIME + 1000 * H1_MS + i * M15_MS, open, high, low, close, volume: 100 };
 }
 
-// 200 H1 candles: 150 flat at 100, then a smooth 50-candle ramp to 110 — keeps every single
-// candle's own body/range tiny (no isShockEvent/isVolatilityExtreme false trip) while still
-// pushing the final close comfortably above the 200-candle SMA (since exactly period=200 candles
-// means computeEma's "seed" IS the only value — plain mean of all 200 closes, ~101.25 here vs a
-// final close of 110), reliably producing UPTREND from the real classifyTrendH1.
+// Same synthetic-history construction as RT-067's original tests: 150 flat H1 candles at 100, then
+// a smooth 50-candle ramp — keeps every candle's own body/range tiny (no shock/volatility false
+// trip) while reliably producing UPTREND from the real classifyTrendH1 (period=200 -> the single
+// EMA value is just the plain mean of all 200 closes, ~101.25 here vs a final close of 110).
+// 3 extra stable candles after the ramp (still UPTREND, close held near 110) so trendAgeH1Candles
+// has a chance to be > 0 by the time a signal is checked — the ramp's OWN last candle is where the
+// trend first becomes computable (EMA200 needs exactly 200 candles) AND changes from null, so age
+// is 0 there by construction; these extra candles let age reflect a trend that's been in place a
+// little while, closer to a realistic scenario.
 function seedUptrendH1(engine: SymbolSignalEngine): void {
   for (let i = 0; i < 150; i++) engine.onNewH1Candle(h1(i, 100));
-  for (let i = 150; i < 200; i++) {
-    const close = 100 + ((i - 150) / 49) * 10; // 100 -> 110
-    engine.onNewH1Candle(h1(i, close));
-  }
+  for (let i = 150; i < 200; i++) engine.onNewH1Candle(h1(i, 100 + ((i - 150) / 49) * 10));
+  for (let i = 200; i < 203; i++) engine.onNewH1Candle(h1(i, 110));
 }
-
-// Mirror image for DOWNTREND: ramp DOWN from 100 to 90.
 function seedDowntrendH1(engine: SymbolSignalEngine): void {
   for (let i = 0; i < 150; i++) engine.onNewH1Candle(h1(i, 100));
-  for (let i = 150; i < 200; i++) {
-    const close = 100 - ((i - 150) / 49) * 10; // 100 -> 90
-    engine.onNewH1Candle(h1(i, close));
-  }
+  for (let i = 150; i < 200; i++) engine.onNewH1Candle(h1(i, 100 - ((i - 150) / 49) * 10));
+  for (let i = 200; i < 203; i++) engine.onNewH1Candle(h1(i, 90));
 }
 
-function isSignal(e: unknown): e is SignalEvent {
-  return !!e && (e as SignalEvent).type === 'SIGNAL';
-}
-function isVirtualClose(e: unknown): e is VirtualCloseEvent {
-  return !!e && (e as VirtualCloseEvent).type === 'VIRTUAL_CLOSE';
-}
-
-describe('SymbolSignalEngine — bullish FVG in an uptrend', () => {
-  it('goes quiet -> pending -> SIGNAL -> VIRTUAL_CLOSE, calling the real production functions throughout', () => {
+describe('SymbolSignalEngine.checkForNewSignal — pure detection only (RT-068: no simulated fill/close)', () => {
+  it('detects a bullish FVG in an uptrend and attaches the 4 regime fields', () => {
     const engine = new SymbolSignalEngine('BTCUSDT');
     seedUptrendH1(engine);
 
-    // Candle1: wick low=99, high=101. Candle2: strong bullish body (open=100.2,close=104.2,
-    // range 99.9-104.5 -> body=4, range=4.6, ratio=0.87>=0.7). Candle3: low=101.5 > candle1.high(101)
-    // -> confirms an unfilled bullish gap [101, 101.5], invalidation = candle1.low = 99.
     const c1 = m15(0, 100, 101, 99, 100.5);
-    const c2 = m15(1, 100.2, 104.5, 99.9, 104.2);
-    const c3 = m15(2, 102, 104, 101.5, 103);
+    const c2 = m15(1, 100.2, 104.5, 99.9, 104.2); // strong bullish body, ratio 0.87 >= 0.7
+    const c3 = m15(2, 102, 104, 101.5, 103); // low=101.5 > candle1.high(101) -> bullish gap
 
-    expect(engine.onNewM15Candle(c1, c1.openTime + M15_MS)).toBeNull();
-    expect(engine.onNewM15Candle(c2, c2.openTime + M15_MS)).toBeNull();
-    const afterC3 = engine.onNewM15Candle(c3, c3.openTime + M15_MS);
-    expect(afterC3).toBeNull(); // FVG just formed -> pending, not yet a signal
-    expect(engine.getDebugState().pending).not.toBeNull();
-    expect(engine.getDebugState().pending?.direction).toBe('LONG');
+    expect(engine.checkForNewSignal(c1, true)).toBeNull();
+    expect(engine.checkForNewSignal(c2, true)).toBeNull();
+    const signal = engine.checkForNewSignal(c3, true);
 
-    // Candle4 touches the gap [101, 101.5] -> fills.
-    const c4 = m15(3, 102, 102.5, 101.2, 101.8);
-    const fillEvent = engine.onNewM15Candle(c4, c4.openTime + M15_MS);
-    expect(isSignal(fillEvent)).toBe(true);
-    if (isSignal(fillEvent)) {
-      expect(fillEvent.symbol).toBe('BTCUSDT');
-      expect(fillEvent.direction).toBe('LONG');
-      expect(fillEvent.entryPrice).toBe(101); // gapLow for a LONG fill
-      expect(fillEvent.slPrice).toBe(99); // candle1.low
-      expect(fillEvent.tpPrice).toBeCloseTo(101 + 2.1 * (101 - 99), 6); // TARGET_R=2.10, production config
-      expect(fillEvent.riskPct).toBe(0.015); // resolveRiskPct('BTCUSDT', ...) — the real production function
-    }
-    expect(engine.getDebugState().pending).toBeNull();
-    expect(engine.getDebugState().open).not.toBeNull();
-
-    // No new detection while "virtually open" — mirrors checkpoint 1 (one trade at a time/symbol).
-    const c5 = m15(4, 102, 103, 101.5, 102.5);
-    expect(engine.onNewM15Candle(c5, c5.openTime + M15_MS)).toBeNull();
-
-    // Price rallies to TP (101 + 2.1*2 = 105.2).
-    const c6 = m15(5, 103, 106, 102.5, 105.5);
-    const closeEvent = engine.onNewM15Candle(c6, c6.openTime + M15_MS);
-    expect(isVirtualClose(closeEvent)).toBe(true);
-    if (isVirtualClose(closeEvent)) {
-      expect(closeEvent.outcome).toBe('TP');
-      expect(closeEvent.exitPrice).toBeCloseTo(105.2, 6);
-    }
-    expect(engine.getDebugState().open).toBeNull();
+    expect(signal).not.toBeNull();
+    expect(signal?.type).toBe('FVG_DETECTED');
+    expect(signal?.direction).toBe('LONG');
+    expect(signal?.gapLow).toBe(101);
+    expect(signal?.gapHigh).toBe(101.5);
+    expect(signal?.invalidationPrice).toBe(99);
+    expect(signal?.regime.trend).toBe('UPTREND');
+    expect(signal?.regime.trendAgeH1Candles).toBeGreaterThan(0);
+    expect(Number.isFinite(signal?.regime.atrPercentileH1)).toBe(true);
+    expect(Number.isFinite(signal?.regime.distanceFromEma200H1Pct)).toBe(true);
+    expect(signal?.regime.distanceFromEma200H1Pct).toBeGreaterThan(0); // close(110) above EMA -> positive distance
   });
-});
 
-describe('SymbolSignalEngine — bearish FVG in a downtrend (mirror of the LONG case)', () => {
-  it('produces a SHORT signal with SL above entry and TP below', () => {
+  it('detects a bearish FVG in a downtrend (mirror case)', () => {
     const engine = new SymbolSignalEngine('ETHUSDT');
     seedDowntrendH1(engine);
 
-    // Candle1: low=99, high=101 (wick). Candle2: strong bearish body. Candle3: high=98.5 < candle1.low(99)
-    // -> bearish gap [98.5, 99], invalidation = candle1.high = 101.
     const c1 = m15(0, 100, 101, 99, 99.5);
-    const c2 = m15(1, 99.8, 100.1, 95.5, 95.8); // body=4, range=4.6 -> ratio=0.87
-    const c3 = m15(2, 98, 98.5, 96, 97);
+    const c2 = m15(1, 99.8, 100.1, 95.5, 95.8);
+    const c3 = m15(2, 98, 98.5, 96, 97); // high=98.5 < candle1.low(99) -> bearish gap
 
-    engine.onNewM15Candle(c1, c1.openTime + M15_MS);
-    engine.onNewM15Candle(c2, c2.openTime + M15_MS);
-    engine.onNewM15Candle(c3, c3.openTime + M15_MS);
-    expect(engine.getDebugState().pending?.direction).toBe('SHORT');
+    engine.checkForNewSignal(c1, true);
+    engine.checkForNewSignal(c2, true);
+    const signal = engine.checkForNewSignal(c3, true);
 
-    const c4 = m15(3, 98.7, 98.9, 98.6, 98.7); // touches [98.5, 99]
-    const fillEvent = engine.onNewM15Candle(c4, c4.openTime + M15_MS);
-    expect(isSignal(fillEvent)).toBe(true);
-    if (isSignal(fillEvent)) {
-      expect(fillEvent.direction).toBe('SHORT');
-      expect(fillEvent.entryPrice).toBe(99); // gapHigh for a SHORT fill
-      expect(fillEvent.slPrice).toBe(101); // candle1.high
-      expect(fillEvent.tpPrice).toBeLessThan(fillEvent.entryPrice);
-    }
+    expect(signal?.direction).toBe('SHORT');
+    expect(signal?.gapLow).toBe(98.5);
+    expect(signal?.gapHigh).toBe(99);
+    expect(signal?.invalidationPrice).toBe(101);
+    expect(signal?.regime.trend).toBe('DOWNTREND');
+    expect(signal?.regime.distanceFromEma200H1Pct).toBeLessThan(0);
   });
-});
 
-describe('SymbolSignalEngine — checkNoTradeZone genuinely gates detection (not bypassed)', () => {
-  it('does not open a pending FVG the candle a shock event (>7.5% single-candle body move) just happened', () => {
+  it('does NOT detect when freeToDetect=false (execution layer says busy) — mirrors checkpoint 1', () => {
     const engine = new SymbolSignalEngine('BTCUSDT');
-    // Same uptrend seed, but replace the LAST H1 candle with a violent single-candle move
-    // (100 -> 130, 30% body) — should trip isShockEvent and block detection via checkNoTradeZone,
-    // proving the real production check function is actually being consulted.
-    for (let i = 0; i < 150; i++) engine.onNewH1Candle(h1(i, 100));
-    for (let i = 150; i < 199; i++) {
-      const close = 100 + ((i - 150) / 48) * 10;
-      engine.onNewH1Candle(h1(i, close));
-    }
-    engine.onNewH1Candle(h1(199, 130, 100, 131, 99)); // shock candle, still closes above EMA (still "uptrend")
-
-    const c1 = m15(0, 100, 101, 99, 100.5);
-    const c2 = m15(1, 100.2, 104.5, 99.9, 104.2);
-    const c3 = m15(2, 102, 104, 101.5, 103);
-    engine.onNewM15Candle(c1, c1.openTime + M15_MS);
-    engine.onNewM15Candle(c2, c2.openTime + M15_MS);
-    engine.onNewM15Candle(c3, c3.openTime + M15_MS);
-
-    // ntz.blocked should suppress fresh detection entirely (checked BEFORE the trend/FVG branch).
-    expect(engine.getDebugState().pending).toBeNull();
-  });
-});
-
-describe('SymbolSignalEngine — resolveRiskPct is genuinely symbol/breaksKeyZone-aware', () => {
-  it('uses HYPEUSDT baseline risk (1.0%) via the real resolveRiskPct, not a hard-coded value', () => {
-    const engine = new SymbolSignalEngine('HYPEUSDT');
     seedUptrendH1(engine);
     const c1 = m15(0, 100, 101, 99, 100.5);
     const c2 = m15(1, 100.2, 104.5, 99.9, 104.2);
     const c3 = m15(2, 102, 104, 101.5, 103);
-    engine.onNewM15Candle(c1, c1.openTime + M15_MS);
-    engine.onNewM15Candle(c2, c2.openTime + M15_MS);
-    engine.onNewM15Candle(c3, c3.openTime + M15_MS);
-    const c4 = m15(3, 102, 102.5, 101.2, 101.8);
-    const fillEvent = engine.onNewM15Candle(c4, c4.openTime + M15_MS);
-    expect(isSignal(fillEvent)).toBe(true);
-    if (isSignal(fillEvent)) {
-      // No key zone in this synthetic history (no swing points formed) -> breaksKeyZone=false -> 1.0%.
-      expect(fillEvent.breaksKeyZone).toBe(false);
-      expect(fillEvent.riskPct).toBe(0.01);
-    }
+    engine.checkForNewSignal(c1, false);
+    engine.checkForNewSignal(c2, false);
+    expect(engine.checkForNewSignal(c3, false)).toBeNull(); // would have been a signal if free
+  });
+
+  it('checkNoTradeZone genuinely gates detection — a shock event blocks it', () => {
+    const engine = new SymbolSignalEngine('BTCUSDT');
+    for (let i = 0; i < 150; i++) engine.onNewH1Candle(h1(i, 100));
+    for (let i = 150; i < 199; i++) engine.onNewH1Candle(h1(i, 100 + ((i - 150) / 48) * 10));
+    engine.onNewH1Candle(h1(199, 130, 100, 131, 99)); // 30% single-candle body -> isShockEvent trips
+
+    const c1 = m15(0, 100, 101, 99, 100.5);
+    const c2 = m15(1, 100.2, 104.5, 99.9, 104.2);
+    const c3 = m15(2, 102, 104, 101.5, 103);
+    engine.checkForNewSignal(c1, true);
+    engine.checkForNewSignal(c2, true);
+    expect(engine.checkForNewSignal(c3, true)).toBeNull();
+  });
+
+  it('does not throw before any H1 history has arrived, and reports no signal', () => {
+    const engine = new SymbolSignalEngine('BTCUSDT');
+    const c1 = m15(0, 100, 101, 99, 100.5);
+    expect(engine.checkForNewSignal(c1, true)).toBeNull();
+    expect(engine.getDebugState().h1Count).toBe(0);
   });
 });

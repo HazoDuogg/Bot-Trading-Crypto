@@ -51,6 +51,18 @@ export interface RetryOptions {
   maxDelayMs?: number;
   onRetry?: (attempt: number, err: unknown, delayMs: number) => void;
 }
+// A 4xx status means the REQUEST ITSELF was rejected (bad params, unknown order, auth failure) —
+// retrying it will never succeed, unlike a network blip or Binance's own rate-limit/ban codes.
+// 429 (rate limited) and 418 (IP auto-banned for excessive requests) are Binance's explicit
+// "back off and try again" signals, so those two 4xx codes ARE retried; every other 4xx is not.
+// Anything that isn't a BinanceHttpError at all (a plain network failure) is always retried.
+function isRetryable(err: unknown): boolean {
+  if (!(err instanceof BinanceHttpError)) return true;
+  if (err.status === 429 || err.status === 418) return true;
+  if (err.status >= 500) return true;
+  return false;
+}
+
 export async function retryWithBackoff<T>(fn: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
   const maxRetries = options.maxRetries ?? 5;
   const baseDelayMs = options.baseDelayMs ?? 1000;
@@ -62,6 +74,7 @@ export async function retryWithBackoff<T>(fn: () => Promise<T>, options: RetryOp
       return await fn();
     } catch (err) {
       attempt++;
+      if (!isRetryable(err)) throw err;
       if (attempt > maxRetries) throw err;
       let delayMs = Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1));
       const retryAfterSec = err instanceof BinanceHttpError ? err.retryAfterSec : undefined;

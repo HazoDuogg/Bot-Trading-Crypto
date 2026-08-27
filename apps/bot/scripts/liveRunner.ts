@@ -1,49 +1,55 @@
 import { config as loadEnv } from 'dotenv';
 loadEnv();
 
+import path from 'node:path';
 import { BinanceRestPollingFeed, msUntilNextPoll } from '../src/live/binanceRestPollingFeed.js';
-import { SymbolSignalEngine, type SignalEngineEvent } from '../src/live/signalEngine.js';
-import { loadTelegramConfigFromEnv, sendTelegramMessage, formatSignalMessage, formatStartupMessage, formatErrorMessage, type TelegramConfig } from '../src/live/telegram.js';
+import { BinanceOrderClient } from '../src/live/binanceOrderClient.js';
+import { SymbolSignalEngine } from '../src/live/signalEngine.js';
+import { SymbolOrderLifecycle, type LifecycleEvent } from '../src/live/orderLifecycle.js';
+import { fromEngineStartup, fromPollError, fromLifecycleEvent, type LiveEventRecord } from '../src/live/eventRecord.js';
+import { EventLogger } from '../src/live/eventLogger.js';
+import { loadTelegramConfigFromEnv, sendTelegramMessage, formatEventMessage, type TelegramConfig } from '../src/live/telegram.js';
 
-// TICKET-RT-067 Part C: main live loop — monitoring only, places NO orders (Ticket 2's job).
-// For each new closed candle from BinanceRestPollingFeed, runs it through SymbolSignalEngine
-// (which calls the exact same production pure functions every backtest in this repo has used) and
-// sends a Telegram notification when a real-time signal is detected.
+// TICKET-RT-068: real order-placement live loop (testnet only, per LIVE_EXCHANGE_BASE_URL /
+// BinanceOrderClient's own testnet safety guard). For each symbol: SymbolSignalEngine does PURE
+// detection, SymbolOrderLifecycle does REAL execution (place/track/cancel/close) — kept as two
+// separate objects per the ticket's explicit "tach bach" instruction.
 //
-// Scheduling design: ONE recurring tick per M15 close boundary (+3s), not two independent timers
-// for H1 and M15. At each tick this polls H1 first, then M15. On 3 of every 4 ticks the H1 poll is
-// a cheap no-op (no new H1 candle yet); on the 4th tick (which coincides EXACTLY with an H1
-// boundary — H1 closes are always also M15 closes), the fresh H1 candle is picked up within the
-// same +3s window as its own close AND is guaranteed visible to that tick's M15 processing. Two
-// independent timers could race — an M15 tick evaluating trend direction against a stale H1
-// buffer if the H1 timer's network round-trip happened to land after the M15 one — this design
-// structurally rules that out with a single, simpler schedule.
+// STARTUP RECONCILIATION (a gap not explicitly detailed in the ticket, but load-bearing for
+// restart-safety with REAL orders — flagged here rather than silently handled): a crash/restart
+// resets this process's in-memory lifecycle state to IDLE for every symbol, but real orders/
+// positions on the exchange from before the crash do NOT reset. Blindly starting IDLE risks
+// placing a DUPLICATE/conflicting order for a symbol that already has one outstanding. Before
+// entering the live loop, this script queries REAL open orders + REAL open position for every
+// managed symbol; if either is non-empty, that symbol is marked BLOCKED (detection permanently
+// skipped) for the rest of this process's lifetime, and a loud Telegram+log alert is sent — NOT
+// auto-reconciled (deliberately: reconstructing a full state machine from partial exchange state
+// is a genuinely hard problem deserving its own explicit design, out of this ticket's scope).
+// Confirmed during RT-068's own testing: the shared testnet account already had a pre-existing
+// open BTCUSDT position (not created by this code) — this mechanism correctly blocks BTCUSDT.
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'XRPUSDT'];
-const CATCH_UP_LOOKBACK_CANDLES = 300; // see binanceRestPollingFeed.ts's DEFAULT_LOOKBACK_CANDLES for why 300
+const CATCH_UP_LOOKBACK_CANDLES = 300;
 
 interface SymbolRuntimeState {
   symbol: string;
   engine: SymbolSignalEngine;
+  lifecycle: SymbolOrderLifecycle;
   lastH1OpenTime: number | null;
   lastM15OpenTime: number | null;
+  blocked: boolean;
 }
 
 function logLine(msg: string): void {
   console.log(`[${new Date().toISOString()}] ${msg}`);
 }
 
-async function handleEvent(telegramConfig: TelegramConfig | null, symbol: string, event: SignalEngineEvent, notify: boolean): Promise<void> {
-  if (event.type === 'SIGNAL') {
-    logLine(
-      `TIN HIEU ${notify ? '' : '[catch-up, khong gui Telegram] '}: ${symbol} ${event.direction} entry=${event.entryPrice} sl=${event.slPrice} tp=${event.tpPrice} risk=${(event.riskPct * 100).toFixed(2)}% breaksKeyZone=${event.breaksKeyZone}`,
-    );
-    if (notify && telegramConfig) {
-      const results = await sendTelegramMessage(telegramConfig, formatSignalMessage(event));
-      for (const r of results) if (!r.ok) console.error(`  Gui Telegram toi chat ${r.chatId} that bai: ${r.error}`);
-    }
-  } else {
-    logLine(`Virtual close ${notify ? '' : '[catch-up] '}: ${symbol} ${event.outcome} entry=${event.entryPrice} exit=${event.exitPrice}`);
+async function emit(telegramConfig: TelegramConfig | null, logger: EventLogger, record: LiveEventRecord, notifyTelegram: boolean): Promise<void> {
+  logLine(`${record.eventKind} ${record.symbol}${record.note ? ` — ${record.note}` : ''}`);
+  await logger.append(record).catch((err) => console.error('  Ghi JSONL log that bai:', err));
+  if (notifyTelegram && telegramConfig) {
+    const results = await sendTelegramMessage(telegramConfig, formatEventMessage(record));
+    for (const r of results) if (!r.ok) console.error(`  Gui Telegram toi chat ${r.chatId} that bai: ${r.error}`);
   }
 }
 
@@ -52,22 +58,56 @@ async function main() {
   if (!baseUrl) {
     throw new Error('CORRECTION_REQUIRED: can bien moi truong LIVE_EXCHANGE_BASE_URL hoac BINANCE_TESTNET_URL trong .env — khong co gia tri mac dinh de tranh vo tinh tro toi live API.');
   }
+  const apiKey = process.env.BINANCE_TESTNET_KEY_ENC;
+  const apiSecret = process.env.BINANCE_TESTNET_SECRET_ENC;
+  if (!apiKey || !apiSecret) {
+    throw new Error('CORRECTION_REQUIRED: can BINANCE_TESTNET_KEY_ENC va BINANCE_TESTNET_SECRET_ENC trong .env de dat lenh (Part A/B).');
+  }
 
   const telegramConfig = loadTelegramConfigFromEnv();
   if (!telegramConfig) {
     console.warn('CANH BAO: TELEGRAM_BOT_TOKEN_ENC / TELEGRAM_CHAT_ID chua duoc cau hinh trong .env — engine van chay nhung se KHONG gui duoc thong bao Telegram.');
   }
+  const logger = new EventLogger(path.resolve(process.cwd(), 'apps/bot/logs'));
 
-  logLine(`Live Engine v1 (RT-067) khoi dong. Base URL: ${baseUrl}. Symbols: ${SYMBOLS.join(', ')}. Che do: CHI GIAM SAT, chua dat lenh.`);
+  logLine(`Live Engine v2 (RT-068) khoi dong. Base URL: ${baseUrl}. Symbols: ${SYMBOLS.join(', ')}. Che do: DAT LENH THAT (testnet).`);
 
   const feed = new BinanceRestPollingFeed(baseUrl, {
     onRetry: (attempt, err, delayMs) => console.warn(`  Retry #${attempt} sau ${delayMs}ms: ${err instanceof Error ? err.message : String(err)}`),
   });
+  const orderClient = new BinanceOrderClient(baseUrl, apiKey, apiSecret);
 
-  const states: SymbolRuntimeState[] = SYMBOLS.map((symbol) => ({ symbol, engine: new SymbolSignalEngine(symbol), lastH1OpenTime: null, lastM15OpenTime: null }));
+  const states: SymbolRuntimeState[] = SYMBOLS.map((symbol) => ({
+    symbol,
+    engine: new SymbolSignalEngine(symbol),
+    lifecycle: new SymbolOrderLifecycle(symbol, orderClient),
+    lastH1OpenTime: null,
+    lastM15OpenTime: null,
+    blocked: false,
+  }));
 
-  // --- Part B point 6: catch-up (also covers first-ever startup, where "catch-up" = full seed) ---
-  logLine('Dang bat kip (catch-up) tu lich su gan day...');
+  // --- Reconciliation: check REAL exchange state before trusting anything ---
+  logLine('Dang doi chieu (reconcile) trang thai that tren san giao dich...');
+  for (const state of states) {
+    try {
+      const [positionQty, openOrders] = await Promise.all([orderClient.getOpenPositionQty(state.symbol), orderClient.getOpenOrders(state.symbol)]);
+      if (positionQty !== 0 || openOrders.length > 0) {
+        state.blocked = true;
+        const msg = `${state.symbol} da co vi the/lenh THAT tren san (positionQty=${positionQty}, openOrders=${openOrders.length}) TRUOC KHI engine nay khoi dong — BLOCK phat hien tin hieu moi cho symbol nay cho toi khi restart voi trang thai sach.`;
+        console.warn(`  ${msg}`);
+        await emit(telegramConfig, logger, { timestampUtc: new Date().toISOString(), symbol: state.symbol, strategy: 'FVG H1+M15', eventKind: 'LIFECYCLE_ERROR', note: msg, raw: { positionQty, openOrders } }, true);
+      }
+    } catch (err) {
+      console.error(`  ${state.symbol}: LOI khi doi chieu trang thai (coi nhu BLOCKED de an toan):`, err);
+      state.blocked = true;
+    }
+  }
+  logLine('Doi chieu xong.\n');
+
+  // --- Catch-up: seed detection state from recent history. Never places real orders for
+  // catch-up-derived signals (an entry price from before this process even started is stale/
+  // untradeable) — only logs them as informational. ---
+  logLine('Dang bat kip (catch-up) tu lich su gan day (chi cap nhat trang thai, KHONG dat lenh)...');
   for (const state of states) {
     try {
       const h1Candles = await feed.getClosedCandlesSince(state.symbol, '1h', null, CATCH_UP_LOOKBACK_CANDLES);
@@ -75,25 +115,22 @@ async function main() {
       if (h1Candles.length > 0) state.lastH1OpenTime = h1Candles[h1Candles.length - 1].openTime;
 
       const m15Candles = await feed.getClosedCandlesSince(state.symbol, '15m', null, CATCH_UP_LOOKBACK_CANDLES);
-      const nowMs = await feed.getServerTimeMs();
       for (const c of m15Candles) {
-        const event = state.engine.onNewM15Candle(c, nowMs);
-        if (event) await handleEvent(telegramConfig, state.symbol, event, false);
+        const signal = state.engine.checkForNewSignal(c, true);
+        if (signal) logLine(`  [catch-up, KHONG dat lenh] ${state.symbol}: tin hieu ${signal.direction} tai ${signal.detectedAtOpenTime} (da qua, bo qua)`);
       }
       if (m15Candles.length > 0) state.lastM15OpenTime = m15Candles[m15Candles.length - 1].openTime;
-
-      logLine(`  ${state.symbol}: H1=${h1Candles.length} nen, M15=${m15Candles.length} nen. Trang thai sau catch-up: ${JSON.stringify(state.engine.getDebugState())}`);
+      logLine(`  ${state.symbol}: H1=${h1Candles.length} nen, M15=${m15Candles.length} nen. ${JSON.stringify(state.engine.getDebugState())}`);
     } catch (err) {
       console.error(`  ${state.symbol}: LOI khi catch-up (se thu lai o vong poll dau tien):`, err);
     }
   }
   logLine('Catch-up xong.\n');
 
-  if (telegramConfig) {
-    await sendTelegramMessage(telegramConfig, formatStartupMessage({ symbols: SYMBOLS, baseUrl, isRestart: process.env.LIVE_ENGINE_RESTART === '1' }));
-  }
+  await emit(telegramConfig, logger, fromEngineStartup({ symbols: SYMBOLS, baseUrl, isRestart: process.env.LIVE_ENGINE_RESTART === '1' }), true);
 
-  // --- Live polling loop ---
+  // --- Live polling loop (single M15-cadence schedule — see RT-067's file comment for why H1 is
+  // polled at the same cadence instead of two independent timers) ---
   let consecutiveFailureStreak = 0;
 
   async function pollCycle(): Promise<void> {
@@ -104,23 +141,34 @@ async function main() {
         if (h1Candles.length > 0) state.lastH1OpenTime = h1Candles[h1Candles.length - 1].openTime;
 
         const m15Candles = await feed.getClosedCandlesSince(state.symbol, '15m', state.lastM15OpenTime);
-        if (m15Candles.length > 0) {
-          const nowMs = await feed.getServerTimeMs();
-          for (const c of m15Candles) {
-            const event = state.engine.onNewM15Candle(c, nowMs);
-            if (event) await handleEvent(telegramConfig, state.symbol, event, true);
+        for (const c of m15Candles) {
+          // Capture "free" BEFORE processing this candle's order-lifecycle tick — a position that
+          // closes ON this candle does not get evaluated for a fresh signal until the NEXT candle,
+          // mirroring every backtest script's `continue`-after-close convention.
+          const wasFree = !state.blocked && state.lifecycle.isFree();
+
+          const lifecycleEvent = await state.lifecycle.onNewM15Candle();
+          if (lifecycleEvent) await emit(telegramConfig, logger, fromLifecycleEvent(lifecycleEvent), true);
+
+          if (wasFree) {
+            const signal = state.engine.checkForNewSignal(c, true);
+            if (signal) {
+              const placeEvent: LifecycleEvent = await state.lifecycle.onSignalDetected(signal);
+              await emit(telegramConfig, logger, fromLifecycleEvent(placeEvent), true);
+            }
+          } else {
+            state.engine.checkForNewSignal(c, false); // still buffers the candle, never detects
           }
-          state.lastM15OpenTime = m15Candles[m15Candles.length - 1].openTime;
         }
+        if (m15Candles.length > 0) state.lastM15OpenTime = m15Candles[m15Candles.length - 1].openTime;
 
         consecutiveFailureStreak = 0;
       } catch (err) {
         consecutiveFailureStreak++;
+        const message = err instanceof Error ? err.message : String(err);
         console.error(`[${new Date().toISOString()}] LOI khi poll ${state.symbol} (lan lien tiep #${consecutiveFailureStreak}):`, err);
-        // Part D: notify on "mat ket noi API keo dai" — alert on the 3rd consecutive failure across
-        // any symbol, then again every 20 to avoid spamming during an extended outage.
         if (telegramConfig && (consecutiveFailureStreak === 3 || consecutiveFailureStreak % 20 === 0)) {
-          await sendTelegramMessage(telegramConfig, formatErrorMessage({ context: `Poll ${state.symbol}`, message: err instanceof Error ? err.message : String(err), consecutiveFailures: consecutiveFailureStreak })).catch(() => {});
+          await emit(telegramConfig, logger, fromPollError({ symbol: state.symbol, message, consecutiveFailures: consecutiveFailureStreak }), true).catch(() => {});
         }
       }
     }
@@ -142,15 +190,12 @@ async function main() {
   scheduleNextTick();
 
   // Genuinely unexpected errors: log + best-effort Telegram alert + exit, so an external process
-  // manager (pm2/systemd/docker restart policy — Vinh Tam's VPS setup) restarts cleanly. The
-  // catch-up logic above makes a restart safe: ongoing pending/open state reconstructs correctly.
-  // This is DELIBERATELY different from the per-poll try/catch above, which handles EXPECTED
-  // transient failures (network blips, rate limits) without ever needing a restart at all — per
-  // the ticket's "khong thoat han process vi 1 loi" (that loi = one transient poll error).
+  // manager restarts cleanly — the reconciliation logic above makes a restart safe (RT-067's
+  // original reasoning; RT-068 hardens it for real orders specifically).
   const fatal = async (context: string, err: unknown) => {
     console.error(`${context} — engine se thoat de process manager restart:`, err);
     if (telegramConfig) {
-      await sendTelegramMessage(telegramConfig, formatErrorMessage({ context, message: err instanceof Error ? err.message : String(err) })).catch(() => {});
+      await emit(telegramConfig, logger, { timestampUtc: new Date().toISOString(), symbol: 'ALL', strategy: 'FVG H1+M15', eventKind: 'LIFECYCLE_ERROR', note: `${context}: ${err instanceof Error ? err.message : String(err)}`, raw: { context, err: String(err) } }, true).catch(() => {});
     }
     process.exit(1);
   };

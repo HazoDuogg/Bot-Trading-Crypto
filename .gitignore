@@ -83,6 +83,10 @@ scratch/
 tmp/
 temp/
 
+# TICKET-RT-068: operational JSONL event logs written by apps/bot/scripts/liveRunner.ts
+# (apps/bot/logs/live-events-YYYY-MM-DD.jsonl) — accumulates daily on the VPS, not source-controlled.
+apps/bot/logs/
+
 .agents
 .claude
 skills-lock.json

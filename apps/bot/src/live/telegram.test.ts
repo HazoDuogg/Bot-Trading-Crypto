@@ -1,14 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { loadTelegramConfigFromEnv, formatSignalMessage, formatStartupMessage, formatErrorMessage } from './telegram.js';
+import { loadTelegramConfigFromEnv, formatEventMessage } from './telegram.js';
+import type { LiveEventRecord } from './eventRecord.js';
 
 // Note: sendTelegramMessage() itself (the real network call) is deliberately NOT covered by an
-// automated test here — unlike this repo's other real-external-call integration tests (Python/
-// XGBoost in softVeto.test.ts, real Binance Testnet in binanceRestPollingFeed.test.ts), a
-// permanent test that fires a real Telegram message on every `npm test` run would spam the
-// configured chat(s) every single CI/local run, which is a real user-facing side effect (a phone
-// notification), unlike a silent HTTP call to a market-data endpoint. Delivery was instead
-// verified manually once during RT-067's own testing (see the ticket report) — that one send is
-// not repeated automatically.
+// automated test — a permanent test that fires a real Telegram message on every `npm test` run
+// would spam the configured chat(s) every single run. See RT-067's report for the manual
+// verification note (the user declined a live test-send during RT-067; not repeated here either).
 
 describe('loadTelegramConfigFromEnv', () => {
   it('returns null when the bot token is missing', () => {
@@ -31,44 +28,69 @@ describe('loadTelegramConfigFromEnv', () => {
   });
 });
 
-describe('formatSignalMessage', () => {
-  it('includes coin, direction, entry/SL/TP, and risk% — everything the ticket asks for', () => {
-    const msg = formatSignalMessage({
-      symbol: 'BTCUSDT',
-      direction: 'LONG',
-      entryPrice: 101,
-      slPrice: 99,
-      tpPrice: 105.2,
-      riskPct: 0.015,
-      breaksKeyZone: false,
-    });
+function baseRecord(overrides: Partial<LiveEventRecord>): LiveEventRecord {
+  return { timestampUtc: '2026-01-01T00:00:00.000Z', symbol: 'BTCUSDT', strategy: 'FVG H1+M15', eventKind: 'ENTRY_PLACED', raw: {}, ...overrides };
+}
+
+describe('formatEventMessage — covers every field the ticket lists (Part D)', () => {
+  it('includes time, asset, strategy always', () => {
+    const msg = formatEventMessage(baseRecord({}));
+    expect(msg).toContain('2026-01-01T00:00:00.000Z');
     expect(msg).toContain('BTCUSDT');
+    expect(msg).toContain('FVG H1+M15');
+  });
+
+  it('includes regime (Part C: trend, age, ATR percentile, distance from EMA200)', () => {
+    const msg = formatEventMessage(baseRecord({ regime: { trend: 'UPTREND', trendAgeH1Candles: 12, atrPercentileH1: 63.5, distanceFromEma200H1Pct: 1.234 } }));
+    expect(msg).toContain('UPTREND');
+    expect(msg).toContain('12');
+    expect(msg).toContain('63.5%');
+    expect(msg).toContain('1.234%');
+  });
+
+  it('includes Entry/SL/TP, R:R (fixed but shown), and entry reason for a fill event', () => {
+    const msg = formatEventMessage(
+      baseRecord({
+        eventKind: 'ENTRY_FILLED',
+        direction: 'LONG',
+        entryPrice: 101,
+        slPrice: 99,
+        tpPrice: 105.2,
+        rMultiple: 2.1,
+        entryReasonText: 'FVG tang gia, gap [101, 101.5]',
+      }),
+    );
     expect(msg).toContain('LONG');
     expect(msg).toContain('101');
     expect(msg).toContain('99');
     expect(msg).toContain('105.2');
-    expect(msg).toContain('1.50%');
-    expect(msg).toContain('CHUA dat lenh');
+    expect(msg).toContain('2.10R');
+    expect(msg).toContain('FVG tang gia');
   });
 
-  it('flags breaksKeyZone when true', () => {
-    const msg = formatSignalMessage({ symbol: 'HYPEUSDT', direction: 'SHORT', entryPrice: 10, slPrice: 10.5, tpPrice: 8.95, riskPct: 0.015, breaksKeyZone: true });
-    expect(msg).toContain('breaksKeyZone');
-  });
-});
-
-describe('formatStartupMessage / formatErrorMessage', () => {
-  it('distinguishes a fresh start from a restart', () => {
-    const fresh = formatStartupMessage({ symbols: ['BTCUSDT'], baseUrl: 'https://testnet.binancefuture.com', isRestart: false });
-    const restart = formatStartupMessage({ symbols: ['BTCUSDT'], baseUrl: 'https://testnet.binancefuture.com', isRestart: true });
-    expect(fresh).toContain('KHOI DONG');
-    expect(restart).toContain('RESTART');
+  it('includes result (win/loss + real PnL + reason) for a closed position', () => {
+    const msg = formatEventMessage(
+      baseRecord({ eventKind: 'POSITION_CLOSED', resultOutcome: 'TP', resultPnlUsd: 12.3456, resultReasonText: 'Cham TP (2.10R) — gia khop that: 105.2' }),
+    );
+    expect(msg).toContain('THANG');
+    expect(msg).toContain('12.3456');
+    expect(msg).toContain('105.2');
   });
 
-  it('includes the consecutive-failure count when provided', () => {
-    const msg = formatErrorMessage({ context: 'Poll BTCUSDT', message: 'network timeout', consecutiveFailures: 5 });
-    expect(msg).toContain('Poll BTCUSDT');
-    expect(msg).toContain('network timeout');
-    expect(msg).toContain('5 lan lien tiep');
+  it('shows a loss clearly and formats a negative PnL with its sign', () => {
+    const msg = formatEventMessage(baseRecord({ eventKind: 'POSITION_CLOSED', resultOutcome: 'SL', resultPnlUsd: -8.5, resultReasonText: 'Cham SL' }));
+    expect(msg).toContain('THUA');
+    expect(msg).toContain('-8.5000');
+  });
+
+  it('includes special-event notes (API errors, timeout cancellations, etc.)', () => {
+    const msg = formatEventMessage(baseRecord({ eventKind: 'ENTRY_TIMEOUT_CANCELLED', note: 'Lenh LIMIT bi HUY do qua maxWaitCandles=20 ma chua khop.' }));
+    expect(msg).toContain('maxWaitCandles=20');
+  });
+
+  it('distinguishes every event kind with a recognizable title', () => {
+    const kinds: LiveEventRecord['eventKind'][] = ['ENGINE_STARTUP', 'ENTRY_PLACED', 'ENTRY_SKIPPED', 'ENTRY_TIMEOUT_CANCELLED', 'ENTRY_FILLED', 'POSITION_CLOSED', 'LIFECYCLE_ERROR', 'POLL_ERROR'];
+    const titles = new Set(kinds.map((k) => formatEventMessage(baseRecord({ eventKind: k }))));
+    expect(titles.size).toBe(kinds.length); // all distinct
   });
 });
