@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { checkNoTradeZone } from '../src/noTradeZone/noTradeZone.js';
 import type { Candle } from '../src/noTradeZone/types.js';
 import { classifyTrendH1 } from '../src/trend/trendH1.js';
@@ -537,7 +538,15 @@ async function main() {
   );
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exitCode = 1;
-});
+// TICKET-RT-066 Part B: guard against the import side-effect discovered in RT-058 — importing this
+// module (e.g. apps/bot/scripts/research/xgbFeatureAudit.ts imports loadAllSymbolData/runSimulation/
+// computeClosedPnl/BALANCE/SYMBOLS from here) used to also run this file's own main(), silently
+// re-executing the full RT-051 near-live simulation and printing its report as an unwanted side
+// effect. Only run main() when this file is the actual entry point, same pattern already used in
+// xgbFeatureAuditV2.ts/V3.ts (RT-059/065).
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  main().catch((err) => {
+    console.error(err);
+    process.exitCode = 1;
+  });
+}
