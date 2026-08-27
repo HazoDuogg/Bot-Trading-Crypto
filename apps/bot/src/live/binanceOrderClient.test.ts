@@ -12,12 +12,6 @@ import { BinanceOrderClient, TestnetSafetyError, roundDownToStep, roundToTick } 
 import { BinanceHttpError } from './binanceRestPollingFeed.js';
 import type { OrderInfo } from './exchangeOrderClient.js';
 
-// TICKET-RT-071: confirmed via real testnet calls that the Algo Order API has a brief eventual-
-// consistency window in BOTH directions — GET /fapi/v1/algoOrder?algoId=... can throw -2013 "Order
-// does not exist" for a few hundred ms right after PLACEMENT (not just after cancellation), before
-// settling. This doesn't affect production (SymbolOrderLifecycle only ever polls getOrder() on the
-// next M15 candle, minutes later — never immediately after placing), so this retries briefly rather
-// than asserting instantly.
 async function getOrderWithRetry(client: BinanceOrderClient, symbol: string, orderId: number, maxAttempts = 5): Promise<OrderInfo> {
   for (let i = 0; i < maxAttempts; i++) {
     try {
@@ -33,12 +27,6 @@ async function getOrderWithRetry(client: BinanceOrderClient, symbol: string, ord
   throw new Error('unreachable');
 }
 
-// TICKET-RT-071: confirmed via real testnet calls that a just-canceled ALGO order is NOT queryable
-// right after cancellation — GET /fapi/v1/algoOrder?algoId=... throws -2013 "Order does not exist"
-// immediately (unlike the old /fapi/v1/order endpoint, which still returns the order with
-// status=CANCELED). This doesn't affect production (SymbolOrderLifecycle never calls getOrder()
-// on an id right after canceling it), so this polls getOpenOrders() instead — the thing production
-// actually relies on (reconciliation) — until the id is no longer listed as open.
 async function pollUntilNotOpen(client: BinanceOrderClient, symbol: string, orderId: number, maxAttempts = 5): Promise<OrderInfo[]> {
   let last: OrderInfo[] = [];
   for (let i = 0; i < maxAttempts; i++) {
@@ -81,20 +69,9 @@ describe('BinanceOrderClient — testnet safety guard', () => {
   });
 });
 
-// Integration tests against the REAL Binance Futures Testnet, using the REAL API key/secret from
-// .env — per the ticket's own verification method. Uses XRPUSDT specifically (confirmed to have NO
-// pre-existing open position on this account before RT-068 started, unlike BTCUSDT which does —
-// deliberately avoided to prevent any interaction with that unrelated position). Every order
-// placed here uses a price far from the real market (verified ~$1.40 at test-authoring time) so it
-// can never accidentally fill, and every test cancels/cleans up what it created.
 const hasCredentials = !!(process.env.BINANCE_TESTNET_URL && process.env.BINANCE_TESTNET_KEY_ENC && process.env.BINANCE_TESTNET_SECRET_ENC);
 
 describe.skipIf(!hasCredentials)('BinanceOrderClient (integration, real Binance Futures Testnet)', () => {
-  // Constructed lazily (not at describe-body top level) — describe.skipIf still EXECUTES the
-  // describe callback body to register test structure even when every test inside ends up
-  // skipped, so anything relying on env vars that might be absent belongs in a getter/hook, not a
-  // bare top-level const (which is exactly what broke here the first time: hasCredentials=false
-  // still ran `new BinanceOrderClient(undefined!, ...)` and threw during collection).
   function makeClient(): BinanceOrderClient {
     return new BinanceOrderClient(process.env.BINANCE_TESTNET_URL!, process.env.BINANCE_TESTNET_KEY_ENC!, process.env.BINANCE_TESTNET_SECRET_ENC!);
   }
@@ -146,16 +123,6 @@ describe.skipIf(!hasCredentials)('BinanceOrderClient (integration, real Binance 
     await expect(client.cancelOrder('XRPUSDT', placed.orderId)).resolves.not.toThrow();
   }, 30000);
 
-  // TICKET-RT-071 HOTFIX: STOP_MARKET/TAKE_PROFIT_MARKET with closePosition=true is REJECTED by
-  // Binance (real, verified: -4509 "Time in Force (TIF) GTE can only be used with open positions")
-  // when the account is flat on that symbol — true both before and after this hotfix, and exactly
-  // matches production usage (SymbolOrderLifecycle only ever calls placeStopMarketCloseOrder/
-  // placeTakeProfitMarketCloseOrder AFTER the entry order has FILLED, so a real position always
-  // exists by then). To test the real endpoint honestly this opens a REAL tiny XRPUSDT position
-  // first (a LIMIT BUY priced to cross the book and fill immediately as taker), places both close
-  // legs through the new Algo Order API against that real position, verifies them, cancels both,
-  // then flattens the position again (LIMIT SELL crossing the book) — leaving the account exactly
-  // as it started.
   it('opens a real tiny position, places REAL STOP_MARKET+TAKE_PROFIT_MARKET close orders via the Algo Order API, verifies+cancels them, and flattens the position again', async () => {
     const filters = await client.getSymbolFilters('XRPUSDT');
     const priceRes = await fetch(`${process.env.BINANCE_TESTNET_URL}/fapi/v1/ticker/price?symbol=XRPUSDT`);

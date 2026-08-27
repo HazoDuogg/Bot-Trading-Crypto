@@ -3,12 +3,6 @@ import { DEFAULT_FVG_STRATEGY_CONFIG } from '../entry/fvgStrategyConfig.js';
 import type { LifecycleEvent } from './orderLifecycle.js';
 import type { RegimeSnapshot } from './signalEngine.js';
 
-// TICKET-RT-068 Part D+E: ONE canonical record shape built from every event source (signal
-// detection skip, order placed/filled/cancelled/closed, engine lifecycle) — Telegram formatting
-// (Part D) and JSONL logging (Part E) both consume this SAME structure, so the log is guaranteed
-// to contain exactly what the Telegram message said, per the ticket's "log... chua toan bo du
-// lieu o Phan D".
-
 export const STRATEGY_NAME = 'FVG H1+M15'; // "chi co 1" per the ticket — fixed text, not a config lookup
 export const R_MULTIPLE = DEFAULT_FVG_STRATEGY_CONFIG.targetRMultiple; // read from production config, not a hardcoded literal, even though "co dinh" per the ticket
 
@@ -39,10 +33,6 @@ export interface LiveEventRecord {
   resultReasonText?: string; // Part D: "ket qua (...) + ly do"
   note?: string; // Part D: "ghi chu su kien dac biet (loi API, huy lenh do timeout, v.v.)"
   raw: unknown; // the full underlying event object, for programmatic analysis beyond the display fields
-  // TICKET-RT-072: ENGINE_STARTUP-only — real USDT balance at startup time (via
-  // client.getAvailableBalanceUsdt(), same source as everywhere else, never hard-coded/computed).
-  // null means the fetch failed (formatEventMessage shows "khong lay duoc" instead of blocking
-  // startup). Unused/undefined for every other eventKind.
   startupBalanceUsdt?: number | null;
 }
 
