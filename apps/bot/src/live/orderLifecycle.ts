@@ -14,8 +14,18 @@ import type { DetectedFvgSignal } from './signalEngine.js';
 // internally-tracked number).
 //
 // State machine: IDLE (free to detect) -> ENTRY_PENDING (real LIMIT order placed, polling for
-// FILLED or maxWaitCandles timeout) -> POSITION_OPEN (real SL+TP STOP_MARKET/TAKE_PROFIT_MARKET
-// orders placed, polling for either to fill) -> back to IDLE.
+// FILLED or maxWaitCandles timeout) -> PLACING_PROTECTION (entry FILLED, SL and/or TP still being
+// placed — see TICKET-RT-070 below) -> POSITION_OPEN (both SL+TP confirmed placed, polling for
+// either to fill) -> back to IDLE.
+//
+// TICKET-RT-070 fix: placeStopMarketCloseOrder/placeTakeProfitMarketCloseOrder used to be a single
+// Promise.all — if one succeeded and the other failed, the failure was reported but the SUCCESSFUL
+// order's id was thrown away (state stayed ENTRY_PENDING), so the next retry called BOTH again and
+// placed a duplicate for the one that had already succeeded. PLACING_PROTECTION now tracks
+// slOrderId/tpOrderId independently as `number | null`, and placeMissingProtectionOrders() below
+// only ever calls whichever leg is still null — an already-successful leg's id is reused, never
+// re-requested. Transition to POSITION_OPEN only happens once BOTH are non-null, whether that
+// happened on the same tick as the fill or several retries later.
 //
 // KNOWN LIMITATION (not solved here, and not solvable by simple polling — the standard, accepted
 // workaround across the crypto trading dev community since Binance Futures has no true OCO
@@ -70,6 +80,18 @@ export type LifecycleEvent =
 type State =
   | { phase: 'IDLE' }
   | { phase: 'ENTRY_PENDING'; orderId: number; direction: Direction; entryPrice: number; slPrice: number; tpPrice: number; quantity: number; waitCount: number; signal: DetectedFvgSignal }
+  | {
+      phase: 'PLACING_PROTECTION';
+      direction: Direction;
+      entryPrice: number;
+      quantity: number;
+      slPrice: number;
+      tpPrice: number;
+      slOrderId: number | null;
+      tpOrderId: number | null;
+      entryFilledAtMs: number;
+      signal: DetectedFvgSignal;
+    }
   | { phase: 'POSITION_OPEN'; direction: Direction; entryPrice: number; quantity: number; slOrderId: number; tpOrderId: number; entryFilledAtMs: number; signal: DetectedFvgSignal };
 
 export class SymbolOrderLifecycle {
@@ -125,6 +147,44 @@ export class SymbolOrderLifecycle {
     return { type: 'ENTRY_PLACED', symbol: this.symbol, orderId: order.orderId, direction, entryPrice, slPrice, tpPrice, quantity, riskPct, riskUsd, balanceUsedUsdt: balance, signal };
   }
 
+  // TICKET-RT-070: called once right after entry FILLED, and again on every subsequent tick while
+  // phase === 'PLACING_PROTECTION'. Each leg is its own try/catch — a leg whose orderId is already
+  // known (non-null) is NEVER re-requested, so a partial failure on one leg can never duplicate the
+  // other leg's already-successful order on retry.
+  private async placeMissingProtectionOrders(): Promise<LifecycleEvent> {
+    const s = this.state as Extract<State, { phase: 'PLACING_PROTECTION' }>;
+
+    if (s.slOrderId === null) {
+      try {
+        const slOrder = await this.client.placeStopMarketCloseOrder(this.symbol, s.direction, s.slPrice);
+        s.slOrderId = slOrder.orderId;
+      } catch (err) {
+        return { type: 'LIFECYCLE_ERROR', symbol: this.symbol, context: 'placeStopMarketCloseOrder AFTER ENTRY FILLED — VI TRI DANG MO, CHUA CO SL BAO VE', message: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    if (s.tpOrderId === null) {
+      try {
+        const tpOrder = await this.client.placeTakeProfitMarketCloseOrder(this.symbol, s.direction, s.tpPrice);
+        s.tpOrderId = tpOrder.orderId;
+      } catch (err) {
+        return { type: 'LIFECYCLE_ERROR', symbol: this.symbol, context: 'placeTakeProfitMarketCloseOrder AFTER ENTRY FILLED — VI TRI DANG MO, CHUA CO TP BAO VE', message: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    this.state = {
+      phase: 'POSITION_OPEN',
+      direction: s.direction,
+      entryPrice: s.entryPrice,
+      quantity: s.quantity,
+      slOrderId: s.slOrderId,
+      tpOrderId: s.tpOrderId,
+      entryFilledAtMs: s.entryFilledAtMs,
+      signal: s.signal,
+    };
+    return { type: 'ENTRY_FILLED', symbol: this.symbol, direction: s.direction, entryPrice: s.entryPrice, quantity: s.quantity, slPrice: s.slPrice, tpPrice: s.tpPrice, slOrderId: s.slOrderId, tpOrderId: s.tpOrderId, signal: s.signal };
+  }
+
   async onNewM15Candle(): Promise<LifecycleEvent | null> {
     if (this.state.phase === 'IDLE') return null;
 
@@ -139,21 +199,19 @@ export class SymbolOrderLifecycle {
       }
 
       if (order.status === 'FILLED') {
-        try {
-          const [slOrder, tpOrder] = await Promise.all([
-            this.client.placeStopMarketCloseOrder(this.symbol, s.direction, s.slPrice),
-            this.client.placeTakeProfitMarketCloseOrder(this.symbol, s.direction, s.tpPrice),
-          ]);
-          const entryFilledAtMs = order.updateTime;
-          this.state = { phase: 'POSITION_OPEN', direction: s.direction, entryPrice: order.avgPrice, quantity: order.executedQty, slOrderId: slOrder.orderId, tpOrderId: tpOrder.orderId, entryFilledAtMs, signal: s.signal };
-          return { type: 'ENTRY_FILLED', symbol: this.symbol, direction: s.direction, entryPrice: order.avgPrice, quantity: order.executedQty, slPrice: s.slPrice, tpPrice: s.tpPrice, slOrderId: slOrder.orderId, tpOrderId: tpOrder.orderId, signal: s.signal };
-        } catch (err) {
-          // Entry filled but SL/TP placement failed — stay in a (slightly stale) ENTRY_PENDING
-          // state and surface this loudly; retried next tick's getOrder (still FILLED) will retry
-          // SL/TP placement. A genuinely open, unprotected position is the single most dangerous
-          // state this code can be in, so this is deliberately NOT silently swallowed.
-          return { type: 'LIFECYCLE_ERROR', symbol: this.symbol, context: 'placeStopMarketCloseOrder/placeTakeProfitMarketCloseOrder AFTER ENTRY FILLED — VI TRI DANG MO, CHUA CO SL/TP BAO VE', message: err instanceof Error ? err.message : String(err) };
-        }
+        this.state = {
+          phase: 'PLACING_PROTECTION',
+          direction: s.direction,
+          entryPrice: order.avgPrice,
+          quantity: order.executedQty,
+          slPrice: s.slPrice,
+          tpPrice: s.tpPrice,
+          slOrderId: null,
+          tpOrderId: null,
+          entryFilledAtMs: order.updateTime,
+          signal: s.signal,
+        };
+        return this.placeMissingProtectionOrders();
       }
 
       if (order.status === 'PARTIALLY_FILLED') return null; // keep waiting for a full fill
@@ -168,6 +226,10 @@ export class SymbolOrderLifecycle {
         return { type: 'ENTRY_TIMEOUT_CANCELLED', symbol: this.symbol, orderId: s.orderId, waitedCandles: s.waitCount };
       }
       return null;
+    }
+
+    if (this.state.phase === 'PLACING_PROTECTION') {
+      return this.placeMissingProtectionOrders();
     }
 
     // POSITION_OPEN

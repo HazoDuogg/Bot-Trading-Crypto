@@ -224,4 +224,43 @@ describe('SymbolOrderLifecycle — full real-order state machine (mocked exchang
     expect(event?.type).toBe('LIFECYCLE_ERROR');
     client.getOrder = originalGetOrder;
   });
+
+  // TICKET-RT-070: reproduces the exact partial-failure bug. SL succeeds on the FIRST attempt; TP
+  // fails on the first attempt then succeeds on the retry. The already-successful SL leg must NEVER
+  // be re-requested, and its orderId must be the one from the FIRST call, not a new one.
+  it('never re-places an already-successful SL order when TP fails and is retried (TICKET-RT-070)', async () => {
+    await lifecycle.onSignalDetected(makeSignal());
+    const entryOrderId = 1;
+    client.setStatus(entryOrderId, 'FILLED', 100, 1);
+
+    const originalPlaceTp = client.placeTakeProfitMarketCloseOrder.bind(client);
+    let tpCallCount = 0;
+    client.placeTakeProfitMarketCloseOrder = async (...args) => {
+      tpCallCount++;
+      if (tpCallCount === 1) throw new Error('simulated partial failure: TP placement rejected');
+      return originalPlaceTp(...args);
+    };
+
+    // Tick 1: entry FILLED -> SL placed successfully (id 2), TP placement throws.
+    const firstEvent = await lifecycle.onNewM15Candle();
+    expect(firstEvent?.type).toBe('LIFECYCLE_ERROR');
+    expect(lifecycle.isFree()).toBe(false); // stays open (PLACING_PROTECTION), not silently dropped
+
+    const slCallsAfterFirstTick = client.placedOrders.filter((o) => o.type === 'STOP_MARKET').length;
+    expect(slCallsAfterFirstTick).toBe(1); // SL was placed exactly once so far
+    const slOrderIdAfterFirstTick = [...client.orders.values()].find((o) => o.type === 'STOP_MARKET')?.orderId;
+
+    // Tick 2 (retry): only the missing TP leg should be requested; SL must NOT be called again.
+    const secondEvent = await lifecycle.onNewM15Candle();
+    expect(secondEvent?.type).toBe('ENTRY_FILLED');
+
+    const slCallsTotal = client.placedOrders.filter((o) => o.type === 'STOP_MARKET').length;
+    expect(slCallsTotal).toBe(1); // still exactly once across the whole retry sequence
+    expect(tpCallCount).toBe(2); // TP: 1 failed attempt + 1 successful retry
+
+    if (secondEvent?.type === 'ENTRY_FILLED') {
+      expect(secondEvent.slOrderId).toBe(slOrderIdAfterFirstTick); // reused, not a fresh order
+    }
+    expect(lifecycle.isFree()).toBe(false); // now POSITION_OPEN
+  });
 });
