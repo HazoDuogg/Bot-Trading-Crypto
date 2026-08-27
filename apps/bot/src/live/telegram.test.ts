@@ -88,6 +88,24 @@ describe('formatEventMessage — covers every field the ticket lists (Part D)', 
     expect(msg).toContain('maxWaitCandles=20');
   });
 
+  // TICKET-RT-072: ENGINE_STARTUP shows the real account balance instead of "ALL"/symbol.
+  it('ENGINE_STARTUP shows the real balance instead of the symbol placeholder', () => {
+    const msg = formatEventMessage(baseRecord({ eventKind: 'ENGINE_STARTUP', startupBalanceUsdt: 1234.5 }));
+    expect(msg).toContain('💰 Balance: 1234.50 USDT');
+    expect(msg).not.toContain('💰 BTCUSDT');
+    expect(msg).not.toContain('💰 ALL');
+  });
+
+  it('ENGINE_STARTUP falls back to a "khong lay duoc" note when the balance fetch failed (null), never crashing formatting', () => {
+    const msg = formatEventMessage(baseRecord({ eventKind: 'ENGINE_STARTUP', startupBalanceUsdt: null }));
+    expect(msg).toContain('💰 Balance: (không lấy được)');
+  });
+
+  it('non-startup events still show the symbol, unaffected by the RT-072 change', () => {
+    const msg = formatEventMessage(baseRecord({ eventKind: 'ENTRY_PLACED', symbol: 'ETHUSDT' }));
+    expect(msg).toContain('💰 ETHUSDT');
+  });
+
   it('distinguishes every event kind with a recognizable title', () => {
     const kinds: LiveEventRecord['eventKind'][] = ['ENGINE_STARTUP', 'ENTRY_PLACED', 'ENTRY_SKIPPED', 'ENTRY_TIMEOUT_CANCELLED', 'ENTRY_FILLED', 'POSITION_CLOSED', 'LIFECYCLE_ERROR', 'POLL_ERROR'];
     const titles = new Set(kinds.map((k) => formatEventMessage(baseRecord({ eventKind: k }))));

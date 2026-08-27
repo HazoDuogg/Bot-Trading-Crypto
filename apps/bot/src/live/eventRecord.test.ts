@@ -26,10 +26,21 @@ describe('STRATEGY_NAME / R_MULTIPLE', () => {
 
 describe('fromEngineStartup / fromPollError', () => {
   it('builds a startup record with symbols and endpoint in the note', () => {
-    const rec = fromEngineStartup({ symbols: ['BTCUSDT', 'ETHUSDT'], baseUrl: 'https://testnet.binancefuture.com', isRestart: false });
+    const rec = fromEngineStartup({ symbols: ['BTCUSDT', 'ETHUSDT'], baseUrl: 'https://testnet.binancefuture.com', isRestart: false, balanceUsdt: 1234.56 });
     expect(rec.eventKind).toBe('ENGINE_STARTUP');
     expect(rec.note).toContain('BTCUSDT');
     expect(rec.note).toContain('testnet.binancefuture.com');
+  });
+
+  // TICKET-RT-072: real balance passed through to the record for the Telegram formatter to show.
+  it('carries the real startup balance through to startupBalanceUsdt', () => {
+    const rec = fromEngineStartup({ symbols: ['BTCUSDT'], baseUrl: 'https://testnet.binancefuture.com', isRestart: false, balanceUsdt: 987.65 });
+    expect(rec.startupBalanceUsdt).toBe(987.65);
+  });
+
+  it('carries a null balance through when the real fetch failed at startup', () => {
+    const rec = fromEngineStartup({ symbols: ['BTCUSDT'], baseUrl: 'https://testnet.binancefuture.com', isRestart: false, balanceUsdt: null });
+    expect(rec.startupBalanceUsdt).toBeNull();
   });
 
   it('builds a poll-error record with the failure count', () => {

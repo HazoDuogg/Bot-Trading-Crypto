@@ -85,7 +85,14 @@ export function formatEventMessage(record: LiveEventRecord): string {
   const lines: string[] = [];
   lines.push(`${EVENT_EMOJI[record.eventKind]} <b>${EVENT_TITLE[record.eventKind]}</b>`);
   lines.push(`🕐 ${record.timestampUtc}`);
-  lines.push(`💰 ${record.symbol}`);
+  // TICKET-RT-072: ENGINE_STARTUP isn't tied to one symbol — show the real account balance
+  // instead of the "ALL" placeholder. Every other event kind is untouched (still shows symbol).
+  if (record.eventKind === 'ENGINE_STARTUP') {
+    const balanceText = record.startupBalanceUsdt !== undefined && record.startupBalanceUsdt !== null ? `${record.startupBalanceUsdt.toFixed(2)} USDT` : '(không lấy được)';
+    lines.push(`💰 Balance: ${balanceText}`);
+  } else {
+    lines.push(`💰 ${record.symbol}`);
+  }
   lines.push(`📐 Chiến lược: ${record.strategy}`);
 
   if (record.regime) {
