@@ -1,7 +1,9 @@
-// TICKET-RT-067 Part D: Telegram monitoring. Bot token/chat id come ONLY from environment
-// variables (TELEGRAM_BOT_TOKEN_ENC, TELEGRAM_CHAT_ID) — never hard-coded, never committed.
-// TELEGRAM_CHAT_ID may be a single id or a comma-separated list (the .env value observed during
-// this ticket's own testing was two ids) — sends to every id in the list.
+import type { LiveEventRecord } from './eventRecord.js';
+
+// TICKET-RT-067 Part D, superseded by TICKET-RT-068 Part D ("Telegram format v2 — phu du vong
+// doi"): bot token/chat id come ONLY from environment variables (TELEGRAM_BOT_TOKEN_ENC,
+// TELEGRAM_CHAT_ID) — never hard-coded, never committed. TELEGRAM_CHAT_ID may be a single id or a
+// comma-separated list — sends to every id in the list.
 
 export interface TelegramConfig {
   botToken: string;
@@ -52,43 +54,59 @@ export async function sendTelegramMessage(config: TelegramConfig, text: string):
   return results;
 }
 
-// --- Message formatting (Part D: "ro rang, de doc tren dien thoai") ---
+// --- Message formatting v2 (TICKET-RT-068 Part D) ---
+// ONE formatter for every event kind, built from the SAME LiveEventRecord that Part E logs to
+// JSONL — the ticket's explicit field list: thoi gian, tai san, chien luoc, regime, Entry/SL/TP,
+// R:R, ly do vao lenh, ket qua (+ PnL that + ly do), ghi chu su kien dac biet.
 
-export function formatSignalMessage(input: {
-  symbol: string;
-  direction: 'LONG' | 'SHORT';
-  entryPrice: number;
-  slPrice: number;
-  tpPrice: number;
-  riskPct: number;
-  breaksKeyZone: boolean;
-}): string {
-  const arrow = input.direction === 'LONG' ? '📈 LONG' : '📉 SHORT';
-  return [
-    `🔔 <b>TIN HIEU MOI — ${input.symbol}</b>`,
-    `${arrow}`,
-    `Entry du kien: <b>${input.entryPrice}</b>`,
-    `SL: ${input.slPrice}`,
-    `TP: ${input.tpPrice}`,
-    `Risk%: <b>${(input.riskPct * 100).toFixed(2)}%</b>${input.breaksKeyZone ? ' (breaksKeyZone)' : ''}`,
-    ``,
-    `<i>Chi thong bao — CHUA dat lenh (RT-067, engine v1).</i>`,
-  ].join('\n');
-}
+const EVENT_EMOJI: Record<LiveEventRecord['eventKind'], string> = {
+  ENGINE_STARTUP: '🟢',
+  ENTRY_PLACED: '🟡',
+  ENTRY_SKIPPED: '⚪',
+  ENTRY_TIMEOUT_CANCELLED: '⌛',
+  ENTRY_FILLED: '🔔',
+  POSITION_CLOSED: '🏁',
+  LIFECYCLE_ERROR: '🔴',
+  POLL_ERROR: '🔴',
+};
 
-export function formatStartupMessage(input: { symbols: string[]; baseUrl: string; isRestart: boolean }): string {
-  return [
-    `${input.isRestart ? '🔄 <b>ENGINE RESTART</b>' : '🟢 <b>ENGINE KHOI DONG</b>'}`,
-    `Symbols: ${input.symbols.join(', ')}`,
-    `Exchange endpoint: ${input.baseUrl}`,
-    `Che do: chi giam sat, CHUA dat lenh (RT-067 Live Engine v1).`,
-  ].join('\n');
-}
+const EVENT_TITLE: Record<LiveEventRecord['eventKind'], string> = {
+  ENGINE_STARTUP: 'ENGINE KHỞI ĐỘNG',
+  ENTRY_PLACED: 'ĐÃ ĐẶT LỆNH LIMIT',
+  ENTRY_SKIPPED: 'TÍN HIỆU BỊ BỎ QUA',
+  ENTRY_TIMEOUT_CANCELLED: 'LỆNH BỊ HỦY (TIMEOUT)',
+  ENTRY_FILLED: 'LỆNH ĐÃ KHỚP',
+  POSITION_CLOSED: 'VỊ TRÍ ĐÃ ĐÓNG',
+  LIFECYCLE_ERROR: 'LỖI VÒNG ĐỜI LỆNH',
+  POLL_ERROR: 'LỖI KẾT NỐI API',
+};
 
-export function formatErrorMessage(input: { context: string; message: string; consecutiveFailures?: number }): string {
-  const lines = [`🔴 <b>LOI</b> — ${input.context}`, input.message];
-  if (input.consecutiveFailures !== undefined && input.consecutiveFailures > 1) {
-    lines.push(`(${input.consecutiveFailures} lan lien tiep)`);
+export function formatEventMessage(record: LiveEventRecord): string {
+  const lines: string[] = [];
+  lines.push(`${EVENT_EMOJI[record.eventKind]} <b>${EVENT_TITLE[record.eventKind]}</b>`);
+  lines.push(`🕐 ${record.timestampUtc}`);
+  lines.push(`💰 ${record.symbol}`);
+  lines.push(`📐 Chiến lược: ${record.strategy}`);
+
+  if (record.regime) {
+    lines.push(`📊 Regime: ${record.regime.trend} (tuoi ${record.regime.trendAgeH1Candles} nen H1), ATR percentile ${record.regime.atrPercentileH1.toFixed(1)}%, cach EMA200 ${record.regime.distanceFromEma200H1Pct.toFixed(3)}%`);
   }
+
+  if (record.direction) lines.push(`↔️ Hướng: <b>${record.direction}</b>`);
+  if (record.entryPrice !== undefined) lines.push(`🎯 Entry: <b>${record.entryPrice}</b>`);
+  if (record.slPrice !== undefined) lines.push(`🛑 SL: ${record.slPrice}`);
+  if (record.tpPrice !== undefined) lines.push(`✅ TP: ${record.tpPrice}`);
+  if (record.rMultiple !== undefined) lines.push(`⚖️ R:R: ${record.rMultiple.toFixed(2)}R (co dinh)`);
+  if (record.entryReasonText) lines.push(`📝 Lý do vào lệnh: ${record.entryReasonText}`);
+
+  if (record.resultOutcome) {
+    const resultEmoji = record.resultOutcome === 'TP' ? '✅ WIN' : '❌ LOSS (XUI THÔI, ĐỎ LÀ WIN RỒI)';
+    const pnlText = record.resultPnlUsd !== undefined ? ` (PnL thật: ${record.resultPnlUsd >= 0 ? '+' : ''}$${record.resultPnlUsd.toFixed(4)})` : '';
+    lines.push(`🏆 Kết quả: <b>${resultEmoji}</b>${pnlText}`);
+    if (record.resultReasonText) lines.push(`   ${record.resultReasonText}`);
+  }
+
+  if (record.note) lines.push(`\nℹ️ ${record.note}`);
+
   return lines.join('\n');
 }
