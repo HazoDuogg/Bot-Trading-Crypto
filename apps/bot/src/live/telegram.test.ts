@@ -72,14 +72,14 @@ describe('formatEventMessage — covers every field the ticket lists (Part D)', 
     const msg = formatEventMessage(
       baseRecord({ eventKind: 'POSITION_CLOSED', resultOutcome: 'TP', resultPnlUsd: 12.3456, resultReasonText: 'Cham TP (2.10R) — gia khop that: 105.2' }),
     );
-    expect(msg).toContain('THANG');
+    expect(msg).toContain('WIN');
     expect(msg).toContain('12.3456');
     expect(msg).toContain('105.2');
   });
 
   it('shows a loss clearly and formats a negative PnL with its sign', () => {
     const msg = formatEventMessage(baseRecord({ eventKind: 'POSITION_CLOSED', resultOutcome: 'SL', resultPnlUsd: -8.5, resultReasonText: 'Cham SL' }));
-    expect(msg).toContain('THUA');
+    expect(msg).toContain('LOSS (XUI THÔI, ĐỎ LÀ WIN RỒI)');
     expect(msg).toContain('-8.5000');
   });
 
