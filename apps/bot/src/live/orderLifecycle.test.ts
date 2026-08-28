@@ -69,8 +69,8 @@ class MockExchangeOrderClient implements ExchangeOrderClient {
   async getRealizedPnlSince(): Promise<number> {
     return this.realizedPnlUsd;
   }
-  async getOpenPositionQty(): Promise<number> {
-    return 0;
+  async getOpenPosition(): Promise<{ qty: number; entryPrice: number }> {
+    return { qty: 0, entryPrice: 0 };
   }
   async getOpenOrders(): Promise<OrderInfo[]> {
     return [];
@@ -267,6 +267,35 @@ describe('SymbolOrderLifecycle — full real-order state machine (mocked exchang
       expect(event.realizedPnlUsd).toBe(-1.9);
     }
     expect(client.cancelledOrderIds).toContain(3); // the TP order was cancelled
+  });
+
+  // TICKET-RT-078
+  describe('restart recovery (restorePositionOpen / restorePlacingProtection)', () => {
+    it('restorePositionOpen: not free, existing SL/TP polling picks up a later TP fill and closes correctly', async () => {
+      client.orders.set(2, { orderId: 2, symbol: 'BTCUSDT', status: 'NEW', side: 'SELL', type: 'STOP_MARKET', avgPrice: 0, executedQty: 0, origQty: 0, price: 0, stopPrice: 98, updateTime: 0 });
+      client.orders.set(3, { orderId: 3, symbol: 'BTCUSDT', status: 'NEW', side: 'SELL', type: 'TAKE_PROFIT_MARKET', avgPrice: 0, executedQty: 0, origQty: 0, price: 0, stopPrice: 104.2, updateTime: 0 });
+      lifecycle.restorePositionOpen({ direction: 'LONG', entryPrice: 100, quantity: 1, slOrderId: 2, tpOrderId: 3 });
+      expect(lifecycle.isFree()).toBe(false);
+
+      client.realizedPnlUsd = 4.2;
+      client.setStatus(3, 'FILLED', 104.2);
+      const event = await lifecycle.onNewM15Candle();
+      expect(event?.type).toBe('POSITION_CLOSED');
+      if (event?.type === 'POSITION_CLOSED') expect(event.outcome).toBe('TP');
+      expect(client.cancelledOrderIds).toContain(2);
+      expect(lifecycle.isFree()).toBe(true); // symbol is free again, no restart needed
+    });
+
+    it('restorePlacingProtection: SL already exists (not re-placed), missing TP gets placed on the next tick', async () => {
+      client.orders.set(2, { orderId: 2, symbol: 'BTCUSDT', status: 'NEW', side: 'SELL', type: 'STOP_MARKET', avgPrice: 0, executedQty: 0, origQty: 0, price: 0, stopPrice: 98, updateTime: 0 });
+      lifecycle.restorePlacingProtection({ direction: 'LONG', entryPrice: 100, quantity: 1, slPrice: 98, tpPrice: 104.2, slOrderId: 2, tpOrderId: null });
+
+      const event = await lifecycle.onNewM15Candle();
+      expect(event?.type).toBe('ENTRY_FILLED');
+      expect(client.placedOrders.some((o) => o.type === 'STOP_MARKET')).toBe(false); // SL never re-requested
+      expect(client.placedOrders.some((o) => o.type === 'TAKE_PROFIT_MARKET')).toBe(true); // TP placed fresh
+      expect(lifecycle.isFree()).toBe(false);
+    });
   });
 
   it('is free again (can detect a new signal) only after a position fully closes', async () => {

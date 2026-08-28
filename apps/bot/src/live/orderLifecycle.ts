@@ -11,6 +11,25 @@ import type { DetectedFvgSignal } from './signalEngine.js';
 // need a real Python subprocess per case — see liveRunner.ts for the production wiring.
 export type RiskResolverFn = (symbol: string, breaksKeyZone: boolean, features: SoftVetoFeatures) => Promise<SoftVetoResolution>;
 
+// RT-078: original entry reason/regime/Soft-Veto-score only ever lived in memory — lost on
+// restart. Used ONLY for display text on a restored position; never re-derived or guessed.
+const RESTORED_SOFT_VETO: SoftVetoResolution = { baseRiskPct: NaN, adjustedRiskPct: NaN, tier: 'MIDDLE', predictedScore: NaN };
+function restoredPlaceholderSignal(symbol: string, direction: Direction, entryPrice: number): DetectedFvgSignal {
+  return {
+    type: 'FVG_DETECTED',
+    symbol,
+    direction,
+    gapLow: entryPrice,
+    gapHigh: entryPrice,
+    invalidationPrice: entryPrice,
+    breaksKeyZone: false,
+    detectedAtOpenTime: 0,
+    atrH1Pct: NaN,
+    keyZoneDistancePct: null,
+    regime: { trend: direction === 'LONG' ? 'UPTREND' : 'DOWNTREND', trendAgeH1Candles: 0, atrPercentileH1: NaN, distanceFromEma200H1Pct: NaN },
+  };
+}
+
 // TICKET-RT-068 Part B: the REAL order-execution state machine — deliberately separate from
 // signalEngine.ts's pure detection (per the ticket's explicit "tach bach" instruction). One
 // instance per symbol. Calls calculatePositionSize/resolveRiskPct (production, unmodified) with
@@ -116,6 +135,42 @@ export class SymbolOrderLifecycle {
 
   getDebugState(): State {
     return this.state;
+  }
+
+  // RT-078: restart-time recovery, called by liveRunner.ts's reconciliation ONLY when it already
+  // has BOTH real algo orderIds for this symbol's open position — everything the existing
+  // POSITION_OPEN polling (onNewM15Candle) needs to keep tracking fill/close correctly.
+  restorePositionOpen(input: { direction: Direction; entryPrice: number; quantity: number; slOrderId: number; tpOrderId: number }): void {
+    this.state = {
+      phase: 'POSITION_OPEN',
+      direction: input.direction,
+      entryPrice: input.entryPrice,
+      quantity: input.quantity,
+      slOrderId: input.slOrderId,
+      tpOrderId: input.tpOrderId,
+      entryFilledAtMs: Date.now(),
+      signal: restoredPlaceholderSignal(this.symbol, input.direction, input.entryPrice),
+    };
+  }
+
+  // RT-078: restart-time recovery when a position is open but one or both SL/TP legs are missing
+  // — the existing PLACING_PROTECTION retry (placeMissingProtectionOrders, called on the next
+  // onNewM15Candle tick) places whichever leg(s) are still null, exactly as it already does for a
+  // normal partial-failure retry.
+  restorePlacingProtection(input: { direction: Direction; entryPrice: number; quantity: number; slPrice: number; tpPrice: number; slOrderId: number | null; tpOrderId: number | null }): void {
+    this.state = {
+      phase: 'PLACING_PROTECTION',
+      direction: input.direction,
+      entryPrice: input.entryPrice,
+      quantity: input.quantity,
+      slPrice: input.slPrice,
+      tpPrice: input.tpPrice,
+      slOrderId: input.slOrderId,
+      tpOrderId: input.tpOrderId,
+      entryFilledAtMs: Date.now(),
+      signal: restoredPlaceholderSignal(this.symbol, input.direction, input.entryPrice),
+      softVeto: RESTORED_SOFT_VETO,
+    };
   }
 
   async onSignalDetected(signal: DetectedFvgSignal): Promise<LifecycleEvent> {
