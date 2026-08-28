@@ -20,42 +20,6 @@ import { DEFAULT_FVG_STRATEGY_CONFIG } from '../src/entry/fvgStrategyConfig.js';
 const SOFT_VETO_META_PATH = path.resolve(process.cwd(), 'apps/bot/data/models/softVetoModelC.meta.json');
 const TARGET_R_MULTIPLE = DEFAULT_FVG_STRATEGY_CONFIG.targetRMultiple;
 
-// TICKET-RT-068: real order-placement live loop (testnet only, per LIVE_EXCHANGE_BASE_URL /
-// BinanceOrderClient's own testnet safety guard). For each symbol: SymbolSignalEngine does PURE
-// detection, SymbolOrderLifecycle does REAL execution (place/track/cancel/close) — kept as two
-// separate objects per the ticket's explicit "tach bach" instruction.
-//
-// STARTUP RECONCILIATION: a crash/restart resets this process's in-memory lifecycle state to IDLE
-// for every symbol, but real orders/positions on the exchange from before the crash do NOT reset.
-// Before entering the live loop, this script queries REAL open orders + REAL open position for
-// every managed symbol and classifies the result (src/live/reconciliation.ts) into one of:
-//   - POSITION_OPEN (both SL+TP algo orders present) — restored, existing polling continues.
-//   - PLACING_PROTECTION (position open, one SL/TP leg missing) — restored, existing RT-070 retry
-//     places the missing leg (its price reconstructed from the existing leg via the fixed
-//     targetR-multiple relationship — never guessed).
-//   - CANCEL_PENDING_ENTRY (unfilled LIMIT entry, no position) — canceled outright: its intended
-//     SL/TP only ever lived in memory and cannot be recovered, per Vinh Tam's explicit RT-078
-//     decision (safer to lose the entry than risk placing wrong SL/TP later).
-//   - BLOCKED (anything that doesn't cleanly match the above — e.g. more than one SL/TP order, a
-//     position with neither, an orphaned algo order) — the RT-068 fallback: detection permanently
-//     skipped for that symbol until a restart with clean state, loud Telegram+log alert.
-// Confirmed during RT-068's own testing: the shared testnet account already had a pre-existing
-// open BTCUSDT position (not created by this code) — this mechanism correctly handles BTCUSDT.
-//
-// TICKET-RT-073 (RT-AUDIT-001 follow-up): two independent safety additions, both audit-only-then-
-// approved, neither touching PLACING_PROTECTION/SL-TP retry logic (confirmed correct by RT-AUDIT-001):
-// Part A — a GLOBAL, in-memory circuit breaker (src/live/circuitBreaker.ts): 3 consecutive
-//   LIFECYCLE_ERROR events (any symbol) blocks NEW-entry detection at every symbol (existing open
-//   positions keep being managed normally) and sends one distinct, unmissable Telegram alert. Does
-//   NOT auto-resume — clearing it requires a process restart (a human deliberately bringing the
-//   process back up), matching the ticket's "khong tu dong resume" requirement with no added surface
-//   area (no separate resume command).
-// Part B — leverage sync at startup (src/live/leverageSync.ts): sets exchange leverage to match
-//   DEFAULT_LEVERAGE_CONFIG for every symbol BEFORE the main loop starts. Fails closed: any
-//   set-leverage failure stops startup entirely (see the try/catch around syncLeverageAtStartup
-//   below) rather than running with an unverified/wrong leverage — RT-AUDIT-001's root cause for
-//   the leverage mismatch was that nothing had EVER called a leverage-set endpoint.
-
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'DOGEUSDT'];
 const CATCH_UP_LOOKBACK_CANDLES = 300;
 
@@ -122,7 +86,7 @@ async function main() {
         logger,
         { timestampUtc: new Date().toISOString(), symbol: 'ALL', strategy: 'FVG H1+M15', eventKind: 'LIFECYCLE_ERROR', note: `Dong bo leverage luc khoi dong THAT BAI — engine KHONG khoi dong: ${message}`, raw: { context: 'syncLeverageAtStartup', message } },
         true,
-      ).catch(() => {});
+      ).catch(() => { });
     }
     throw err;
   }
@@ -142,7 +106,7 @@ async function main() {
         logger,
         { timestampUtc: new Date().toISOString(), symbol: 'ALL', strategy: 'FVG H1+M15', eventKind: 'LIFECYCLE_ERROR', note: `Nap Soft Veto model luc khoi dong THAT BAI — engine KHONG khoi dong: ${message}`, raw: { context: 'loadSoftVetoModelMeta', message } },
         true,
-      ).catch(() => {});
+      ).catch(() => { });
     }
     throw err;
   }
@@ -260,7 +224,7 @@ async function main() {
               const { justTripped } = recordLifecycleError(circuitBreaker);
               if (justTripped) {
                 console.error(`[${new Date().toISOString()}] CIRCUIT BREAKER KICH HOAT: ${circuitBreaker.consecutiveErrors} LIFECYCLE_ERROR lien tiep — dung phat hien Entry moi o TAT CA symbol cho toi khi restart.`);
-                await emit(telegramConfig, logger, fromCircuitBreakerTripped({ consecutiveErrors: circuitBreaker.consecutiveErrors }), true).catch(() => {});
+                await emit(telegramConfig, logger, fromCircuitBreakerTripped({ consecutiveErrors: circuitBreaker.consecutiveErrors }), true).catch(() => { });
               }
             } else if (lifecycleEvent.type === 'ENTRY_FILLED' || lifecycleEvent.type === 'POSITION_CLOSED') {
               recordSuccess(circuitBreaker);
@@ -286,7 +250,7 @@ async function main() {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[${new Date().toISOString()}] LOI khi poll ${state.symbol} (lan lien tiep #${consecutiveFailureStreak}):`, err);
         if (telegramConfig && (consecutiveFailureStreak === 3 || consecutiveFailureStreak % 20 === 0)) {
-          await emit(telegramConfig, logger, fromPollError({ symbol: state.symbol, message, consecutiveFailures: consecutiveFailureStreak }), true).catch(() => {});
+          await emit(telegramConfig, logger, fromPollError({ symbol: state.symbol, message, consecutiveFailures: consecutiveFailureStreak }), true).catch(() => { });
         }
       }
     }
@@ -313,7 +277,7 @@ async function main() {
   const fatal = async (context: string, err: unknown) => {
     console.error(`${context} — engine se thoat de process manager restart:`, err);
     if (telegramConfig) {
-      await emit(telegramConfig, logger, { timestampUtc: new Date().toISOString(), symbol: 'ALL', strategy: 'FVG H1+M15', eventKind: 'LIFECYCLE_ERROR', note: `${context}: ${err instanceof Error ? err.message : String(err)}`, raw: { context, err: String(err) } }, true).catch(() => {});
+      await emit(telegramConfig, logger, { timestampUtc: new Date().toISOString(), symbol: 'ALL', strategy: 'FVG H1+M15', eventKind: 'LIFECYCLE_ERROR', note: `${context}: ${err instanceof Error ? err.message : String(err)}`, raw: { context, err: String(err) } }, true).catch(() => { });
     }
     process.exit(1);
   };

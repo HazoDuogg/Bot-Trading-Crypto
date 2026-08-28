@@ -77,10 +77,6 @@ export function fromPollError(input: { symbol: string; message: string; consecut
   };
 }
 
-// TICKET-RT-073 Part A: fired exactly once, the tick CIRCUIT_BREAKER_THRESHOLD consecutive
-// LIFECYCLE_ERROR events is reached (see circuitBreaker.ts) — deliberately a distinct eventKind
-// from LIFECYCLE_ERROR (not just another one of those) so it renders as a visibly different,
-// unmissable Telegram message per the ticket's "loai rieng biet, noi bat" requirement.
 export function fromCircuitBreakerTripped(input: { consecutiveErrors: number }): LiveEventRecord {
   return {
     timestampUtc: new Date().toISOString(),
