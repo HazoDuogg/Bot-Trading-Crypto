@@ -99,7 +99,7 @@ function checkNoGaps(klines: Kline[], intervalMs: number): { gaps: { afterIndex:
 }
 
 async function main() {
-  const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'XRPUSDT'];
+  const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'DOGEUSDT']; // TICKET-RT-DOGE-001: XRPUSDT -> DOGEUSDT
   const intervals: ('1h' | '15m')[] = ['1h', '15m'];
   const dataDir = path.resolve(process.cwd(), 'apps/bot/data');
   await mkdir(dataDir, { recursive: true });
