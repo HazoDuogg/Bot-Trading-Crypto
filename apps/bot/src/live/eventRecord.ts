@@ -14,7 +14,8 @@ export type EventRecordKind =
   | 'ENTRY_FILLED'
   | 'POSITION_CLOSED'
   | 'LIFECYCLE_ERROR'
-  | 'POLL_ERROR';
+  | 'POLL_ERROR'
+  | 'CIRCUIT_BREAKER_TRIPPED';
 
 export interface LiveEventRecord {
   timestampUtc: string; // Part D: "thoi gian"
@@ -65,6 +66,21 @@ export function fromPollError(input: { symbol: string; message: string; consecut
     strategy: STRATEGY_NAME,
     eventKind: 'POLL_ERROR',
     note: `Loi khi poll du lieu (lan lien tiep #${input.consecutiveFailures}): ${input.message}`,
+    raw: input,
+  };
+}
+
+// TICKET-RT-073 Part A: fired exactly once, the tick CIRCUIT_BREAKER_THRESHOLD consecutive
+// LIFECYCLE_ERROR events is reached (see circuitBreaker.ts) — deliberately a distinct eventKind
+// from LIFECYCLE_ERROR (not just another one of those) so it renders as a visibly different,
+// unmissable Telegram message per the ticket's "loai rieng biet, noi bat" requirement.
+export function fromCircuitBreakerTripped(input: { consecutiveErrors: number }): LiveEventRecord {
+  return {
+    timestampUtc: new Date().toISOString(),
+    symbol: 'ALL',
+    strategy: STRATEGY_NAME,
+    eventKind: 'CIRCUIT_BREAKER_TRIPPED',
+    note: `${input.consecutiveErrors} LIFECYCLE_ERROR lien tiep — da DUNG phat hien Entry moi o TAT CA symbol. Vi tri/lenh dang mo KHONG bi anh huong (SL/TP van duoc quan ly binh thuong). Can kiem tra thu cong va restart process de tiep tuc nhan Entry.`,
     raw: input,
   };
 }

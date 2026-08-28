@@ -30,6 +30,11 @@ export interface SymbolFilters {
 export interface ExchangeOrderClient {
   getAvailableBalanceUsdt(): Promise<number>;
   getSymbolLeverage(symbol: string): Promise<number>;
+  // TICKET-RT-073 Part B: actually SET leverage on the exchange (getSymbolLeverage only ever read
+  // it — RT-AUDIT-001 found nothing had ever called a leverage-set endpoint, so the exchange's real
+  // leverage had silently drifted from the design). Called once per symbol at startup, before the
+  // main loop — never mid-flight, so no caller needs to invalidate any cached leverage.
+  setLeverage(symbol: string, leverage: number): Promise<void>;
   getSymbolFilters(symbol: string): Promise<SymbolFilters>;
 
   // Entry: real LIMIT order at the FVG's own price (Part B step 1 — no simulated-touch wait).

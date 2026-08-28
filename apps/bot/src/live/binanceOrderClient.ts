@@ -111,6 +111,14 @@ export class BinanceOrderClient implements ExchangeOrderClient {
     return Number(pos.leverage);
   }
 
+  // TICKET-RT-073 Part B: POST /fapi/v1/leverage — sets the account's leverage for this symbol.
+  // Response echoes back {symbol, leverage, maxNotionalValue}; we don't need those fields (the
+  // caller already knows what it asked for) so this resolves void on success and throws (via
+  // signedRequest's own error handling) on any non-2xx response — no silent partial success.
+  async setLeverage(symbol: string, leverage: number): Promise<void> {
+    await this.signedRequest('POST', '/fapi/v1/leverage', { symbol, leverage });
+  }
+
   async getSymbolFilters(symbol: string): Promise<SymbolFilters> {
     // Public endpoint (no signing needed) — reads from the SAME baseUrl this client is talking to,
     // so filters can never mismatch between testnet/mainnet.

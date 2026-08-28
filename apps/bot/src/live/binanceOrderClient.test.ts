@@ -88,6 +88,15 @@ describe.skipIf(!hasCredentials)('BinanceOrderClient (integration, real Binance 
     expect(leverage).toBeGreaterThan(0);
   }, 15000);
 
+  it('setLeverage actually changes the account\'s real leverage for XRPUSDT, confirmed by re-reading it', async () => {
+    const before = await client.getSymbolLeverage('XRPUSDT');
+    const target = before === 10 ? 15 : 10; // pick a value guaranteed different from whatever is currently set
+    await client.setLeverage('XRPUSDT', target);
+    const after = await client.getSymbolLeverage('XRPUSDT');
+    expect(after).toBe(target);
+    await client.setLeverage('XRPUSDT', before); // restore, so this test doesn't leave the account mutated
+  }, 15000);
+
   it('getSymbolFilters returns real LOT_SIZE/PRICE_FILTER/MIN_NOTIONAL for XRPUSDT', async () => {
     const filters = await client.getSymbolFilters('XRPUSDT');
     expect(filters.stepSize).toBeGreaterThan(0);

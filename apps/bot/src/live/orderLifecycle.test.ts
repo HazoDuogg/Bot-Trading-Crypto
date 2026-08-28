@@ -22,6 +22,9 @@ class MockExchangeOrderClient implements ExchangeOrderClient {
   async getSymbolLeverage(): Promise<number> {
     return this.leverage;
   }
+  async setLeverage(_symbol: string, leverage: number): Promise<void> {
+    this.leverage = leverage;
+  }
   async getSymbolFilters(): Promise<SymbolFilters> {
     return this.filters;
   }
