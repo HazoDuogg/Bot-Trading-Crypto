@@ -116,4 +116,34 @@ describe('predictSoftVetoScore + resolveSoftVetoAdjustedRiskPct (integration, re
     else if (result.tier === 'BOTTOM') expect(result.adjustedRiskPct).toBeCloseTo(0.01, 10);
     else expect(result.adjustedRiskPct).toBe(0.015);
   }, 20000);
+
+  // TICKET-RT-079 Part B step 5: 3 real feature vectors against the DOGE-lineup model (RT-076),
+  // one per tier, each score independently probed via predictSoftVeto.py CLI before writing this
+  // test (0.9311 / 0.5353 / 0.2571 — all well clear of the real thresholds 0.588/0.419, no
+  // boundary ambiguity), confirming risk% adjusts correctly end-to-end for all three tiers.
+  it('TOP tier real example (DOGEUSDT): risk% adjusted UP by 0.5pp', async () => {
+    const meta = await loadMetaFromRepoRoot();
+    const result = await resolveSoftVetoAdjustedRiskPct('DOGEUSDT', false, { fvgGapSizePct: 5, keyZoneDistancePct: 0.01, atrH1Pct: 0.5, slPct: 0.4 }, meta);
+    expect(result.predictedScore).toBeCloseTo(0.931085467338562, 9);
+    expect(result.tier).toBe('TOP');
+    expect(result.baseRiskPct).toBe(0.015);
+    expect(result.adjustedRiskPct).toBeCloseTo(0.02, 10);
+  }, 20000);
+
+  it('MIDDLE tier real example (DOGEUSDT): risk% unchanged', async () => {
+    const meta = await loadMetaFromRepoRoot();
+    const result = await resolveSoftVetoAdjustedRiskPct('DOGEUSDT', false, { fvgGapSizePct: 0.5, keyZoneDistancePct: 1, atrH1Pct: 1, slPct: 0.7 }, meta);
+    expect(result.predictedScore).toBeCloseTo(0.5352601408958435, 9);
+    expect(result.tier).toBe('MIDDLE');
+    expect(result.adjustedRiskPct).toBe(0.015);
+  }, 20000);
+
+  it('BOTTOM tier real example (DOGEUSDT): risk% adjusted DOWN by 0.5pp', async () => {
+    const meta = await loadMetaFromRepoRoot();
+    const result = await resolveSoftVetoAdjustedRiskPct('DOGEUSDT', false, { fvgGapSizePct: 0.1, keyZoneDistancePct: 0.1, atrH1Pct: 0.1, slPct: 0.1 }, meta);
+    expect(result.predictedScore).toBeCloseTo(0.25710752606391907, 9);
+    expect(result.tier).toBe('BOTTOM');
+    expect(result.baseRiskPct).toBe(0.015);
+    expect(result.adjustedRiskPct).toBeCloseTo(0.01, 10);
+  }, 20000);
 });

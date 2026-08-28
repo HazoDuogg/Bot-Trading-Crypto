@@ -36,7 +36,7 @@ describe('circuit breaker', () => {
     const state = createCircuitBreakerState();
     recordLifecycleError(state); // e.g. BTCUSDT
     recordLifecycleError(state); // e.g. SOLUSDT
-    const third = recordLifecycleError(state); // e.g. XRPUSDT
+    const third = recordLifecycleError(state); // e.g. DOGEUSDT
     expect(third.justTripped).toBe(true);
   });
 
@@ -98,7 +98,7 @@ describe('circuit breaker end-to-end (RT-073 acceptance scenario)', () => {
     expect(cb.tripped).toBe(false);
     simulateLifecycleErrorEvent(); // e.g. SOLUSDT
     expect(cb.tripped).toBe(false);
-    simulateLifecycleErrorEvent(); // e.g. XRPUSDT — 3rd, trips
+    simulateLifecycleErrorEvent(); // e.g. DOGEUSDT — 3rd, trips
     expect(cb.tripped).toBe(true);
 
     // Exactly one alert — not one per subsequent error.
@@ -107,13 +107,13 @@ describe('circuit breaker end-to-end (RT-073 acceptance scenario)', () => {
     expect(alerts[0].symbol).toBe('ALL');
 
     // Entry detection must now be blocked at EVERY symbol, regardless of that symbol's own state.
-    for (const symbol of ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'XRPUSDT']) {
+    for (const symbol of ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'DOGEUSDT']) {
       expect(isNewEntryAllowed({ symbolBlocked: false, lifecycleIsFree: true, circuitBreaker: cb }), symbol).toBe(false);
     }
 
     // The alert renders as a visibly different Telegram message from a routine LIFECYCLE_ERROR.
     const breakerMsg = formatEventMessage(alerts[0]);
-    const routineErrorMsg = formatEventMessage({ timestampUtc: alerts[0].timestampUtc, symbol: 'XRPUSDT', strategy: 'FVG H1+M15', eventKind: 'LIFECYCLE_ERROR', note: 'mot loi don le', raw: {} });
+    const routineErrorMsg = formatEventMessage({ timestampUtc: alerts[0].timestampUtc, symbol: 'DOGEUSDT', strategy: 'FVG H1+M15', eventKind: 'LIFECYCLE_ERROR', note: 'mot loi don le', raw: {} });
     expect(breakerMsg).toContain('🛑');
     expect(breakerMsg).toContain('CIRCUIT BREAKER');
     expect(breakerMsg.split('\n')[0]).not.toBe(routineErrorMsg.split('\n')[0]);

@@ -26,7 +26,7 @@ describe('isNewEntryAllowed', () => {
     recordLifecycleError(cb);
     expect(cb.tripped).toBe(true);
 
-    const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'XRPUSDT'];
+    const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'DOGEUSDT'];
     for (const symbol of symbols) {
       // Even a symbol that is otherwise perfectly free to trade (its own state has nothing to do
       // with which symbol tripped the breaker) must be blocked once tripped.
