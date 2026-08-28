@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fromEngineStartup, fromPollError, fromLifecycleEvent, STRATEGY_NAME, R_MULTIPLE } from './eventRecord.js';
+import { fromEngineStartup, fromPollError, fromLifecycleEvent, fromCircuitBreakerTripped, STRATEGY_NAME, R_MULTIPLE } from './eventRecord.js';
 import type { LifecycleEvent } from './orderLifecycle.js';
 import type { DetectedFvgSignal } from './signalEngine.js';
 
@@ -48,6 +48,17 @@ describe('fromEngineStartup / fromPollError', () => {
     expect(rec.eventKind).toBe('POLL_ERROR');
     expect(rec.note).toContain('#4');
     expect(rec.note).toContain('timeout');
+  });
+});
+
+// TICKET-RT-073 Part A
+describe('fromCircuitBreakerTripped', () => {
+  it('builds a CIRCUIT_BREAKER_TRIPPED record, symbol ALL, mentioning the error count and that entries are blocked', () => {
+    const rec = fromCircuitBreakerTripped({ consecutiveErrors: 3 });
+    expect(rec.eventKind).toBe('CIRCUIT_BREAKER_TRIPPED');
+    expect(rec.symbol).toBe('ALL');
+    expect(rec.note).toContain('3');
+    expect(rec.note).toMatch(/DUNG phat hien Entry/i);
   });
 });
 

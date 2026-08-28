@@ -107,8 +107,30 @@ describe('formatEventMessage — covers every field the ticket lists (Part D)', 
   });
 
   it('distinguishes every event kind with a recognizable title', () => {
-    const kinds: LiveEventRecord['eventKind'][] = ['ENGINE_STARTUP', 'ENTRY_PLACED', 'ENTRY_SKIPPED', 'ENTRY_TIMEOUT_CANCELLED', 'ENTRY_FILLED', 'POSITION_CLOSED', 'LIFECYCLE_ERROR', 'POLL_ERROR'];
+    const kinds: LiveEventRecord['eventKind'][] = [
+      'ENGINE_STARTUP',
+      'ENTRY_PLACED',
+      'ENTRY_SKIPPED',
+      'ENTRY_TIMEOUT_CANCELLED',
+      'ENTRY_FILLED',
+      'POSITION_CLOSED',
+      'LIFECYCLE_ERROR',
+      'POLL_ERROR',
+      'CIRCUIT_BREAKER_TRIPPED',
+    ];
     const titles = new Set(kinds.map((k) => formatEventMessage(baseRecord({ eventKind: k }))));
     expect(titles.size).toBe(kinds.length); // all distinct
+  });
+
+  // TICKET-RT-073 Part A: the ticket requires this alert to be visibly DIFFERENT from a routine
+  // LIFECYCLE_ERROR, not just another instance of it.
+  it('CIRCUIT_BREAKER_TRIPPED renders with a distinct emoji/title from LIFECYCLE_ERROR and surfaces the note', () => {
+    const breakerMsg = formatEventMessage(baseRecord({ eventKind: 'CIRCUIT_BREAKER_TRIPPED', symbol: 'ALL', note: '3 LIFECYCLE_ERROR lien tiep — da DUNG phat hien Entry moi o TAT CA symbol.' }));
+    const errorMsg = formatEventMessage(baseRecord({ eventKind: 'LIFECYCLE_ERROR', note: 'mot loi don le' }));
+    expect(breakerMsg).toContain('🛑');
+    expect(breakerMsg).toContain('CIRCUIT BREAKER');
+    expect(breakerMsg).toContain('DUNG phat hien Entry moi');
+    expect(breakerMsg).not.toBe(errorMsg);
+    expect(breakerMsg.split('\n')[0]).not.toBe(errorMsg.split('\n')[0]); // title line itself differs
   });
 });

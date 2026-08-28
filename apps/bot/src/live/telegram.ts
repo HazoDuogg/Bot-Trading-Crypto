@@ -55,6 +55,7 @@ const EVENT_EMOJI: Record<LiveEventRecord['eventKind'], string> = {
   POSITION_CLOSED: '🏁',
   LIFECYCLE_ERROR: '🔴',
   POLL_ERROR: '🔴',
+  CIRCUIT_BREAKER_TRIPPED: '🛑',
 };
 
 const EVENT_TITLE: Record<LiveEventRecord['eventKind'], string> = {
@@ -66,6 +67,7 @@ const EVENT_TITLE: Record<LiveEventRecord['eventKind'], string> = {
   POSITION_CLOSED: 'VỊ TRÍ ĐÃ ĐÓNG',
   LIFECYCLE_ERROR: 'LỖI VÒNG ĐỜI LỆNH',
   POLL_ERROR: 'LỖI KẾT NỐI API',
+  CIRCUIT_BREAKER_TRIPPED: 'CIRCUIT BREAKER KÍCH HOẠT — DỪNG NHẬN LỆNH MỚI',
 };
 
 export function formatEventMessage(record: LiveEventRecord): string {

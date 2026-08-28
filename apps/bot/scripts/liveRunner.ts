@@ -6,9 +6,12 @@ import { BinanceRestPollingFeed, msUntilNextPoll } from '../src/live/binanceRest
 import { BinanceOrderClient } from '../src/live/binanceOrderClient.js';
 import { SymbolSignalEngine } from '../src/live/signalEngine.js';
 import { SymbolOrderLifecycle, type LifecycleEvent } from '../src/live/orderLifecycle.js';
-import { fromEngineStartup, fromPollError, fromLifecycleEvent, type LiveEventRecord } from '../src/live/eventRecord.js';
+import { fromEngineStartup, fromPollError, fromLifecycleEvent, fromCircuitBreakerTripped, type LiveEventRecord } from '../src/live/eventRecord.js';
 import { EventLogger } from '../src/live/eventLogger.js';
 import { loadTelegramConfigFromEnv, sendTelegramMessage, formatEventMessage, type TelegramConfig } from '../src/live/telegram.js';
+import { createCircuitBreakerState, recordLifecycleError, recordSuccess } from '../src/live/circuitBreaker.js';
+import { isNewEntryAllowed } from '../src/live/entryGate.js';
+import { syncLeverageAtStartup } from '../src/live/leverageSync.js';
 
 // TICKET-RT-068: real order-placement live loop (testnet only, per LIVE_EXCHANGE_BASE_URL /
 // BinanceOrderClient's own testnet safety guard). For each symbol: SymbolSignalEngine does PURE
@@ -27,6 +30,20 @@ import { loadTelegramConfigFromEnv, sendTelegramMessage, formatEventMessage, typ
 // is a genuinely hard problem deserving its own explicit design, out of this ticket's scope).
 // Confirmed during RT-068's own testing: the shared testnet account already had a pre-existing
 // open BTCUSDT position (not created by this code) — this mechanism correctly blocks BTCUSDT.
+//
+// TICKET-RT-073 (RT-AUDIT-001 follow-up): two independent safety additions, both audit-only-then-
+// approved, neither touching PLACING_PROTECTION/SL-TP retry logic (confirmed correct by RT-AUDIT-001):
+// Part A — a GLOBAL, in-memory circuit breaker (src/live/circuitBreaker.ts): 3 consecutive
+//   LIFECYCLE_ERROR events (any symbol) blocks NEW-entry detection at every symbol (existing open
+//   positions keep being managed normally) and sends one distinct, unmissable Telegram alert. Does
+//   NOT auto-resume — clearing it requires a process restart (a human deliberately bringing the
+//   process back up), matching the ticket's "khong tu dong resume" requirement with no added surface
+//   area (no separate resume command).
+// Part B — leverage sync at startup (src/live/leverageSync.ts): sets exchange leverage to match
+//   DEFAULT_LEVERAGE_CONFIG for every symbol BEFORE the main loop starts. Fails closed: any
+//   set-leverage failure stops startup entirely (see the try/catch around syncLeverageAtStartup
+//   below) rather than running with an unverified/wrong leverage — RT-AUDIT-001's root cause for
+//   the leverage mismatch was that nothing had EVER called a leverage-set endpoint.
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'XRPUSDT'];
 const CATCH_UP_LOOKBACK_CANDLES = 300;
@@ -76,6 +93,28 @@ async function main() {
     onRetry: (attempt, err, delayMs) => console.warn(`  Retry #${attempt} sau ${delayMs}ms: ${err instanceof Error ? err.message : String(err)}`),
   });
   const orderClient = new BinanceOrderClient(baseUrl, apiKey, apiSecret);
+
+  // --- TICKET-RT-073 Part B: sync leverage BEFORE anything else — fails closed (engine never
+  // starts with unverified/wrong leverage). RT-AUDIT-001's root cause was that nothing had ever set
+  // leverage at all, so the exchange's real value silently drifted from the design. ---
+  logLine('Dang dong bo leverage voi thiet ke (RT-073 Part B)...');
+  try {
+    const synced = await syncLeverageAtStartup(orderClient, SYMBOLS);
+    for (const s of synced) logLine(`  ${s.symbol}: leverage da set = ${s.leverage}x.`);
+    logLine('Dong bo leverage xong.\n');
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('LOI NGHIEM TRONG: dong bo leverage that bai — DUNG khoi dong (khong chay engine voi leverage chua xac minh):', err);
+    if (telegramConfig) {
+      await emit(
+        telegramConfig,
+        logger,
+        { timestampUtc: new Date().toISOString(), symbol: 'ALL', strategy: 'FVG H1+M15', eventKind: 'LIFECYCLE_ERROR', note: `Dong bo leverage luc khoi dong THAT BAI — engine KHONG khoi dong: ${message}`, raw: { context: 'syncLeverageAtStartup', message } },
+        true,
+      ).catch(() => {});
+    }
+    throw err;
+  }
 
   const states: SymbolRuntimeState[] = SYMBOLS.map((symbol) => ({
     symbol,
@@ -140,6 +179,7 @@ async function main() {
   // --- Live polling loop (single M15-cadence schedule — see RT-067's file comment for why H1 is
   // polled at the same cadence instead of two independent timers) ---
   let consecutiveFailureStreak = 0;
+  const circuitBreaker = createCircuitBreakerState(); // TICKET-RT-073 Part A: ONE shared instance across every symbol (global, not per-symbol)
 
   async function pollCycle(): Promise<void> {
     for (const state of states) {
@@ -153,10 +193,25 @@ async function main() {
           // Capture "free" BEFORE processing this candle's order-lifecycle tick — a position that
           // closes ON this candle does not get evaluated for a fresh signal until the NEXT candle,
           // mirroring every backtest script's `continue`-after-close convention.
-          const wasFree = !state.blocked && state.lifecycle.isFree();
+          const wasFree = isNewEntryAllowed({ symbolBlocked: state.blocked, lifecycleIsFree: state.lifecycle.isFree(), circuitBreaker });
 
           const lifecycleEvent = await state.lifecycle.onNewM15Candle();
-          if (lifecycleEvent) await emit(telegramConfig, logger, fromLifecycleEvent(lifecycleEvent), true);
+          if (lifecycleEvent) {
+            await emit(telegramConfig, logger, fromLifecycleEvent(lifecycleEvent), true);
+
+            // TICKET-RT-073 Part A: feed every LIFECYCLE_ERROR/ENTRY_FILLED/POSITION_CLOSED into the
+            // circuit breaker. Existing open positions keep being managed above regardless — this
+            // only affects `wasFree` (hence NEW entries) on the NEXT candle, never this tick's SL/TP.
+            if (lifecycleEvent.type === 'LIFECYCLE_ERROR') {
+              const { justTripped } = recordLifecycleError(circuitBreaker);
+              if (justTripped) {
+                console.error(`[${new Date().toISOString()}] CIRCUIT BREAKER KICH HOAT: ${circuitBreaker.consecutiveErrors} LIFECYCLE_ERROR lien tiep — dung phat hien Entry moi o TAT CA symbol cho toi khi restart.`);
+                await emit(telegramConfig, logger, fromCircuitBreakerTripped({ consecutiveErrors: circuitBreaker.consecutiveErrors }), true).catch(() => {});
+              }
+            } else if (lifecycleEvent.type === 'ENTRY_FILLED' || lifecycleEvent.type === 'POSITION_CLOSED') {
+              recordSuccess(circuitBreaker);
+            }
+          }
 
           if (wasFree) {
             const signal = state.engine.checkForNewSignal(c, true);
