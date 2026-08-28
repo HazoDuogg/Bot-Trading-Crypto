@@ -3,7 +3,7 @@ import { resolveRiskPct, DEFAULT_RISK_CONFIG } from './riskConfig.js';
 
 describe('resolveRiskPct', () => {
   it('returns fourCoinRiskPct (1.5%) for BTC/ETH/SOL/XRP regardless of breaksKeyZone', () => {
-    for (const symbol of ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT']) {
+    for (const symbol of ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'DOGEUSDT']) {
       expect(resolveRiskPct(symbol, false)).toBe(0.015);
       expect(resolveRiskPct(symbol, true)).toBe(0.015);
     }

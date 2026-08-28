@@ -132,6 +132,74 @@ describe.skipIf(!hasCredentials)('BinanceOrderClient (integration, real Binance 
     await expect(client.cancelOrder('XRPUSDT', placed.orderId)).resolves.not.toThrow();
   }, 30000);
 
+  // TICKET-RT-079 Part B step 4: same real-order round trip as the XRPUSDT tests above, now for
+  // DOGEUSDT — confirms rounding via getSymbolFilters('DOGEUSDT') (stepSize/tickSize DIFFERENT
+  // from XRP: DOGE's LOT_SIZE stepSize is whole coins, not fractional) works correctly end to end.
+  const DOGE_FAR_BELOW_MARKET_PRICE = 0.03; // real DOGEUSDT price ~0.087 at authoring time — never fills
+
+  it('getSymbolFilters returns real LOT_SIZE/PRICE_FILTER/MIN_NOTIONAL for DOGEUSDT', async () => {
+    const filters = await client.getSymbolFilters('DOGEUSDT');
+    expect(filters.stepSize).toBeGreaterThan(0);
+    expect(filters.tickSize).toBeGreaterThan(0);
+    expect(filters.minNotional).toBeGreaterThanOrEqual(0);
+  }, 15000);
+
+  it('places a real DOGEUSDT LIMIT order far below market (qty/price rounded via real filters), queries it as NEW, cancels it, and confirms CANCELED', async () => {
+    const filters = await client.getSymbolFilters('DOGEUSDT');
+    const price = roundToTick(DOGE_FAR_BELOW_MARKET_PRICE, filters.tickSize);
+    const minQtyForNotional = filters.minNotional > 0 ? filters.minNotional / price : filters.stepSize;
+    const quantity = roundDownToStep(Math.max(minQtyForNotional * 1.1, filters.stepSize), filters.stepSize);
+
+    const placed = await client.placeLimitEntryOrder('DOGEUSDT', 'LONG', quantity, price);
+    expect(placed.status).toBe('NEW');
+    expect(placed.symbol).toBe('DOGEUSDT');
+    expect(quantity % filters.stepSize).toBeCloseTo(0, 8); // rounded correctly to DOGE's (whole-coin) step
+
+    const queried = await client.getOrder('DOGEUSDT', placed.orderId);
+    expect(queried.status).toBe('NEW');
+    expect(queried.orderId).toBe(placed.orderId);
+
+    await client.cancelOrder('DOGEUSDT', placed.orderId);
+    const afterCancel = await client.getOrder('DOGEUSDT', placed.orderId);
+    expect(afterCancel.status).toBe('CANCELED');
+  }, 30000);
+
+  it('opens a real tiny DOGEUSDT position and places REAL STOP_MARKET+TAKE_PROFIT_MARKET close orders via the Algo Order API, then flattens it', async () => {
+    const filters = await client.getSymbolFilters('DOGEUSDT');
+    const priceRes = await fetch(`${process.env.BINANCE_TESTNET_URL}/fapi/v1/ticker/price?symbol=DOGEUSDT`);
+    const markPrice = Number(((await priceRes.json()) as { price: string }).price);
+    expect(markPrice).toBeGreaterThan(0);
+
+    const minQtyForNotional = filters.minNotional > 0 ? filters.minNotional / markPrice : filters.stepSize;
+    const quantity = roundDownToStep(Math.max(minQtyForNotional * 1.1, filters.stepSize), filters.stepSize);
+
+    const entryPrice = roundToTick(markPrice * 1.02, filters.tickSize);
+    const entry = await client.placeLimitEntryOrder('DOGEUSDT', 'LONG', quantity, entryPrice);
+    const filledEntry = await client.getOrder('DOGEUSDT', entry.orderId);
+    expect(filledEntry.status).toBe('FILLED');
+
+    try {
+      const slPrice = roundToTick(markPrice * 0.5, filters.tickSize);
+      const tpPrice = roundToTick(markPrice * 2, filters.tickSize);
+
+      const slPlaced = await client.placeStopMarketCloseOrder('DOGEUSDT', 'LONG', slPrice);
+      expect(slPlaced.status).toBe('NEW');
+      const tpPlaced = await client.placeTakeProfitMarketCloseOrder('DOGEUSDT', 'LONG', tpPrice);
+      expect(tpPlaced.status).toBe('NEW');
+
+      const slQueried = await getOrderWithRetry(client, 'DOGEUSDT', slPlaced.orderId);
+      expect(slQueried.status).toBe('NEW');
+      const tpQueried = await getOrderWithRetry(client, 'DOGEUSDT', tpPlaced.orderId);
+      expect(tpQueried.status).toBe('NEW');
+
+      await client.cancelOrder('DOGEUSDT', slPlaced.orderId);
+      await client.cancelOrder('DOGEUSDT', tpPlaced.orderId);
+    } finally {
+      const closePrice = roundToTick(markPrice * 0.98, filters.tickSize);
+      await client.placeLimitEntryOrder('DOGEUSDT', 'SHORT', quantity, closePrice);
+    }
+  }, 30000);
+
   it('opens a real tiny position, places REAL STOP_MARKET+TAKE_PROFIT_MARKET close orders via the Algo Order API, verifies+cancels them, and flattens the position again', async () => {
     const filters = await client.getSymbolFilters('XRPUSDT');
     const priceRes = await fetch(`${process.env.BINANCE_TESTNET_URL}/fapi/v1/ticker/price?symbol=XRPUSDT`);

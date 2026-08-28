@@ -14,7 +14,7 @@
 // confirming the four-coin bump doesn't touch HYPEUSDT's own risk. hypeKeyZoneRiskPct=1.5% traces to
 // RT-052's M=1.5 multiplier sweep on HYPEUSDT's breaksKeyZone=true trades specifically.
 export interface RiskConfig {
-  fourCoinRiskPct: number; // BTCUSDT/ETHUSDT/SOLUSDT/XRPUSDT — every trade, flat
+  fourCoinRiskPct: number; // BTCUSDT/ETHUSDT/SOLUSDT/DOGEUSDT — every trade, flat
   hypeBaselineRiskPct: number; // HYPEUSDT, breaksKeyZone=false — unchanged from the original 1.0%
   hypeKeyZoneRiskPct: number; // HYPEUSDT, breaksKeyZone=true only
 }
