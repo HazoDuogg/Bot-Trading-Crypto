@@ -35,6 +35,8 @@ export interface LiveEventRecord {
   note?: string; // Part D: "ghi chu su kien dac biet (loi API, huy lenh do timeout, v.v.)"
   raw: unknown; // the full underlying event object, for programmatic analysis beyond the display fields
   startupBalanceUsdt?: number | null;
+  currentBalanceUsdt?: number | null; // RT-074: ENTRY_PLACED/ENTRY_FILLED/POSITION_CLOSED only
+  leverage?: number; // RT-074: ENTRY_PLACED/ENTRY_FILLED only
 }
 
 function describeEntryReason(direction: Direction, gapLow: number, gapHigh: number, regime: RegimeSnapshot, breaksKeyZone: boolean): string {

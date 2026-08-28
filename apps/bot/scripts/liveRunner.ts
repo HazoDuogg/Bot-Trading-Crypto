@@ -10,6 +10,7 @@ import { fromEngineStartup, fromPollError, fromLifecycleEvent, fromCircuitBreake
 import { EventLogger } from '../src/live/eventLogger.js';
 import { loadTelegramConfigFromEnv, sendTelegramMessage, formatEventMessage, type TelegramConfig } from '../src/live/telegram.js';
 import { createCircuitBreakerState, recordLifecycleError, recordSuccess } from '../src/live/circuitBreaker.js';
+import { enrichWithBalanceAndLeverage } from '../src/live/eventEnrichment.js';
 import { isNewEntryAllowed } from '../src/live/entryGate.js';
 import { syncLeverageAtStartup } from '../src/live/leverageSync.js';
 
@@ -197,7 +198,8 @@ async function main() {
 
           const lifecycleEvent = await state.lifecycle.onNewM15Candle();
           if (lifecycleEvent) {
-            await emit(telegramConfig, logger, fromLifecycleEvent(lifecycleEvent), true);
+            const record = await enrichWithBalanceAndLeverage(fromLifecycleEvent(lifecycleEvent), orderClient);
+            await emit(telegramConfig, logger, record, true);
 
             // TICKET-RT-073 Part A: feed every LIFECYCLE_ERROR/ENTRY_FILLED/POSITION_CLOSED into the
             // circuit breaker. Existing open positions keep being managed above regardless — this
@@ -217,7 +219,8 @@ async function main() {
             const signal = state.engine.checkForNewSignal(c, true);
             if (signal) {
               const placeEvent: LifecycleEvent = await state.lifecycle.onSignalDetected(signal);
-              await emit(telegramConfig, logger, fromLifecycleEvent(placeEvent), true);
+              const record = await enrichWithBalanceAndLeverage(fromLifecycleEvent(placeEvent), orderClient);
+              await emit(telegramConfig, logger, record, true);
             }
           } else {
             state.engine.checkForNewSignal(c, false); // still buffers the candle, never detects
