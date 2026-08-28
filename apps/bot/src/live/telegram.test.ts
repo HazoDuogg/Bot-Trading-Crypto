@@ -122,6 +122,35 @@ describe('formatEventMessage — covers every field the ticket lists (Part D)', 
     expect(titles.size).toBe(kinds.length); // all distinct
   });
 
+  it('shows current balance + leverage on ENTRY_PLACED', () => {
+    const msg = formatEventMessage(baseRecord({ eventKind: 'ENTRY_PLACED', currentBalanceUsdt: 4321.55, leverage: 20 }));
+    expect(msg).toContain('💰 Balance hiện tại: 4321.55 USDT');
+    expect(msg).toContain('⚙️ Đòn bẩy: 20x');
+  });
+
+  it('shows current balance + leverage on ENTRY_FILLED', () => {
+    const msg = formatEventMessage(baseRecord({ eventKind: 'ENTRY_FILLED', currentBalanceUsdt: 100, leverage: 10 }));
+    expect(msg).toContain('💰 Balance hiện tại: 100.00 USDT');
+    expect(msg).toContain('⚙️ Đòn bẩy: 10x');
+  });
+
+  it('shows current balance but NOT leverage on POSITION_CLOSED', () => {
+    const msg = formatEventMessage(baseRecord({ eventKind: 'POSITION_CLOSED', currentBalanceUsdt: 5000, resultOutcome: 'TP', resultPnlUsd: 12 }));
+    expect(msg).toContain('💰 Balance hiện tại: 5000.00 USDT');
+    expect(msg).not.toContain('Đòn bẩy');
+  });
+
+  it('shows the fallback text when currentBalanceUsdt is null (fetch failed)', () => {
+    const msg = formatEventMessage(baseRecord({ eventKind: 'ENTRY_PLACED', currentBalanceUsdt: null }));
+    expect(msg).toContain('💰 Balance hiện tại: (không lấy được)');
+  });
+
+  it('omits balance/leverage lines entirely when the fields are absent (LIFECYCLE_ERROR, unaffected)', () => {
+    const msg = formatEventMessage(baseRecord({ eventKind: 'LIFECYCLE_ERROR' }));
+    expect(msg).not.toContain('Balance hiện tại');
+    expect(msg).not.toContain('Đòn bẩy');
+  });
+
   // TICKET-RT-073 Part A: the ticket requires this alert to be visibly DIFFERENT from a routine
   // LIFECYCLE_ERROR, not just another instance of it.
   it('CIRCUIT_BREAKER_TRIPPED renders with a distinct emoji/title from LIFECYCLE_ERROR and surfaces the note', () => {

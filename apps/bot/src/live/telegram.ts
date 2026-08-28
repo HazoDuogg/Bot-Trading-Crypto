@@ -83,6 +83,12 @@ export function formatEventMessage(record: LiveEventRecord): string {
   }
   lines.push(`📐 Chiến lược: ${record.strategy}`);
 
+  if (record.currentBalanceUsdt !== undefined) {
+    const balText = record.currentBalanceUsdt !== null ? `${record.currentBalanceUsdt.toFixed(2)} USDT` : '(không lấy được)';
+    lines.push(`💰 Balance hiện tại: ${balText}`);
+  }
+  if (record.leverage !== undefined) lines.push(`⚙️ Đòn bẩy: ${record.leverage}x`);
+
   if (record.regime) {
     lines.push(`📊 Regime: ${record.regime.trend} (tuoi ${record.regime.trendAgeH1Candles} nen H1), ATR percentile ${record.regime.atrPercentileH1.toFixed(1)}%, cach EMA200 ${record.regime.distanceFromEma200H1Pct.toFixed(3)}%`);
   }
