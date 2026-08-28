@@ -66,6 +66,8 @@ export interface DetectedFvgSignal {
   breaksKeyZone: boolean;
   detectedAtOpenTime: number;
   regime: RegimeSnapshot;
+  atrH1Pct: number; // RT-077: Soft Veto Option-C feature, same definition as rt076FeatureAuditDoge.ts
+  keyZoneDistancePct: number | null;
 }
 
 export class SymbolSignalEngine {
@@ -151,6 +153,9 @@ export class SymbolSignalEngine {
     const gapLow = fvg.gapLow;
     const gapHigh = fvg.gapHigh;
     const breaksKeyZone = this.cachedZones.some((z) => z.price >= gapLow && z.price <= gapHigh);
+    const entryPrice = fvg.direction === 'LONG' ? gapLow : gapHigh;
+    const keyZoneDistancePct = this.cachedZones.length > 0 ? Math.min(...this.cachedZones.map((z) => (Math.abs(z.price - entryPrice) / entryPrice) * 100)) : null;
+    const atrH1Pct = this.currentAtr !== null ? (this.currentAtr / closePrice) * 100 : NaN;
 
     const atrPercentileH1 = this.currentAtr !== null && this.atrHistory.length > 0 ? (this.atrHistory.filter((v) => v <= this.currentAtr!).length / this.atrHistory.length) * 100 : NaN;
     const distanceFromEma200H1Pct = this.currentEma !== null ? ((closePrice - this.currentEma) / this.currentEma) * 100 : NaN;
@@ -164,6 +169,8 @@ export class SymbolSignalEngine {
       invalidationPrice: fvg.invalidationPrice,
       breaksKeyZone,
       detectedAtOpenTime: candle.openTime,
+      atrH1Pct,
+      keyZoneDistancePct,
       regime: {
         trend,
         trendAgeH1Candles: this.h1CandleCount - this.trendChangeH1Cursor,

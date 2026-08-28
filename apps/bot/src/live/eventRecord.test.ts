@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { fromEngineStartup, fromPollError, fromLifecycleEvent, fromCircuitBreakerTripped, STRATEGY_NAME, R_MULTIPLE } from './eventRecord.js';
 import type { LifecycleEvent } from './orderLifecycle.js';
 import type { DetectedFvgSignal } from './signalEngine.js';
+import type { SoftVetoResolution } from '../positionSizing/softVeto.js';
 
 const signal: DetectedFvgSignal = {
   type: 'FVG_DETECTED',
@@ -12,8 +13,12 @@ const signal: DetectedFvgSignal = {
   invalidationPrice: 98,
   breaksKeyZone: true,
   detectedAtOpenTime: 0,
+  atrH1Pct: 1.2,
+  keyZoneDistancePct: 0.3,
   regime: { trend: 'UPTREND', trendAgeH1Candles: 7, atrPercentileH1: 40, distanceFromEma200H1Pct: 0.8 },
 };
+
+const softVeto: SoftVetoResolution = { baseRiskPct: 0.015, adjustedRiskPct: 0.02, tier: 'TOP', predictedScore: 0.7 };
 
 describe('STRATEGY_NAME / R_MULTIPLE', () => {
   it('strategy name is the fixed literal the ticket specifies', () => {
@@ -64,7 +69,7 @@ describe('fromCircuitBreakerTripped', () => {
 
 describe('fromLifecycleEvent', () => {
   it('ENTRY_PLACED: carries regime, Entry/SL/TP, R:R, and an entry reason mentioning gap + trend', () => {
-    const event: LifecycleEvent = { type: 'ENTRY_PLACED', symbol: 'BTCUSDT', orderId: 1, direction: 'LONG', entryPrice: 100, slPrice: 98, tpPrice: 104.2, quantity: 0.01, riskPct: 0.015, riskUsd: 15, balanceUsedUsdt: 1000, signal };
+    const event: LifecycleEvent = { type: 'ENTRY_PLACED', symbol: 'BTCUSDT', orderId: 1, direction: 'LONG', entryPrice: 100, slPrice: 98, tpPrice: 104.2, quantity: 0.01, riskPct: 0.02, riskUsd: 20, balanceUsedUsdt: 1000, signal, softVeto };
     const rec = fromLifecycleEvent(event);
     expect(rec.eventKind).toBe('ENTRY_PLACED');
     expect(rec.regime).toEqual(signal.regime);
@@ -72,6 +77,16 @@ describe('fromLifecycleEvent', () => {
     expect(rec.rMultiple).toBe(2.1);
     expect(rec.entryReasonText).toContain('UPTREND');
     expect(rec.entryReasonText).toContain('breaksKeyZone');
+  });
+
+  // TICKET-RT-077
+  it('ENTRY_PLACED: carries Soft Veto score/tier and risk% before/after adjustment', () => {
+    const event: LifecycleEvent = { type: 'ENTRY_PLACED', symbol: 'BTCUSDT', orderId: 1, direction: 'LONG', entryPrice: 100, slPrice: 98, tpPrice: 104.2, quantity: 0.01, riskPct: 0.02, riskUsd: 20, balanceUsedUsdt: 1000, signal, softVeto };
+    const rec = fromLifecycleEvent(event);
+    expect(rec.softVetoScore).toBe(0.7);
+    expect(rec.softVetoTier).toBe('TOP');
+    expect(rec.riskPctBeforeAdjustment).toBe(0.015);
+    expect(rec.riskPctAfterAdjustment).toBe(0.02);
   });
 
   it('ENTRY_SKIPPED: carries the skip reason', () => {
@@ -87,10 +102,20 @@ describe('fromLifecycleEvent', () => {
   });
 
   it('ENTRY_FILLED: uses the real fill price/qty', () => {
-    const event: LifecycleEvent = { type: 'ENTRY_FILLED', symbol: 'BTCUSDT', direction: 'LONG', entryPrice: 100.03, quantity: 0.0099, slPrice: 98, tpPrice: 104.2, slOrderId: 2, tpOrderId: 3, signal };
+    const event: LifecycleEvent = { type: 'ENTRY_FILLED', symbol: 'BTCUSDT', direction: 'LONG', entryPrice: 100.03, quantity: 0.0099, slPrice: 98, tpPrice: 104.2, slOrderId: 2, tpOrderId: 3, signal, softVeto };
     const rec = fromLifecycleEvent(event);
     expect(rec.entryPrice).toBe(100.03);
     expect(rec.note).toContain('0.0099');
+  });
+
+  // TICKET-RT-077
+  it('ENTRY_FILLED: carries Soft Veto score/tier and risk% before/after adjustment', () => {
+    const event: LifecycleEvent = { type: 'ENTRY_FILLED', symbol: 'BTCUSDT', direction: 'LONG', entryPrice: 100.03, quantity: 0.0099, slPrice: 98, tpPrice: 104.2, slOrderId: 2, tpOrderId: 3, signal, softVeto };
+    const rec = fromLifecycleEvent(event);
+    expect(rec.softVetoScore).toBe(0.7);
+    expect(rec.softVetoTier).toBe('TOP');
+    expect(rec.riskPctBeforeAdjustment).toBe(0.015);
+    expect(rec.riskPctAfterAdjustment).toBe(0.02);
   });
 
   it('POSITION_CLOSED: reports outcome, real PnL, and reason; flags the rare both-filled race', () => {

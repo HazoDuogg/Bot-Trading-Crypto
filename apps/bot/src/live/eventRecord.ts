@@ -2,6 +2,7 @@ import type { Direction } from '../entry/types.js';
 import { DEFAULT_FVG_STRATEGY_CONFIG } from '../entry/fvgStrategyConfig.js';
 import type { LifecycleEvent } from './orderLifecycle.js';
 import type { RegimeSnapshot } from './signalEngine.js';
+import type { SoftVetoTier } from '../positionSizing/softVeto.js';
 
 export const STRATEGY_NAME = 'FVG H1+M15'; // "chi co 1" per the ticket — fixed text, not a config lookup
 export const R_MULTIPLE = DEFAULT_FVG_STRATEGY_CONFIG.targetRMultiple; // read from production config, not a hardcoded literal, even though "co dinh" per the ticket
@@ -37,6 +38,10 @@ export interface LiveEventRecord {
   startupBalanceUsdt?: number | null;
   currentBalanceUsdt?: number | null; // RT-074: ENTRY_PLACED/ENTRY_FILLED/POSITION_CLOSED only
   leverage?: number; // RT-074: ENTRY_PLACED/ENTRY_FILLED only
+  softVetoScore?: number; // RT-077: ENTRY_PLACED/ENTRY_FILLED only
+  softVetoTier?: SoftVetoTier;
+  riskPctBeforeAdjustment?: number;
+  riskPctAfterAdjustment?: number;
 }
 
 function describeEntryReason(direction: Direction, gapLow: number, gapHigh: number, regime: RegimeSnapshot, breaksKeyZone: boolean): string {
@@ -103,6 +108,10 @@ export function fromLifecycleEvent(event: LifecycleEvent): LiveEventRecord {
         rMultiple: R_MULTIPLE,
         entryReasonText: describeEntryReason(event.direction, event.signal.gapLow, event.signal.gapHigh, event.signal.regime, event.signal.breaksKeyZone),
         note: `Da dat lenh LIMIT that (chua khop). Qty=${event.quantity}, risk=${(event.riskPct * 100).toFixed(2)}% ($${event.riskUsd.toFixed(2)}), balance=$${event.balanceUsedUsdt.toFixed(2)}.`,
+        softVetoScore: event.softVeto.predictedScore,
+        softVetoTier: event.softVeto.tier,
+        riskPctBeforeAdjustment: event.softVeto.baseRiskPct,
+        riskPctAfterAdjustment: event.softVeto.adjustedRiskPct,
       };
     case 'ENTRY_SKIPPED':
       return {
@@ -130,6 +139,10 @@ export function fromLifecycleEvent(event: LifecycleEvent): LiveEventRecord {
         rMultiple: R_MULTIPLE,
         entryReasonText: describeEntryReason(event.direction, event.signal.gapLow, event.signal.gapHigh, event.signal.regime, event.signal.breaksKeyZone),
         note: `Lenh KHOP THAT (API). Qty that=${event.quantity}, gia khop that=${event.entryPrice}. Da dat SL/TP (orderId ${event.slOrderId}/${event.tpOrderId}).`,
+        softVetoScore: event.softVeto.predictedScore,
+        softVetoTier: event.softVeto.tier,
+        riskPctBeforeAdjustment: event.softVeto.baseRiskPct,
+        riskPctAfterAdjustment: event.softVeto.adjustedRiskPct,
       };
     case 'POSITION_CLOSED':
       return {

@@ -13,6 +13,9 @@ import { createCircuitBreakerState, recordLifecycleError, recordSuccess } from '
 import { enrichWithBalanceAndLeverage } from '../src/live/eventEnrichment.js';
 import { isNewEntryAllowed } from '../src/live/entryGate.js';
 import { syncLeverageAtStartup } from '../src/live/leverageSync.js';
+import { loadSoftVetoModelMeta, resolveSoftVetoAdjustedRiskPct, type SoftVetoModelMeta } from '../src/positionSizing/softVeto.js';
+
+const SOFT_VETO_META_PATH = path.resolve(process.cwd(), 'apps/bot/data/models/softVetoModelC.meta.json');
 
 // TICKET-RT-068: real order-placement live loop (testnet only, per LIVE_EXCHANGE_BASE_URL /
 // BinanceOrderClient's own testnet safety guard). For each symbol: SymbolSignalEngine does PURE
@@ -46,7 +49,7 @@ import { syncLeverageAtStartup } from '../src/live/leverageSync.js';
 //   below) rather than running with an unverified/wrong leverage — RT-AUDIT-001's root cause for
 //   the leverage mismatch was that nothing had EVER called a leverage-set endpoint.
 
-const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'XRPUSDT'];
+const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'DOGEUSDT'];
 const CATCH_UP_LOOKBACK_CANDLES = 300;
 
 interface SymbolRuntimeState {
@@ -117,10 +120,32 @@ async function main() {
     throw err;
   }
 
+  // --- TICKET-RT-077: load the Soft Veto model meta once — risk% for every entry now comes from
+  // resolveSoftVetoAdjustedRiskPct (base risk unchanged, tier adjustment on top). Fails closed. ---
+  let softVetoMeta: SoftVetoModelMeta;
+  try {
+    softVetoMeta = await loadSoftVetoModelMeta(SOFT_VETO_META_PATH);
+    logLine(`Da nap Soft Veto model: trainN=${softVetoMeta.trainN}, trainedFrom=${softVetoMeta.trainedFrom}, trainedAtUtc=${softVetoMeta.trainedAtUtc}.\n`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('LOI NGHIEM TRONG: khong nap duoc Soft Veto model — DUNG khoi dong:', err);
+    if (telegramConfig) {
+      await emit(
+        telegramConfig,
+        logger,
+        { timestampUtc: new Date().toISOString(), symbol: 'ALL', strategy: 'FVG H1+M15', eventKind: 'LIFECYCLE_ERROR', note: `Nap Soft Veto model luc khoi dong THAT BAI — engine KHONG khoi dong: ${message}`, raw: { context: 'loadSoftVetoModelMeta', message } },
+        true,
+      ).catch(() => {});
+    }
+    throw err;
+  }
+  const resolveRisk = (symbol: string, breaksKeyZone: boolean, features: Parameters<typeof resolveSoftVetoAdjustedRiskPct>[2]) =>
+    resolveSoftVetoAdjustedRiskPct(symbol, breaksKeyZone, features, softVetoMeta);
+
   const states: SymbolRuntimeState[] = SYMBOLS.map((symbol) => ({
     symbol,
     engine: new SymbolSignalEngine(symbol),
-    lifecycle: new SymbolOrderLifecycle(symbol, orderClient),
+    lifecycle: new SymbolOrderLifecycle(symbol, orderClient, resolveRisk),
     lastH1OpenTime: null,
     lastM15OpenTime: null,
     blocked: false,

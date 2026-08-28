@@ -1,19 +1,26 @@
 {
-  "trainN": 3468,
+  "trainN": 3804,
   "featureColumns": [
     "fvgGapSizePct",
     "keyZoneDistancePct",
     "atrH1Pct",
     "slPct"
   ],
-  "topThreshold": 0.6060611009597778,
-  "bottomThreshold": 0.4003695249557495,
-  "meanScore": 0.5034229159355164,
-  "minScore": 0.10826952010393143,
-  "maxScore": 0.9638091921806335,
+  "topThreshold": 0.5880005955696106,
+  "bottomThreshold": 0.41917452216148376,
+  "meanScore": 0.5063644647598267,
+  "minScore": 0.06768098473548889,
+  "maxScore": 0.9430892467498779,
   "modelPath": "apps/bot/data/models/softVetoModelC.json",
-  "trainedAtUtc": "2026-08-27T03:52:33.290Z",
-  "trainedFrom": "apps/bot/data/xgbAuditDatasetThreeYear.csv",
+  "trainedAtUtc": "2026-08-28T10:47:57.193Z",
+  "trainedFrom": "apps/bot/data/xgbAuditDatasetDoge.csv",
+  "coinLineup": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "HYPEUSDT",
+    "DOGEUSDT"
+  ],
   "xgboostHyperparams": {
     "n_estimators": 100,
     "max_depth": 3,

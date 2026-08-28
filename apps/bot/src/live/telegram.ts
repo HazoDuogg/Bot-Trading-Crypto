@@ -88,6 +88,10 @@ export function formatEventMessage(record: LiveEventRecord): string {
     lines.push(`💰 Balance hiện tại: ${balText}`);
   }
   if (record.leverage !== undefined) lines.push(`⚙️ Đòn bẩy: ${record.leverage}x`);
+  if (record.softVetoTier !== undefined) {
+    lines.push(`🤖 Soft Veto: điểm ${record.softVetoScore!.toFixed(4)} → ${record.softVetoTier}`);
+    lines.push(`   Risk%: ${(record.riskPctBeforeAdjustment! * 100).toFixed(2)}% → ${(record.riskPctAfterAdjustment! * 100).toFixed(2)}%`);
+  }
 
   if (record.regime) {
     lines.push(`📊 Regime: ${record.regime.trend} (tuoi ${record.regime.trendAgeH1Candles} nen H1), ATR percentile ${record.regime.atrPercentileH1.toFixed(1)}%, cach EMA200 ${record.regime.distanceFromEma200H1Pct.toFixed(3)}%`);
