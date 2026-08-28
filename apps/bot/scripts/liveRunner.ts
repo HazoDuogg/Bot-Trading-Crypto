@@ -14,26 +14,33 @@ import { enrichWithBalanceAndLeverage } from '../src/live/eventEnrichment.js';
 import { isNewEntryAllowed } from '../src/live/entryGate.js';
 import { syncLeverageAtStartup } from '../src/live/leverageSync.js';
 import { loadSoftVetoModelMeta, resolveSoftVetoAdjustedRiskPct, type SoftVetoModelMeta } from '../src/positionSizing/softVeto.js';
+import { classifyReconciliation } from '../src/live/reconciliation.js';
+import { DEFAULT_FVG_STRATEGY_CONFIG } from '../src/entry/fvgStrategyConfig.js';
 
 const SOFT_VETO_META_PATH = path.resolve(process.cwd(), 'apps/bot/data/models/softVetoModelC.meta.json');
+const TARGET_R_MULTIPLE = DEFAULT_FVG_STRATEGY_CONFIG.targetRMultiple;
 
 // TICKET-RT-068: real order-placement live loop (testnet only, per LIVE_EXCHANGE_BASE_URL /
 // BinanceOrderClient's own testnet safety guard). For each symbol: SymbolSignalEngine does PURE
 // detection, SymbolOrderLifecycle does REAL execution (place/track/cancel/close) — kept as two
 // separate objects per the ticket's explicit "tach bach" instruction.
 //
-// STARTUP RECONCILIATION (a gap not explicitly detailed in the ticket, but load-bearing for
-// restart-safety with REAL orders — flagged here rather than silently handled): a crash/restart
-// resets this process's in-memory lifecycle state to IDLE for every symbol, but real orders/
-// positions on the exchange from before the crash do NOT reset. Blindly starting IDLE risks
-// placing a DUPLICATE/conflicting order for a symbol that already has one outstanding. Before
-// entering the live loop, this script queries REAL open orders + REAL open position for every
-// managed symbol; if either is non-empty, that symbol is marked BLOCKED (detection permanently
-// skipped) for the rest of this process's lifetime, and a loud Telegram+log alert is sent — NOT
-// auto-reconciled (deliberately: reconstructing a full state machine from partial exchange state
-// is a genuinely hard problem deserving its own explicit design, out of this ticket's scope).
+// STARTUP RECONCILIATION: a crash/restart resets this process's in-memory lifecycle state to IDLE
+// for every symbol, but real orders/positions on the exchange from before the crash do NOT reset.
+// Before entering the live loop, this script queries REAL open orders + REAL open position for
+// every managed symbol and classifies the result (src/live/reconciliation.ts) into one of:
+//   - POSITION_OPEN (both SL+TP algo orders present) — restored, existing polling continues.
+//   - PLACING_PROTECTION (position open, one SL/TP leg missing) — restored, existing RT-070 retry
+//     places the missing leg (its price reconstructed from the existing leg via the fixed
+//     targetR-multiple relationship — never guessed).
+//   - CANCEL_PENDING_ENTRY (unfilled LIMIT entry, no position) — canceled outright: its intended
+//     SL/TP only ever lived in memory and cannot be recovered, per Vinh Tam's explicit RT-078
+//     decision (safer to lose the entry than risk placing wrong SL/TP later).
+//   - BLOCKED (anything that doesn't cleanly match the above — e.g. more than one SL/TP order, a
+//     position with neither, an orphaned algo order) — the RT-068 fallback: detection permanently
+//     skipped for that symbol until a restart with clean state, loud Telegram+log alert.
 // Confirmed during RT-068's own testing: the shared testnet account already had a pre-existing
-// open BTCUSDT position (not created by this code) — this mechanism correctly blocks BTCUSDT.
+// open BTCUSDT position (not created by this code) — this mechanism correctly handles BTCUSDT.
 //
 // TICKET-RT-073 (RT-AUDIT-001 follow-up): two independent safety additions, both audit-only-then-
 // approved, neither touching PLACING_PROTECTION/SL-TP retry logic (confirmed correct by RT-AUDIT-001):
@@ -151,16 +158,36 @@ async function main() {
     blocked: false,
   }));
 
-  // --- Reconciliation: check REAL exchange state before trusting anything ---
+  // --- Reconciliation: check REAL exchange state before trusting anything, and RESTORE the
+  // correct in-memory phase instead of always blocking (TICKET-RT-078). ---
   logLine('Dang doi chieu (reconcile) trang thai that tren san giao dich...');
   for (const state of states) {
     try {
-      const [positionQty, openOrders] = await Promise.all([orderClient.getOpenPositionQty(state.symbol), orderClient.getOpenOrders(state.symbol)]);
-      if (positionQty !== 0 || openOrders.length > 0) {
-        state.blocked = true;
-        const msg = `${state.symbol} da co vi the/lenh THAT tren san (positionQty=${positionQty}, openOrders=${openOrders.length}) TRUOC KHI engine nay khoi dong — BLOCK phat hien tin hieu moi cho symbol nay cho toi khi restart voi trang thai sach.`;
+      const [position, openOrders] = await Promise.all([orderClient.getOpenPosition(state.symbol), orderClient.getOpenOrders(state.symbol)]);
+      const plan = classifyReconciliation(position.qty, position.entryPrice, openOrders, TARGET_R_MULTIPLE);
+
+      if (plan.kind === 'IDLE') {
+        // nothing on the exchange — no restoration needed, state already IDLE.
+      } else if (plan.kind === 'POSITION_OPEN') {
+        state.lifecycle.restorePositionOpen(plan);
+        const msg = `Da khoi phuc POSITION_OPEN cho ${state.symbol} sau restart: ${plan.direction} qty=${plan.quantity} entry=${plan.entryPrice}, SL orderId=${plan.slOrderId}, TP orderId=${plan.tpOrderId}. Se tiep tuc theo doi SL/TP binh thuong.`;
         console.warn(`  ${msg}`);
-        await emit(telegramConfig, logger, { timestampUtc: new Date().toISOString(), symbol: state.symbol, strategy: 'FVG H1+M15', eventKind: 'LIFECYCLE_ERROR', note: msg, raw: { positionQty, openOrders } }, true);
+        await emit(telegramConfig, logger, { timestampUtc: new Date().toISOString(), symbol: state.symbol, strategy: 'FVG H1+M15', eventKind: 'LIFECYCLE_ERROR', note: msg, raw: plan }, true);
+      } else if (plan.kind === 'PLACING_PROTECTION') {
+        state.lifecycle.restorePlacingProtection(plan);
+        const msg = `Da khoi phuc PLACING_PROTECTION cho ${state.symbol} sau restart: ${plan.direction} qty=${plan.quantity} entry=${plan.entryPrice}, SL orderId=${plan.slOrderId ?? '(thieu, se dat lai)'}, TP orderId=${plan.tpOrderId ?? '(thieu, se dat lai)'}. gia SL/TP con thieu duoc suy tu targetR=${TARGET_R_MULTIPLE} quanh leg da co.`;
+        console.warn(`  ${msg}`);
+        await emit(telegramConfig, logger, { timestampUtc: new Date().toISOString(), symbol: state.symbol, strategy: 'FVG H1+M15', eventKind: 'LIFECYCLE_ERROR', note: msg, raw: plan }, true);
+      } else if (plan.kind === 'CANCEL_PENDING_ENTRY') {
+        await orderClient.cancelOrder(state.symbol, plan.orderId);
+        const msg = `${state.symbol}: huy lenh LIMIT dang cho (orderId=${plan.orderId}) phat hien luc reconcile sau restart — SL/TP goc da mat, khong the khoi phuc an toan. Symbol san sang nhan tin hieu moi.`;
+        console.warn(`  ${msg}`);
+        await emit(telegramConfig, logger, { timestampUtc: new Date().toISOString(), symbol: state.symbol, strategy: 'FVG H1+M15', eventKind: 'LIFECYCLE_ERROR', note: msg, raw: plan }, true);
+      } else {
+        state.blocked = true;
+        const msg = `${state.symbol}: ${plan.reason} BLOCK phat hien tin hieu moi cho symbol nay cho toi khi restart voi trang thai sach.`;
+        console.warn(`  ${msg}`);
+        await emit(telegramConfig, logger, { timestampUtc: new Date().toISOString(), symbol: state.symbol, strategy: 'FVG H1+M15', eventKind: 'LIFECYCLE_ERROR', note: msg, raw: { position, openOrders } }, true);
       }
     } catch (err) {
       console.error(`  ${state.symbol}: LOI khi doi chieu trang thai (coi nhu BLOCKED de an toan):`, err);

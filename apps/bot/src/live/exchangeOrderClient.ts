@@ -55,6 +55,6 @@ export interface ExchangeOrderClient {
   // process's in-memory lifecycle state to IDLE, but real orders/positions on the exchange from
   // before the crash do NOT reset — this lets the caller detect that mismatch before ever placing
   // a new order for that symbol.
-  getOpenPositionQty(symbol: string): Promise<number>; // signed: positive=long, negative=short, 0=flat
+  getOpenPosition(symbol: string): Promise<{ qty: number; entryPrice: number }>; // qty signed: positive=long, negative=short, 0=flat
   getOpenOrders(symbol: string): Promise<OrderInfo[]>;
 }

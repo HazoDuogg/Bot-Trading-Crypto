@@ -216,10 +216,12 @@ export class BinanceOrderClient implements ExchangeOrderClient {
     }
   }
 
-  async getOpenPositionQty(symbol: string): Promise<number> {
-    const positions = (await this.signedRequest('GET', '/fapi/v2/positionRisk', { symbol })) as { symbol: string; positionAmt: string }[];
+  // RT-078: entryPrice alongside qty — restart-time reconciliation needs the real entry price to
+  // restore POSITION_OPEN/PLACING_PROTECTION state, not just whether a position exists.
+  async getOpenPosition(symbol: string): Promise<{ qty: number; entryPrice: number }> {
+    const positions = (await this.signedRequest('GET', '/fapi/v2/positionRisk', { symbol })) as { symbol: string; positionAmt: string; entryPrice: string }[];
     const pos = positions.find((p) => p.symbol === symbol);
-    return pos ? Number(pos.positionAmt) : 0;
+    return { qty: pos ? Number(pos.positionAmt) : 0, entryPrice: pos ? Number(pos.entryPrice) : 0 };
   }
 
   // TICKET-RT-071: open SL/TP orders no longer show up in /fapi/v1/openOrders post-migration — they
