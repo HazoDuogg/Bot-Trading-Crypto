@@ -14,9 +14,9 @@ class MockLeverageClient {
 }
 
 describe('syncLeverageAtStartup', () => {
-  it('sets leverage for every symbol per DEFAULT_LEVERAGE_CONFIG (BTC/ETH=20x, SOL/HYPE/XRP=10x)', async () => {
+  it('sets leverage for every symbol per DEFAULT_LEVERAGE_CONFIG (BTC/ETH=20x, SOL/HYPE/DOGE=10x)', async () => {
     const client = new MockLeverageClient();
-    const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'XRPUSDT'];
+    const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'DOGEUSDT'];
     const result = await syncLeverageAtStartup(client, symbols);
 
     expect(result).toEqual([
@@ -24,7 +24,7 @@ describe('syncLeverageAtStartup', () => {
       { symbol: 'ETHUSDT', leverage: 20 },
       { symbol: 'SOLUSDT', leverage: 10 },
       { symbol: 'HYPEUSDT', leverage: 10 },
-      { symbol: 'XRPUSDT', leverage: 10 },
+      { symbol: 'DOGEUSDT', leverage: 10 },
     ]);
     expect(client.calls).toEqual(result);
   });
@@ -33,18 +33,18 @@ describe('syncLeverageAtStartup', () => {
   it('rejects (propagates the exchange error) when setLeverage fails for ANY symbol — never resolves with a partial/silent success', async () => {
     const client = new MockLeverageClient();
     client.failOnSymbol = 'SOLUSDT';
-    const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'XRPUSDT'];
+    const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'DOGEUSDT'];
 
     await expect(syncLeverageAtStartup(client, symbols)).rejects.toThrow(/simulated failure for SOLUSDT/);
 
     // Sequential, fail-fast: symbols AFTER the failing one must never have been called.
     expect(client.calls.map((c) => c.symbol)).toEqual(['BTCUSDT', 'ETHUSDT', 'SOLUSDT']);
-    expect(client.calls.some((c) => c.symbol === 'HYPEUSDT' || c.symbol === 'XRPUSDT')).toBe(false);
+    expect(client.calls.some((c) => c.symbol === 'HYPEUSDT' || c.symbol === 'DOGEUSDT')).toBe(false);
   });
 
   it('rejects for a symbol with no configured leverage at all (fail loud, matches resolveLeverage)', async () => {
     const client = new MockLeverageClient();
-    await expect(syncLeverageAtStartup(client, ['DOGEUSDT'])).rejects.toThrow(/CORRECTION_REQUIRED/);
+    await expect(syncLeverageAtStartup(client, ['ADAUSDT'])).rejects.toThrow(/CORRECTION_REQUIRED/);
     expect(client.calls).toHaveLength(0);
   });
 });

@@ -70,10 +70,10 @@ async function loadMetaFromRepoRoot(): Promise<SoftVetoModelMeta> {
   return loadSoftVetoModelMeta(META_PATH);
 }
 
-describe('loadSoftVetoModelMeta (real trained artifact from RT-066 Part D)', () => {
+describe('loadSoftVetoModelMeta (real trained artifact, retrained by RT-076 on BTC/ETH/SOL/HYPE/DOGE)', () => {
   it('parses the metadata file with the expected shape and sane values', async () => {
     const meta = await loadMetaFromRepoRoot();
-    expect(meta.trainN).toBe(3468);
+    expect(meta.trainN).toBe(3804);
     expect(meta.featureColumns).toEqual(['fvgGapSizePct', 'keyZoneDistancePct', 'atrH1Pct', 'slPct']);
     expect(meta.topThreshold).toBeGreaterThan(meta.bottomThreshold);
     expect(meta.topThreshold).toBeGreaterThan(0);
@@ -97,8 +97,8 @@ describe('predictSoftVetoScore + resolveSoftVetoAdjustedRiskPct (integration, re
     expect(score).toBeGreaterThanOrEqual(0);
     expect(score).toBeLessThanOrEqual(1);
     // This exact row/score pair was verified bit-identical against a fresh in-memory retrain
-    // during RT-066 Part D's manual validation (0.4589543640613556).
-    expect(score).toBeCloseTo(0.4589543640613556, 9);
+    // during RT-076's manual validation on the DOGE-lineup dataset (0.6105873584747314).
+    expect(score).toBeCloseTo(0.6105873584747314, 9);
   }, 20000);
 
   it('resolveSoftVetoAdjustedRiskPct composes base risk% (unchanged resolveRiskPct) with the tier adjustment', async () => {

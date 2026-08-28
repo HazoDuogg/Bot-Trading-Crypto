@@ -16,21 +16,17 @@ const REPO_ROOT_DIR = path.resolve(APPS_BOT_DIR, '..', '..');
 
 // TICKET-RT-066 Part D: Soft Veto — "bo phat hien 2 cuc tri". Role agreed with Vinh Tam: the
 // model only speaks when very confident (top/bottom quintile of its OWN training-time score
-// distribution), stays silent (no risk change) for the middle ~60% of cases. This module is
-// PURELY ADDITIVE and NOT wired into any live decision path — verified by search that no
-// "entryRouter" or live-trading orchestrator exists anywhere under apps/bot/src at all, so there
-// is currently nothing to wire into. Per the ticket: "chua bat that — cho qua Testnet 2 giai
-// doan (Phan E) truoc". Every function here is a ready-to-call, independently tested building
-// block for whenever that wiring happens.
+// distribution), stays silent (no risk change) for the middle ~60% of cases.
 //
-// Model: Option C from RT-064/065 (4 features: fvgGapSizePct, keyZoneDistancePct, atrH1Pct,
-// slPct — the feature set that led on both PF and robustness across RT-064's 1-year and RT-065's
-// 3-year comparisons), trained on the FULL 3-year dataset by scripts/trainSoftVetoModel.ts (no
-// walk-forward split — this is the production model, meant to score FUTURE trades). Thresholds
+// Model: Option C (4 features: fvgGapSizePct, keyZoneDistancePct, atrH1Pct, slPct). Thresholds
 // are FIXED at train time from that same training run's own score distribution (top/bottom 20%
-// cutoffs) — never recomputed retroactively per future trade, per the ticket's explicit
-// requirement. Retrain cadence (ticket item 4 proposed monthly) is NOT automated here — the
-// ticket asked to confirm the exact frequency with Vinh Tam before coding a scheduler.
+// cutoffs) — never recomputed retroactively per future trade. Retrain cadence is NOT automated.
+//
+// TICKET-RT-077: wired into orderLifecycle.ts's onSignalDetected via an injected RiskResolverFn —
+// resolveSoftVetoAdjustedRiskPct() now determines the risk% used for every real entry. The model
+// currently loaded (apps/bot/data/models/softVetoModelC.meta.json) is trained on which 5-coin
+// lineup / when — see that file's own trainedFrom/trainedAtUtc fields, kept up to date at every
+// retrain (RT-076: BTC/ETH/SOL/HYPE/DOGE, trainedFrom apps/bot/data/xgbAuditDatasetDoge.csv).
 
 const execFileAsync = promisify(execFile);
 
@@ -54,6 +50,7 @@ export interface SoftVetoModelMeta {
   modelPath: string; // repo-root-relative, e.g. "apps/bot/data/models/softVetoModelC.json"
   trainedAtUtc: string;
   trainedFrom: string;
+  coinLineup?: string[]; // RT-077: which 5-coin universe this model was trained on
   xgboostHyperparams: Record<string, number>;
 }
 

@@ -14,7 +14,7 @@ export const DEFAULT_LEVERAGE_CONFIG: LeverageConfig = {
     ETHUSDT: 20,
     SOLUSDT: 10,
     HYPEUSDT: 10,
-    XRPUSDT: 10,
+    DOGEUSDT: 10,
   },
 };
 

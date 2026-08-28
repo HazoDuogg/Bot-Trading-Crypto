@@ -1,8 +1,17 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { Direction } from '../entry/types.js';
 import type { ExchangeOrderClient, OrderInfo, OrderStatus, SymbolFilters } from './exchangeOrderClient.js';
-import { SymbolOrderLifecycle } from './orderLifecycle.js';
+import { SymbolOrderLifecycle, type RiskResolverFn } from './orderLifecycle.js';
 import type { DetectedFvgSignal } from './signalEngine.js';
+import { resolveRiskPct, DEFAULT_RISK_CONFIG } from '../positionSizing/riskConfig.js';
+
+// RT-077: onSignalDetected now calls an injected risk resolver instead of resolveRiskPct
+// directly — this stub reproduces the OLD (pre-Soft-Veto) behavior exactly (MIDDLE tier, no
+// adjustment) so every existing sizing assertion in this file stays valid unchanged.
+const stubRiskResolver: RiskResolverFn = async (symbol, breaksKeyZone) => {
+  const baseRiskPct = resolveRiskPct(symbol, breaksKeyZone, DEFAULT_RISK_CONFIG);
+  return { baseRiskPct, adjustedRiskPct: baseRiskPct, tier: 'MIDDLE', predictedScore: 0.5 };
+};
 
 // Mock ExchangeOrderClient: full control over order status transitions, records every call for
 // assertions (order placed with what qty/price, cancel called on the right order, etc.).
@@ -86,6 +95,8 @@ function makeSignal(overrides: Partial<DetectedFvgSignal> = {}): DetectedFvgSign
     invalidationPrice: 98,
     breaksKeyZone: false,
     detectedAtOpenTime: 0,
+    atrH1Pct: 1.2,
+    keyZoneDistancePct: 0.3,
     regime: { trend: 'UPTREND', trendAgeH1Candles: 5, atrPercentileH1: 50, distanceFromEma200H1Pct: 1 },
     ...overrides,
   };
@@ -97,7 +108,7 @@ describe('SymbolOrderLifecycle — full real-order state machine (mocked exchang
 
   beforeEach(() => {
     client = new MockExchangeOrderClient();
-    lifecycle = new SymbolOrderLifecycle('BTCUSDT', client);
+    lifecycle = new SymbolOrderLifecycle('BTCUSDT', client, stubRiskResolver);
   });
 
   it('starts IDLE/free', () => {
@@ -117,6 +128,58 @@ describe('SymbolOrderLifecycle — full real-order state machine (mocked exchang
       expect(event.entryPrice).toBe(100); // gapLow for LONG
       expect(event.slPrice).toBe(98);
       expect(event.tpPrice).toBeCloseTo(100 + 2.1 * 2, 6);
+    }
+  });
+
+  // TICKET-RT-077: risk% actually used for sizing must be the SOFT-VETO-ADJUSTED value, not the
+  // base risk% — TOP/BOTTOM/MIDDLE each verified end-to-end through the real wiring point.
+  it('uses the resolver\'s ADJUSTED risk% (TOP tier, base+0.5pp) for both riskPct and riskUsd', async () => {
+    client.balanceUsdt = 10000;
+    const topResolver: RiskResolverFn = async () => ({ baseRiskPct: 0.015, adjustedRiskPct: 0.02, tier: 'TOP', predictedScore: 0.9 });
+    const topLifecycle = new SymbolOrderLifecycle('BTCUSDT', client, topResolver);
+    const event = await topLifecycle.onSignalDetected(makeSignal());
+    expect(event.type).toBe('ENTRY_PLACED');
+    if (event.type === 'ENTRY_PLACED') {
+      expect(event.riskPct).toBe(0.02);
+      expect(event.riskUsd).toBe(200);
+      expect(event.softVeto).toEqual({ baseRiskPct: 0.015, adjustedRiskPct: 0.02, tier: 'TOP', predictedScore: 0.9 });
+    }
+  });
+
+  it('uses the resolver\'s ADJUSTED risk% (BOTTOM tier, base-0.5pp) for both riskPct and riskUsd', async () => {
+    client.balanceUsdt = 10000;
+    const bottomResolver: RiskResolverFn = async () => ({ baseRiskPct: 0.015, adjustedRiskPct: 0.01, tier: 'BOTTOM', predictedScore: 0.1 });
+    const bottomLifecycle = new SymbolOrderLifecycle('BTCUSDT', client, bottomResolver);
+    const event = await bottomLifecycle.onSignalDetected(makeSignal());
+    expect(event.type).toBe('ENTRY_PLACED');
+    if (event.type === 'ENTRY_PLACED') {
+      expect(event.riskPct).toBe(0.01);
+      expect(event.riskUsd).toBe(100);
+      expect(event.softVeto.tier).toBe('BOTTOM');
+    }
+  });
+
+  it('uses the resolver\'s unchanged risk% (MIDDLE tier, no adjustment) for both riskPct and riskUsd', async () => {
+    client.balanceUsdt = 10000;
+    const event = await lifecycle.onSignalDetected(makeSignal()); // default beforeEach lifecycle uses stubRiskResolver (MIDDLE)
+    expect(event.type).toBe('ENTRY_PLACED');
+    if (event.type === 'ENTRY_PLACED') {
+      expect(event.riskPct).toBe(0.015);
+      expect(event.riskUsd).toBe(150);
+      expect(event.softVeto.tier).toBe('MIDDLE');
+    }
+  });
+
+  it('carries the SAME softVeto resolution through from ENTRY_PLACED to ENTRY_FILLED', async () => {
+    client.balanceUsdt = 10000;
+    const topResolver: RiskResolverFn = async () => ({ baseRiskPct: 0.015, adjustedRiskPct: 0.02, tier: 'TOP', predictedScore: 0.9 });
+    const topLifecycle = new SymbolOrderLifecycle('BTCUSDT', client, topResolver);
+    await topLifecycle.onSignalDetected(makeSignal());
+    client.setStatus(1, 'FILLED', 100, 1);
+    const event = await topLifecycle.onNewM15Candle();
+    expect(event?.type).toBe('ENTRY_FILLED');
+    if (event?.type === 'ENTRY_FILLED') {
+      expect(event.softVeto).toEqual({ baseRiskPct: 0.015, adjustedRiskPct: 0.02, tier: 'TOP', predictedScore: 0.9 });
     }
   });
 

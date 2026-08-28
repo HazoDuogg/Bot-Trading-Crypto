@@ -1,11 +1,15 @@
 import type { Direction } from '../entry/types.js';
 import { calculatePositionSize } from '../positionSizing/positionSizing.js';
 import { DEFAULT_MAX_MARGIN_PCT } from '../positionSizing/types.js';
-import { resolveRiskPct, DEFAULT_RISK_CONFIG, type RiskConfig } from '../positionSizing/riskConfig.js';
+import type { SoftVetoFeatures, SoftVetoResolution } from '../positionSizing/softVeto.js';
 import { DEFAULT_FVG_STRATEGY_CONFIG } from '../entry/fvgStrategyConfig.js';
 import type { ExchangeOrderClient } from './exchangeOrderClient.js';
 import { roundDownToStep, roundToTick } from './binanceOrderClient.js';
 import type { DetectedFvgSignal } from './signalEngine.js';
+
+// RT-077: risk% now comes from Soft Veto (base risk + tier adjustment), injected so tests don't
+// need a real Python subprocess per case — see liveRunner.ts for the production wiring.
+export type RiskResolverFn = (symbol: string, breaksKeyZone: boolean, features: SoftVetoFeatures) => Promise<SoftVetoResolution>;
 
 // TICKET-RT-068 Part B: the REAL order-execution state machine — deliberately separate from
 // signalEngine.ts's pure detection (per the ticket's explicit "tach bach" instruction). One
@@ -48,10 +52,11 @@ export type LifecycleEvent =
       slPrice: number;
       tpPrice: number;
       quantity: number;
-      riskPct: number;
+      riskPct: number; // adjusted (post-Soft-Veto) risk% — the value actually used for sizing
       riskUsd: number;
       balanceUsedUsdt: number;
       signal: DetectedFvgSignal;
+      softVeto: SoftVetoResolution;
     }
   | { type: 'ENTRY_SKIPPED'; symbol: string; reason: string; signal: DetectedFvgSignal }
   | { type: 'ENTRY_TIMEOUT_CANCELLED'; symbol: string; orderId: number; waitedCandles: number }
@@ -66,6 +71,7 @@ export type LifecycleEvent =
       slOrderId: number;
       tpOrderId: number;
       signal: DetectedFvgSignal;
+      softVeto: SoftVetoResolution;
     }
   | {
       type: 'POSITION_CLOSED';
@@ -79,7 +85,7 @@ export type LifecycleEvent =
 
 type State =
   | { phase: 'IDLE' }
-  | { phase: 'ENTRY_PENDING'; orderId: number; direction: Direction; entryPrice: number; slPrice: number; tpPrice: number; quantity: number; waitCount: number; signal: DetectedFvgSignal }
+  | { phase: 'ENTRY_PENDING'; orderId: number; direction: Direction; entryPrice: number; slPrice: number; tpPrice: number; quantity: number; waitCount: number; signal: DetectedFvgSignal; softVeto: SoftVetoResolution }
   | {
       phase: 'PLACING_PROTECTION';
       direction: Direction;
@@ -91,6 +97,7 @@ type State =
       tpOrderId: number | null;
       entryFilledAtMs: number;
       signal: DetectedFvgSignal;
+      softVeto: SoftVetoResolution;
     }
   | { phase: 'POSITION_OPEN'; direction: Direction; entryPrice: number; quantity: number; slOrderId: number; tpOrderId: number; entryFilledAtMs: number; signal: DetectedFvgSignal };
 
@@ -100,7 +107,7 @@ export class SymbolOrderLifecycle {
   constructor(
     public readonly symbol: string,
     private readonly client: ExchangeOrderClient,
-    private readonly riskConfig: RiskConfig = DEFAULT_RISK_CONFIG,
+    private readonly resolveRisk: RiskResolverFn,
   ) {}
 
   isFree(): boolean {
@@ -122,7 +129,14 @@ export class SymbolOrderLifecycle {
     if (slPct < FLOOR_PCT) return { type: 'ENTRY_SKIPPED', symbol: this.symbol, reason: `slPct ${slPct.toFixed(3)}% < floor ${FLOOR_PCT}%`, signal };
 
     const tpPriceRaw = direction === 'LONG' ? entryPriceRaw + TARGET_R * slDistanceRaw : entryPriceRaw - TARGET_R * slDistanceRaw;
-    const riskPct = resolveRiskPct(this.symbol, signal.breaksKeyZone, this.riskConfig);
+    const features: SoftVetoFeatures = {
+      fvgGapSizePct: ((signal.gapHigh - signal.gapLow) / entryPriceRaw) * 100,
+      keyZoneDistancePct: signal.keyZoneDistancePct ?? NaN,
+      atrH1Pct: signal.atrH1Pct,
+      slPct,
+    };
+    const softVeto = await this.resolveRisk(this.symbol, signal.breaksKeyZone, features);
+    const riskPct = softVeto.adjustedRiskPct;
 
     // Part A: REAL balance/leverage, fetched fresh every time — never cached/computed internally.
     const [balance, leverage, filters] = await Promise.all([this.client.getAvailableBalanceUsdt(), this.client.getSymbolLeverage(this.symbol), this.client.getSymbolFilters(this.symbol)]);
@@ -142,9 +156,9 @@ export class SymbolOrderLifecycle {
     }
 
     const order = await this.client.placeLimitEntryOrder(this.symbol, direction, quantity, entryPrice);
-    this.state = { phase: 'ENTRY_PENDING', orderId: order.orderId, direction, entryPrice, slPrice, tpPrice, quantity, waitCount: 0, signal };
+    this.state = { phase: 'ENTRY_PENDING', orderId: order.orderId, direction, entryPrice, slPrice, tpPrice, quantity, waitCount: 0, signal, softVeto };
 
-    return { type: 'ENTRY_PLACED', symbol: this.symbol, orderId: order.orderId, direction, entryPrice, slPrice, tpPrice, quantity, riskPct, riskUsd, balanceUsedUsdt: balance, signal };
+    return { type: 'ENTRY_PLACED', symbol: this.symbol, orderId: order.orderId, direction, entryPrice, slPrice, tpPrice, quantity, riskPct, riskUsd, balanceUsedUsdt: balance, signal, softVeto };
   }
 
   // TICKET-RT-070: called once right after entry FILLED, and again on every subsequent tick while
@@ -182,7 +196,7 @@ export class SymbolOrderLifecycle {
       entryFilledAtMs: s.entryFilledAtMs,
       signal: s.signal,
     };
-    return { type: 'ENTRY_FILLED', symbol: this.symbol, direction: s.direction, entryPrice: s.entryPrice, quantity: s.quantity, slPrice: s.slPrice, tpPrice: s.tpPrice, slOrderId: s.slOrderId, tpOrderId: s.tpOrderId, signal: s.signal };
+    return { type: 'ENTRY_FILLED', symbol: this.symbol, direction: s.direction, entryPrice: s.entryPrice, quantity: s.quantity, slPrice: s.slPrice, tpPrice: s.tpPrice, slOrderId: s.slOrderId, tpOrderId: s.tpOrderId, signal: s.signal, softVeto: s.softVeto };
   }
 
   async onNewM15Candle(): Promise<LifecycleEvent | null> {
@@ -210,6 +224,7 @@ export class SymbolOrderLifecycle {
           tpOrderId: null,
           entryFilledAtMs: order.updateTime,
           signal: s.signal,
+          softVeto: s.softVeto,
         };
         return this.placeMissingProtectionOrders();
       }
