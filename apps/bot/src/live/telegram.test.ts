@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loadTelegramConfigFromEnv, formatEventMessage } from './telegram.js';
+import { loadTelegramConfigFromEnv, formatEventMessage, escapeHtmlForTelegram } from './telegram.js';
 import type { LiveEventRecord } from './eventRecord.js';
 
 // Note: sendTelegramMessage() itself (the real network call) is deliberately NOT covered by an
@@ -31,6 +31,71 @@ describe('loadTelegramConfigFromEnv', () => {
 function baseRecord(overrides: Partial<LiveEventRecord>): LiveEventRecord {
   return { timestampUtc: '2026-01-01T00:00:00.000Z', symbol: 'BTCUSDT', strategy: 'FVG H1+M15', eventKind: 'ENTRY_PLACED', raw: {}, ...overrides };
 }
+
+// TICKET-RT-080 hotfix: parse_mode='HTML' means an unescaped '<' in dynamic text is parsed as an
+// HTML tag — Telegram then rejects the WHOLE message with "400: can't parse entities".
+describe('escapeHtmlForTelegram', () => {
+  it('escapes &, <, > in that order (so & introduced by escaping < is not itself re-escaped)', () => {
+    expect(escapeHtmlForTelegram('a < b > c & d')).toBe('a &lt; b &gt; c &amp; d');
+  });
+
+  it('does not double-escape an already-escaped ampersand', () => {
+    expect(escapeHtmlForTelegram('&lt;')).toBe('&amp;lt;'); // input taken literally, per the function's own contract
+  });
+
+  it('leaves plain text with no special characters unchanged', () => {
+    expect(escapeHtmlForTelegram('slPct 0.425% < floor 0.5%').length).toBeGreaterThan(0);
+    expect(escapeHtmlForTelegram('hello world')).toBe('hello world');
+  });
+});
+
+describe('formatEventMessage — RT-080 hotfix: escapes dynamic text so Telegram HTML parsing never breaks', () => {
+  it('reproduces the exact bug scenario: a raw Binance-style error message containing "<" in `note` no longer breaks the surrounding <b> tags', () => {
+    const rawBinanceError = 'Binance tra ve: reduce-only qty < min notional';
+    const msg = formatEventMessage(baseRecord({ eventKind: 'LIFECYCLE_ERROR', note: rawBinanceError }));
+
+    // The dangerous raw '<' must be gone, replaced with the escaped entity.
+    expect(msg).not.toContain('qty < min');
+    expect(msg).toContain('qty &lt; min notional');
+
+    // The code's OWN <b>...</b> tag (the event title) must survive untouched — this is real HTML
+    // structure, not user data, and must not be escaped away.
+    expect(msg).toContain('<b>LỖI VÒNG ĐỜI LỆNH</b>');
+  });
+
+  it('escapes "<" and ">" in entryReasonText without breaking the message\'s own <b> tags', () => {
+    const msg = formatEventMessage(
+      baseRecord({ eventKind: 'ENTRY_PLACED', direction: 'LONG', entryReasonText: 'gap size <0.5% và >0.1%, nghi ngo du lieu' }),
+    );
+    expect(msg).toContain('&lt;0.5% và &gt;0.1%');
+    expect(msg).not.toContain('gap size <0.5%');
+    expect(msg).toContain('<b>LONG</b>'); // direction tag, code-generated, untouched
+  });
+
+  it('escapes "<" in resultReasonText', () => {
+    const msg = formatEventMessage(baseRecord({ eventKind: 'POSITION_CLOSED', resultOutcome: 'SL', resultReasonText: 'gia dong < gia SL du kien (slippage)' }));
+    expect(msg).toContain('gia dong &lt; gia SL');
+  });
+
+  it('escapes "<" in the symbol and strategy fields too (defensive — not attacker-controlled today, but cheap to cover)', () => {
+    const msg = formatEventMessage(baseRecord({ symbol: 'BTC<script>USDT', strategy: 'FVG<H1>' }));
+    expect(msg).toContain('BTC&lt;script&gt;USDT');
+    expect(msg).toContain('FVG&lt;H1&gt;');
+  });
+
+  it('a message with escaped content still sends as valid single-message text (no stray unescaped "<" anywhere it could form a tag)', () => {
+    const msg = formatEventMessage(
+      baseRecord({
+        eventKind: 'POSITION_CLOSED',
+        resultOutcome: 'SL',
+        note: '<<<malformed>>> Binance error: -4120 Order type not supported for this endpoint. Please use the Algo Order API instead. slPct 0.1% < floor 0.5%',
+      }),
+    );
+    // Every remaining '<' in the message belongs to one of the two REAL tags this code emits.
+    const tagLike = msg.match(/<[^>]*>/g) ?? [];
+    for (const tag of tagLike) expect(['<b>', '</b>']).toContain(tag);
+  });
+});
 
 describe('formatEventMessage — covers every field the ticket lists (Part D)', () => {
   it('includes time, asset, strategy always', () => {

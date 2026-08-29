@@ -1,5 +1,14 @@
 import type { LiveEventRecord } from './eventRecord.js';
 
+// TICKET-RT-080: sendTelegramMessage uses parse_mode='HTML' — any dynamic text containing '<'
+// (e.g. a raw Binance/exception error message forwarded into `note`) would otherwise be parsed as
+// an HTML tag, making Telegram reject the ENTIRE message with "400: can't parse entities". Order
+// matters: '&' MUST be escaped first, or the '&' introduced by escaping '<'/'>' would itself get
+// re-escaped into '&amp;lt;' / '&amp;gt;'.
+export function escapeHtmlForTelegram(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 export interface TelegramConfig {
   botToken: string;
   chatIds: string[];
@@ -79,9 +88,9 @@ export function formatEventMessage(record: LiveEventRecord): string {
     const balanceText = record.startupBalanceUsdt !== undefined && record.startupBalanceUsdt !== null ? `${record.startupBalanceUsdt.toFixed(2)} USDT` : '(không lấy được)';
     lines.push(`💰 Balance: ${balanceText}`);
   } else {
-    lines.push(`💰 ${record.symbol}`);
+    lines.push(`💰 ${escapeHtmlForTelegram(record.symbol)}`);
   }
-  lines.push(`📐 Chiến lược: ${record.strategy}`);
+  lines.push(`📐 Chiến lược: ${escapeHtmlForTelegram(record.strategy)}`);
 
   if (record.currentBalanceUsdt !== undefined) {
     const balText = record.currentBalanceUsdt !== null ? `${record.currentBalanceUsdt.toFixed(2)} USDT` : '(không lấy được)';
@@ -102,16 +111,16 @@ export function formatEventMessage(record: LiveEventRecord): string {
   if (record.slPrice !== undefined) lines.push(`🛑 SL: ${record.slPrice}`);
   if (record.tpPrice !== undefined) lines.push(`✅ TP: ${record.tpPrice}`);
   if (record.rMultiple !== undefined) lines.push(`⚖️ R:R: ${record.rMultiple.toFixed(2)}R (co dinh)`);
-  if (record.entryReasonText) lines.push(`📝 Lý do vào lệnh: ${record.entryReasonText}`);
+  if (record.entryReasonText) lines.push(`📝 Lý do vào lệnh: ${escapeHtmlForTelegram(record.entryReasonText)}`);
 
   if (record.resultOutcome) {
     const resultEmoji = record.resultOutcome === 'TP' ? '✅ WIN' : '❌ LOSS (XUI THÔI, ĐỎ LÀ WIN RỒI)';
     const pnlText = record.resultPnlUsd !== undefined ? ` (PnL thật: ${record.resultPnlUsd >= 0 ? '+' : ''}$${record.resultPnlUsd.toFixed(4)})` : '';
     lines.push(`🏆 Kết quả: <b>${resultEmoji}</b>${pnlText}`);
-    if (record.resultReasonText) lines.push(`   ${record.resultReasonText}`);
+    if (record.resultReasonText) lines.push(`   ${escapeHtmlForTelegram(record.resultReasonText)}`);
   }
 
-  if (record.note) lines.push(`\nℹ️ ${record.note}`);
+  if (record.note) lines.push(`\nℹ️ ${escapeHtmlForTelegram(record.note)}`);
 
   return lines.join('\n');
 }
