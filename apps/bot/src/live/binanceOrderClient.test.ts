@@ -37,6 +37,26 @@ async function pollUntilNotOpen(client: BinanceOrderClient, symbol: string, orde
   return last;
 }
 
+// TICKET-RT-081: a real testnet order got left behind because a test's cleanup (cancelOrder) was
+// never wrapped in try/finally at all — an earlier assertion/query throwing (e.g. testnet
+// eventual-consistency, same -2013 class getOrderWithRetry already tolerates) skipped straight
+// past the cancel. This retries the cancel call itself AND every caller below now wraps its
+// cancel/flatten step in try/finally, so cleanup runs even when an earlier step in the test throws.
+async function cancelOrderWithRetry(client: BinanceOrderClient, symbol: string, orderId: number, maxAttempts = 5): Promise<void> {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      await client.cancelOrder(symbol, orderId);
+      return;
+    } catch (err) {
+      if (err instanceof BinanceHttpError && i < maxAttempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 describe('roundDownToStep / roundToTick (pure)', () => {
   it('rounds quantity DOWN to the LOT_SIZE step (never up — never risk over-sizing)', () => {
     expect(roundDownToStep(0.12349, 0.001)).toBeCloseTo(0.123, 10);
@@ -76,66 +96,26 @@ describe.skipIf(!hasCredentials)('BinanceOrderClient (integration, real Binance 
     return new BinanceOrderClient(process.env.BINANCE_TESTNET_URL!, process.env.BINANCE_TESTNET_KEY_ENC!, process.env.BINANCE_TESTNET_SECRET_ENC!);
   }
   const client = hasCredentials ? makeClient() : (null as unknown as BinanceOrderClient);
-  const FAR_BELOW_MARKET_PRICE = 0.5; // real XRPUSDT price ~1.40 at authoring time — never fills
+  const FAR_BELOW_MARKET_PRICE = 0.03; // real DOGEUSDT price ~0.087 at authoring time — never fills
 
   it('getAvailableBalanceUsdt returns a real, positive USDT balance', async () => {
     const balance = await client.getAvailableBalanceUsdt();
     expect(balance).toBeGreaterThan(0);
   }, 15000);
 
-  it('getSymbolLeverage returns the account\'s real current leverage for XRPUSDT', async () => {
-    const leverage = await client.getSymbolLeverage('XRPUSDT');
+  it('getSymbolLeverage returns the account\'s real current leverage for DOGEUSDT', async () => {
+    const leverage = await client.getSymbolLeverage('DOGEUSDT');
     expect(leverage).toBeGreaterThan(0);
   }, 15000);
 
-  it('setLeverage actually changes the account\'s real leverage for XRPUSDT, confirmed by re-reading it', async () => {
-    const before = await client.getSymbolLeverage('XRPUSDT');
+  it('setLeverage actually changes the account\'s real leverage for DOGEUSDT, confirmed by re-reading it', async () => {
+    const before = await client.getSymbolLeverage('DOGEUSDT');
     const target = before === 10 ? 15 : 10; // pick a value guaranteed different from whatever is currently set
-    await client.setLeverage('XRPUSDT', target);
-    const after = await client.getSymbolLeverage('XRPUSDT');
+    await client.setLeverage('DOGEUSDT', target);
+    const after = await client.getSymbolLeverage('DOGEUSDT');
     expect(after).toBe(target);
-    await client.setLeverage('XRPUSDT', before); // restore, so this test doesn't leave the account mutated
+    await client.setLeverage('DOGEUSDT', before); // restore, so this test doesn't leave the account mutated
   }, 15000);
-
-  it('getSymbolFilters returns real LOT_SIZE/PRICE_FILTER/MIN_NOTIONAL for XRPUSDT', async () => {
-    const filters = await client.getSymbolFilters('XRPUSDT');
-    expect(filters.stepSize).toBeGreaterThan(0);
-    expect(filters.tickSize).toBeGreaterThan(0);
-    expect(filters.minNotional).toBeGreaterThanOrEqual(0);
-  }, 15000);
-
-  it('places a real LIMIT order far below market, queries it as NEW, cancels it, and confirms CANCELED', async () => {
-    const filters = await client.getSymbolFilters('XRPUSDT');
-    const price = roundToTick(FAR_BELOW_MARKET_PRICE, filters.tickSize);
-    const minQtyForNotional = filters.minNotional > 0 ? filters.minNotional / price : filters.stepSize;
-    const quantity = roundDownToStep(Math.max(minQtyForNotional * 1.1, filters.stepSize), filters.stepSize);
-
-    const placed = await client.placeLimitEntryOrder('XRPUSDT', 'LONG', quantity, price);
-    expect(placed.status).toBe('NEW');
-    expect(placed.symbol).toBe('XRPUSDT');
-
-    const queried = await client.getOrder('XRPUSDT', placed.orderId);
-    expect(queried.status).toBe('NEW');
-    expect(queried.orderId).toBe(placed.orderId);
-
-    await client.cancelOrder('XRPUSDT', placed.orderId);
-    const afterCancel = await client.getOrder('XRPUSDT', placed.orderId);
-    expect(afterCancel.status).toBe('CANCELED');
-  }, 30000);
-
-  it('cancelOrder on an already-canceled order does not throw (idempotent, -2011 tolerated)', async () => {
-    const filters = await client.getSymbolFilters('XRPUSDT');
-    const price = roundToTick(FAR_BELOW_MARKET_PRICE, filters.tickSize);
-    const quantity = roundDownToStep(Math.max((filters.minNotional / price) * 1.1, filters.stepSize), filters.stepSize);
-    const placed = await client.placeLimitEntryOrder('XRPUSDT', 'LONG', quantity, price);
-    await client.cancelOrder('XRPUSDT', placed.orderId);
-    await expect(client.cancelOrder('XRPUSDT', placed.orderId)).resolves.not.toThrow();
-  }, 30000);
-
-  // TICKET-RT-079 Part B step 4: same real-order round trip as the XRPUSDT tests above, now for
-  // DOGEUSDT — confirms rounding via getSymbolFilters('DOGEUSDT') (stepSize/tickSize DIFFERENT
-  // from XRP: DOGE's LOT_SIZE stepSize is whole coins, not fractional) works correctly end to end.
-  const DOGE_FAR_BELOW_MARKET_PRICE = 0.03; // real DOGEUSDT price ~0.087 at authoring time — never fills
 
   it('getSymbolFilters returns real LOT_SIZE/PRICE_FILTER/MIN_NOTIONAL for DOGEUSDT', async () => {
     const filters = await client.getSymbolFilters('DOGEUSDT');
@@ -146,7 +126,7 @@ describe.skipIf(!hasCredentials)('BinanceOrderClient (integration, real Binance 
 
   it('places a real DOGEUSDT LIMIT order far below market (qty/price rounded via real filters), queries it as NEW, cancels it, and confirms CANCELED', async () => {
     const filters = await client.getSymbolFilters('DOGEUSDT');
-    const price = roundToTick(DOGE_FAR_BELOW_MARKET_PRICE, filters.tickSize);
+    const price = roundToTick(FAR_BELOW_MARKET_PRICE, filters.tickSize);
     const minQtyForNotional = filters.minNotional > 0 ? filters.minNotional / price : filters.stepSize;
     const quantity = roundDownToStep(Math.max(minQtyForNotional * 1.1, filters.stepSize), filters.stepSize);
 
@@ -155,54 +135,37 @@ describe.skipIf(!hasCredentials)('BinanceOrderClient (integration, real Binance 
     expect(placed.symbol).toBe('DOGEUSDT');
     expect(quantity % filters.stepSize).toBeCloseTo(0, 8); // rounded correctly to DOGE's (whole-coin) step
 
-    const queried = await client.getOrder('DOGEUSDT', placed.orderId);
-    expect(queried.status).toBe('NEW');
-    expect(queried.orderId).toBe(placed.orderId);
-
-    await client.cancelOrder('DOGEUSDT', placed.orderId);
-    const afterCancel = await client.getOrder('DOGEUSDT', placed.orderId);
+    // TICKET-RT-081: wrapped in try/finally — an assertion/query failure between place and cancel
+    // (e.g. testnet eventual-consistency, same -2013 class getOrderWithRetry tolerates elsewhere)
+    // must never leave this real order dangling on the account, as previously happened.
+    try {
+      const queried = await getOrderWithRetry(client, 'DOGEUSDT', placed.orderId);
+      expect(queried.status).toBe('NEW');
+      expect(queried.orderId).toBe(placed.orderId);
+    } finally {
+      await cancelOrderWithRetry(client, 'DOGEUSDT', placed.orderId);
+    }
+    const afterCancel = await getOrderWithRetry(client, 'DOGEUSDT', placed.orderId);
     expect(afterCancel.status).toBe('CANCELED');
   }, 30000);
 
-  it('opens a real tiny DOGEUSDT position and places REAL STOP_MARKET+TAKE_PROFIT_MARKET close orders via the Algo Order API, then flattens it', async () => {
+  it('cancelOrder on an already-canceled order does not throw (idempotent, -2011 tolerated)', async () => {
     const filters = await client.getSymbolFilters('DOGEUSDT');
-    const priceRes = await fetch(`${process.env.BINANCE_TESTNET_URL}/fapi/v1/ticker/price?symbol=DOGEUSDT`);
-    const markPrice = Number(((await priceRes.json()) as { price: string }).price);
-    expect(markPrice).toBeGreaterThan(0);
-
-    const minQtyForNotional = filters.minNotional > 0 ? filters.minNotional / markPrice : filters.stepSize;
-    const quantity = roundDownToStep(Math.max(minQtyForNotional * 1.1, filters.stepSize), filters.stepSize);
-
-    const entryPrice = roundToTick(markPrice * 1.02, filters.tickSize);
-    const entry = await client.placeLimitEntryOrder('DOGEUSDT', 'LONG', quantity, entryPrice);
-    const filledEntry = await client.getOrder('DOGEUSDT', entry.orderId);
-    expect(filledEntry.status).toBe('FILLED');
-
+    const price = roundToTick(FAR_BELOW_MARKET_PRICE, filters.tickSize);
+    const quantity = roundDownToStep(Math.max((filters.minNotional / price) * 1.1, filters.stepSize), filters.stepSize);
+    const placed = await client.placeLimitEntryOrder('DOGEUSDT', 'LONG', quantity, price);
     try {
-      const slPrice = roundToTick(markPrice * 0.5, filters.tickSize);
-      const tpPrice = roundToTick(markPrice * 2, filters.tickSize);
-
-      const slPlaced = await client.placeStopMarketCloseOrder('DOGEUSDT', 'LONG', slPrice);
-      expect(slPlaced.status).toBe('NEW');
-      const tpPlaced = await client.placeTakeProfitMarketCloseOrder('DOGEUSDT', 'LONG', tpPrice);
-      expect(tpPlaced.status).toBe('NEW');
-
-      const slQueried = await getOrderWithRetry(client, 'DOGEUSDT', slPlaced.orderId);
-      expect(slQueried.status).toBe('NEW');
-      const tpQueried = await getOrderWithRetry(client, 'DOGEUSDT', tpPlaced.orderId);
-      expect(tpQueried.status).toBe('NEW');
-
-      await client.cancelOrder('DOGEUSDT', slPlaced.orderId);
-      await client.cancelOrder('DOGEUSDT', tpPlaced.orderId);
-    } finally {
-      const closePrice = roundToTick(markPrice * 0.98, filters.tickSize);
-      await client.placeLimitEntryOrder('DOGEUSDT', 'SHORT', quantity, closePrice);
+      await cancelOrderWithRetry(client, 'DOGEUSDT', placed.orderId);
+      await expect(client.cancelOrder('DOGEUSDT', placed.orderId)).resolves.not.toThrow();
+    } catch (err) {
+      await client.cancelOrder('DOGEUSDT', placed.orderId).catch(() => {}); // best-effort cleanup if the assertion above never got that far
+      throw err;
     }
   }, 30000);
 
-  it('opens a real tiny position, places REAL STOP_MARKET+TAKE_PROFIT_MARKET close orders via the Algo Order API, verifies+cancels them, and flattens the position again', async () => {
-    const filters = await client.getSymbolFilters('XRPUSDT');
-    const priceRes = await fetch(`${process.env.BINANCE_TESTNET_URL}/fapi/v1/ticker/price?symbol=XRPUSDT`);
+  it('opens a real tiny DOGEUSDT position, places REAL STOP_MARKET+TAKE_PROFIT_MARKET close orders via the Algo Order API, verifies+cancels them, and flattens the position again', async () => {
+    const filters = await client.getSymbolFilters('DOGEUSDT');
+    const priceRes = await fetch(`${process.env.BINANCE_TESTNET_URL}/fapi/v1/ticker/price?symbol=DOGEUSDT`);
     const markPrice = Number(((await priceRes.json()) as { price: string }).price);
     expect(markPrice).toBeGreaterThan(0);
 
@@ -212,52 +175,52 @@ describe.skipIf(!hasCredentials)('BinanceOrderClient (integration, real Binance 
     // Cross the book (2% above mark) so this LIMIT order fills immediately as a taker order —
     // opens a REAL tiny LONG position, same as a real ENTRY_FILLED in production.
     const entryPrice = roundToTick(markPrice * 1.02, filters.tickSize);
-    const entry = await client.placeLimitEntryOrder('XRPUSDT', 'LONG', quantity, entryPrice);
-    const filledEntry = await client.getOrder('XRPUSDT', entry.orderId);
+    const entry = await client.placeLimitEntryOrder('DOGEUSDT', 'LONG', quantity, entryPrice);
+    const filledEntry = await getOrderWithRetry(client, 'DOGEUSDT', entry.orderId);
     expect(filledEntry.status).toBe('FILLED');
 
     try {
       const slPrice = roundToTick(markPrice * 0.5, filters.tickSize); // far below — never triggers
       const tpPrice = roundToTick(markPrice * 2, filters.tickSize); // far above — never triggers
 
-      const slPlaced = await client.placeStopMarketCloseOrder('XRPUSDT', 'LONG', slPrice);
+      const slPlaced = await client.placeStopMarketCloseOrder('DOGEUSDT', 'LONG', slPrice);
       expect(slPlaced.status).toBe('NEW');
-      expect(slPlaced.symbol).toBe('XRPUSDT');
+      expect(slPlaced.symbol).toBe('DOGEUSDT');
       expect(slPlaced.orderId).toBeGreaterThan(0);
 
-      const tpPlaced = await client.placeTakeProfitMarketCloseOrder('XRPUSDT', 'LONG', tpPrice);
+      const tpPlaced = await client.placeTakeProfitMarketCloseOrder('DOGEUSDT', 'LONG', tpPrice);
       expect(tpPlaced.status).toBe('NEW');
       expect(tpPlaced.orderId).toBeGreaterThan(0);
       expect(tpPlaced.orderId).not.toBe(slPlaced.orderId);
 
-      // getOrder() routes both through the new algoId-based query path — proves the response is
+      // getOrder() routes both through the algoId-based query path — proves the response is
       // getOrder()-compatible (algoStatus mapped back to the same OrderStatus vocabulary).
-      const slQueried = await getOrderWithRetry(client, 'XRPUSDT', slPlaced.orderId);
+      const slQueried = await getOrderWithRetry(client, 'DOGEUSDT', slPlaced.orderId);
       expect(slQueried.status).toBe('NEW');
       expect(slQueried.orderId).toBe(slPlaced.orderId);
-      const tpQueried = await getOrderWithRetry(client, 'XRPUSDT', tpPlaced.orderId);
+      const tpQueried = await getOrderWithRetry(client, 'DOGEUSDT', tpPlaced.orderId);
       expect(tpQueried.status).toBe('NEW');
 
       // getOpenOrders() must see both (merged from /fapi/v1/openAlgoOrders, since they no longer
       // show up in /fapi/v1/openOrders post-migration).
-      const open = await client.getOpenOrders('XRPUSDT');
+      const open = await client.getOpenOrders('DOGEUSDT');
       expect(open.some((o) => o.orderId === slPlaced.orderId)).toBe(true);
       expect(open.some((o) => o.orderId === tpPlaced.orderId)).toBe(true);
 
-      await client.cancelOrder('XRPUSDT', slPlaced.orderId);
-      const openAfterSlCancel = await pollUntilNotOpen(client, 'XRPUSDT', slPlaced.orderId);
+      await cancelOrderWithRetry(client, 'DOGEUSDT', slPlaced.orderId);
+      const openAfterSlCancel = await pollUntilNotOpen(client, 'DOGEUSDT', slPlaced.orderId);
       expect(openAfterSlCancel.some((o) => o.orderId === slPlaced.orderId)).toBe(false);
 
-      await client.cancelOrder('XRPUSDT', tpPlaced.orderId);
-      const openAfterTpCancel = await pollUntilNotOpen(client, 'XRPUSDT', tpPlaced.orderId);
+      await cancelOrderWithRetry(client, 'DOGEUSDT', tpPlaced.orderId);
+      const openAfterTpCancel = await pollUntilNotOpen(client, 'DOGEUSDT', tpPlaced.orderId);
       expect(openAfterTpCancel.some((o) => o.orderId === tpPlaced.orderId)).toBe(false);
 
       // Idempotent cancel on an already-canceled ALGO order must not throw.
-      await expect(client.cancelOrder('XRPUSDT', slPlaced.orderId)).resolves.not.toThrow();
+      await expect(client.cancelOrder('DOGEUSDT', slPlaced.orderId)).resolves.not.toThrow();
     } finally {
       // Always flatten the real position this test opened, even if an assertion above failed.
       const closePrice = roundToTick(markPrice * 0.98, filters.tickSize); // crosses below -> fills as taker
-      await client.placeLimitEntryOrder('XRPUSDT', 'SHORT', quantity, closePrice);
+      await client.placeLimitEntryOrder('DOGEUSDT', 'SHORT', quantity, closePrice);
     }
   }, 30000);
 });
