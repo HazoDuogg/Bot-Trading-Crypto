@@ -13,8 +13,6 @@
     "build": "npm run build --workspace apps/bot",
     "typecheck": "npm run typecheck --workspace apps/bot",
     "build:scripts": "tsc -p apps/bot/scripts/tsconfig.json",
-    "audit:trend-live-like": "npm run build:scripts && node apps/bot/scripts-dist/scripts/research/rt084CurrentTrendLiveLikeBaseline.js",
-    "fetch:rt084-intrabar": "npm run build:scripts && node apps/bot/scripts-dist/scripts/research/fetchRt084Intrabar.js",
     "fetch-ohlcv": "npm run build:scripts && node apps/bot/scripts-dist/fetchOhlcv.js",
     "generate-momentum-training-data": "npm run build:scripts && node apps/bot/scripts-dist/generateMomentumTrainingData.js",
     "measure-candle-poll-latency": "npm run build:scripts && node apps/bot/scripts-dist/measureCandlePollLatency.js"
