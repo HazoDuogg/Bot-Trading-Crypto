@@ -65,6 +65,83 @@ async function fetchRange(range: FetchRange): Promise<Candle[]> {
   return rows.map((row) => ({ openTime: Number(row[0]), open: Number(row[1]), high: Number(row[2]), low: Number(row[3]), close: Number(row[4]), volume: Number(row[5]) }));
 }
 
+async function readExistingCache(filePath: string): Promise<Map<string, Candle & { symbol: string }>> {
+  const cache = new Map<string, Candle & { symbol: string }>();
+  let raw: string;
+  try {
+    raw = await readFile(filePath, 'utf8');
+  } catch {
+    return cache; // no file yet — empty cache, everything required will be "missing"
+  }
+  for (const line of raw.trim().split(/\r?\n/).slice(1)) {
+    const [symbol, openTime, open, high, low, close, volume] = line.split(',');
+    cache.set(`${symbol}:${openTime}`, { symbol, openTime: Number(openTime), open: Number(open), high: Number(high), low: Number(low), close: Number(close), volume: Number(volume) });
+  }
+  return cache;
+}
+
+// TICKET-RT-087: reusable, incremental — reads whatever is already cached in rt084Intrabar1m.csv,
+// fetches ONLY the minutes still missing for the given required-block set, merges, and re-verifies
+// every required minute is present before writing (same "throw if any minute missing" self-check
+// RT-084 always had, now applied to the merged superset instead of a single fresh fetch).
+export async function ensureIntrabarBlocks(required: Map<string, Set<number>>, dataDir: string = DATA_DIR): Promise<{ alreadyCached: number; fetched: number; totalBlocks: number }> {
+  const outputPath = path.join(dataDir, 'rt084Intrabar1m.csv');
+  const cache = await readExistingCache(outputPath);
+
+  const missingBySymbol = new Map<string, Set<number>>();
+  let totalBlocks = 0;
+  let alreadyCachedBlocks = 0;
+  for (const [symbol, blocks] of required) {
+    for (const block of blocks) {
+      totalBlocks++;
+      const complete = Array.from({ length: 15 }, (_, i) => block + i * M1_MS).every((minute) => cache.has(`${symbol}:${minute}`));
+      if (complete) {
+        alreadyCachedBlocks++;
+        continue;
+      }
+      const set = missingBySymbol.get(symbol) ?? new Set<number>();
+      missingBySymbol.set(symbol, set);
+      set.add(block);
+    }
+  }
+
+  const missingBlockCount = [...missingBySymbol.values()].reduce((sum, s) => sum + s.size, 0);
+  console.log(`  Intrabar cache: ${alreadyCachedBlocks}/${totalBlocks} blocks already cached; ${missingBlockCount} missing.`);
+  if (missingBlockCount === 0) return { alreadyCached: alreadyCachedBlocks, fetched: 0, totalBlocks };
+
+  const ranges = [...missingBySymbol].flatMap(([symbol, blocks]) => rangesFor(symbol, blocks));
+  const fetchedRows: Array<Candle & { symbol: string }> = [];
+  let cursor = 0;
+  const workers = Array.from({ length: 4 }, async () => {
+    while (cursor < ranges.length) {
+      const range = ranges[cursor++];
+      const fetched = await fetchRange(range);
+      const wanted = new Set(range.blocks);
+      for (const candle of fetched) if (wanted.has(Math.floor(candle.openTime / M15_MS) * M15_MS)) fetchedRows.push({ ...candle, symbol: range.symbol });
+      if (cursor % 250 === 0) console.log(`  Fetched ${cursor}/${ranges.length} missing ranges`);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    }
+  });
+  await Promise.all(workers);
+
+  for (const candle of fetchedRows) cache.set(`${candle.symbol}:${candle.openTime}`, candle);
+
+  for (const [symbol, blocks] of required) {
+    for (const block of blocks) {
+      for (let minute = 0; minute < 15; minute++) {
+        const key = `${symbol}:${block + minute * M1_MS}`;
+        if (!cache.has(key)) throw new Error(`Missing minute after fetch: ${key}`);
+      }
+    }
+  }
+
+  const merged = [...cache.values()].sort((a, b) => a.symbol.localeCompare(b.symbol) || a.openTime - b.openTime);
+  const rows = merged.map((candle) => `${candle.symbol},${candle.openTime},${candle.open},${candle.high},${candle.low},${candle.close},${candle.volume}`);
+  await writeFile(outputPath, ['symbol,openTime,open,high,low,close,volume', ...rows].join('\n') + '\n', 'utf8');
+  console.log(`  Wrote ${merged.length} total candles (${fetchedRows.length} newly fetched) to ${outputPath}`);
+  return { alreadyCached: alreadyCachedBlocks, fetched: missingBlockCount, totalBlocks };
+}
+
 async function main(): Promise<void> {
   const m15BySymbol = new Map<string, Candle[]>();
   const candidates = [];
@@ -80,35 +157,10 @@ async function main(): Promise<void> {
     candidates.push(...generated.candidates);
   }
   const required = requiredIntrabarBlocks(candidates, m15BySymbol);
-  const ranges = [...required].flatMap(([symbol, blocks]) => rangesFor(symbol, blocks));
   const blockCount = [...required.values()].reduce((sum, blocks) => sum + blocks.size, 0);
-  console.log(`Detected=${detected}; floorRejected=${floorRejected}; eligible=${candidates.length}; blocks=${blockCount}; ranges=${ranges.length}`);
+  console.log(`Detected=${detected}; floorRejected=${floorRejected}; eligible=${candidates.length}; blocks=${blockCount}`);
   if (process.env.RT084_PLAN_ONLY === '1') return;
-
-  const collected: Array<Candle & { symbol: string }> = [];
-  let cursor = 0;
-  const workers = Array.from({ length: 4 }, async () => {
-    while (cursor < ranges.length) {
-      const range = ranges[cursor++];
-      const fetched = await fetchRange(range);
-      const wanted = new Set(range.blocks);
-      for (const candle of fetched) if (wanted.has(Math.floor(candle.openTime / M15_MS) * M15_MS)) collected.push({ ...candle, symbol: range.symbol });
-      if (cursor % 250 === 0) console.log(`Fetched ${cursor}/${ranges.length}`);
-      await new Promise((resolve) => setTimeout(resolve, 600));
-    }
-  });
-  await Promise.all(workers);
-  collected.sort((a, b) => a.symbol.localeCompare(b.symbol) || a.openTime - b.openTime);
-  const unique = new Map(collected.map((candle) => [`${candle.symbol}:${candle.openTime}`, candle]));
-  for (const [symbol, blocks] of required) {
-    for (const block of blocks) {
-      for (let minute = 0; minute < 15; minute++) if (!unique.has(`${symbol}:${block + minute * M1_MS}`)) throw new Error(`Missing minute: ${symbol} ${block + minute * M1_MS}`);
-    }
-  }
-  const candles = [...unique.values()].sort((a, b) => a.symbol.localeCompare(b.symbol) || a.openTime - b.openTime);
-  const rows = candles.map((candle) => `${candle.symbol},${candle.openTime},${candle.open},${candle.high},${candle.low},${candle.close},${candle.volume}`);
-  await writeFile(OUTPUT_PATH, ['symbol,openTime,open,high,low,close,volume', ...rows].join('\n') + '\n', 'utf8');
-  console.log(`Wrote ${candles.length} candles to ${OUTPUT_PATH}`);
+  await ensureIntrabarBlocks(required, DATA_DIR);
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : '';

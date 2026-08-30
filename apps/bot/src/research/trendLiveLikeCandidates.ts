@@ -12,7 +12,11 @@ export interface CandidateGenerationResult {
   candidates: TrendCandidate[];
 }
 
-export function generateTrendCandidates(symbol: string, m15: Candle[], h1: Candle[]): CandidateGenerationResult {
+// TICKET-RT-087: `minSlPctFloor` is now an optional override (default = production's
+// DEFAULT_FVG_STRATEGY_CONFIG.minSlPctFloor) so a sweep can regenerate the candidate set per floor
+// value without touching production config — RT-084/RT-086's callers pass nothing and get the
+// exact same behavior as before this change.
+export function generateTrendCandidates(symbol: string, m15: Candle[], h1: Candle[], minSlPctFloor: number = DEFAULT_FVG_STRATEGY_CONFIG.minSlPctFloor): CandidateGenerationResult {
   const engine = new SymbolSignalEngine(symbol);
   const candidates: TrendCandidate[] = [];
   let h1Cursor = 0;
@@ -27,7 +31,7 @@ export function generateTrendCandidates(symbol: string, m15: Candle[], h1: Candl
     const entryPrice = signal.direction === 'LONG' ? signal.gapLow : signal.gapHigh;
     const slPrice = signal.invalidationPrice;
     const risk = Math.abs(entryPrice - slPrice);
-    if (risk <= 0 || (risk / entryPrice) * 100 < DEFAULT_FVG_STRATEGY_CONFIG.minSlPctFloor) {
+    if (risk <= 0 || (risk / entryPrice) * 100 < minSlPctFloor) {
       floorRejected++;
       continue;
     }
