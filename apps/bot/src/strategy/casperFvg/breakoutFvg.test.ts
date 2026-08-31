@@ -85,6 +85,20 @@ describe('detectBreakoutFvg', () => {
     });
   });
 
+  it('accepts bullish C1 inside then C2 outside', () => {
+    const sequence = bullishSequence();
+    sequence[1] = { ...sequence[1], close: 112 };
+
+    expect(detect(sequence).state).toBe('VALID_BULLISH_FVG');
+  });
+
+  it('accepts bearish C1 inside then C3 outside', () => {
+    const sequence = bearishSequence();
+    sequence[1] = { ...sequence[1], close: 92 };
+
+    expect(detect(sequence).state).toBe('VALID_BEARISH_FVG');
+  });
+
   it('does not accept equality as bullish or bearish FVG geometry', () => {
     const bullish = bullishSequence();
     bullish[2] = { ...bullish[2], low: bullish[0].high };
@@ -105,11 +119,81 @@ describe('detectBreakoutFvg', () => {
     expect(detect(sequence).state).toBe('NO_FVG');
   });
 
-  it('rejects a sequence whose C1 close is already outside the Opening Range', () => {
+  it('rejects a bullish sequence when all closes are already outside', () => {
     const sequence: [CasperCandle, CasperCandle, CasperCandle] = [
       m5('2026-07-15T13:45:00Z', 105, 112, 100, 111),
       m5('2026-07-15T13:50:00Z', 111, 116, 108, 114),
       m5('2026-07-15T13:55:00Z', 114, 118, 113, 116),
+    ];
+
+    expect(detect(sequence).state).toBe('NO_FVG');
+  });
+
+  it('accepts bullish C1 outside then C2 inside then C3 outside', () => {
+    const sequence: [CasperCandle, CasperCandle, CasperCandle] = [
+      m5('2026-07-15T13:45:00Z', 105, 112, 100, 111),
+      m5('2026-07-15T13:50:00Z', 103, 114, 102, 105),
+      m5('2026-07-15T13:55:00Z', 114, 118, 113, 116),
+    ];
+
+    expect(detect(sequence).state).toBe('VALID_BULLISH_FVG');
+  });
+
+  it('accepts bearish C1 outside then C2 inside then C3 outside', () => {
+    const sequence: [CasperCandle, CasperCandle, CasperCandle] = [
+      m5('2026-07-15T13:45:00Z', 95, 100, 88, 89),
+      m5('2026-07-15T13:50:00Z', 97, 99, 86, 95),
+      m5('2026-07-15T13:55:00Z', 87, 87, 82, 84),
+    ];
+
+    expect(detect(sequence).state).toBe('VALID_BEARISH_FVG');
+  });
+
+  it('rejects bullish outside then outside then inside because inside is too late', () => {
+    const sequence: [CasperCandle, CasperCandle, CasperCandle] = [
+      m5('2026-07-15T13:45:00Z', 95, 100, 85, 89),
+      m5('2026-07-15T13:50:00Z', 100, 114, 99, 112),
+      m5('2026-07-15T13:55:00Z', 104, 108, 101, 105),
+    ];
+
+    expect(detect(sequence).state).toBe('NO_FVG');
+  });
+
+  it('rejects bearish outside then outside then inside because inside is too late', () => {
+    const sequence: [CasperCandle, CasperCandle, CasperCandle] = [
+      m5('2026-07-15T13:45:00Z', 105, 115, 100, 111),
+      m5('2026-07-15T13:50:00Z', 102, 103, 87, 88),
+      m5('2026-07-15T13:55:00Z', 96, 99, 93, 95),
+    ];
+
+    expect(detect(sequence).state).toBe('NO_FVG');
+  });
+
+  it('rejects a bearish sequence with no inside close', () => {
+    const sequence: [CasperCandle, CasperCandle, CasperCandle] = [
+      m5('2026-07-15T13:45:00Z', 95, 100, 88, 89),
+      m5('2026-07-15T13:50:00Z', 89, 90, 82, 85),
+      m5('2026-07-15T13:55:00Z', 84, 87, 78, 80),
+    ];
+
+    expect(detect(sequence).state).toBe('NO_FVG');
+  });
+
+  it('rejects bullish outside then inside without a later bullish outside close', () => {
+    const sequence: [CasperCandle, CasperCandle, CasperCandle] = [
+      m5('2026-07-15T13:45:00Z', 90, 95, 85, 89),
+      m5('2026-07-15T13:50:00Z', 99, 105, 98, 103),
+      m5('2026-07-15T13:55:00Z', 100, 108, 96, 105),
+    ];
+
+    expect(detect(sequence).state).toBe('NO_FVG');
+  });
+
+  it('rejects bearish outside then inside without a later bearish outside close', () => {
+    const sequence: [CasperCandle, CasperCandle, CasperCandle] = [
+      m5('2026-07-15T13:45:00Z', 108, 115, 105, 111),
+      m5('2026-07-15T13:50:00Z', 102, 104, 95, 98),
+      m5('2026-07-15T13:55:00Z', 100, 104, 93, 95),
     ];
 
     expect(detect(sequence).state).toBe('NO_FVG');

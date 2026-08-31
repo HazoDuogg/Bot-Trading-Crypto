@@ -24,6 +24,20 @@ export interface DetectBreakoutFvgInput {
   openingRange: OpeningRangeResult;
 }
 
+function hasInsideThenOutside(
+  closes: readonly number[],
+  orLow: number,
+  orHigh: number,
+  isDirectionalOutside: (close: number) => boolean,
+): boolean {
+  let insideSeen = false;
+  for (const close of closes) {
+    if (close >= orLow && close <= orHigh) insideSeen = true;
+    else if (insideSeen && isDirectionalOutside(close)) return true;
+  }
+  return false;
+}
+
 export function detectBreakoutFvg(input: DetectBreakoutFvgInput): BreakoutFvgResult {
   const { nowMs, c1, c2, c3, openingRange } = input;
   if (openingRange.state !== 'OR_LOCKED') {
@@ -62,12 +76,10 @@ export function detectBreakoutFvg(input: DetectBreakoutFvgInput): BreakoutFvgRes
   if (!Number.isFinite(orHigh) || !Number.isFinite(orLow) || orHigh < orLow) {
     return { state: 'INVALID_DATA', tradingDay: openingRange.tradingDay };
   }
-  if (c1.close < orLow || c1.close > orHigh) {
-    return { state: 'NO_FVG', tradingDay: openingRange.tradingDay };
-  }
+  const closes = [c1.close, c2.close, c3.close];
 
   const bullishGeometry = c3.low > c1.high;
-  const bullishBreakout = c2.close > orHigh || c3.close > orHigh;
+  const bullishBreakout = hasInsideThenOutside(closes, orLow, orHigh, (close) => close > orHigh);
   if (bullishGeometry && bullishBreakout && c2.close > c2.open) {
     return {
       state: 'VALID_BULLISH_FVG',
@@ -82,7 +94,7 @@ export function detectBreakoutFvg(input: DetectBreakoutFvgInput): BreakoutFvgRes
   }
 
   const bearishGeometry = c3.high < c1.low;
-  const bearishBreakout = c2.close < orLow || c3.close < orLow;
+  const bearishBreakout = hasInsideThenOutside(closes, orLow, orHigh, (close) => close < orLow);
   if (bearishGeometry && bearishBreakout && c2.close < c2.open) {
     return {
       state: 'VALID_BEARISH_FVG',
