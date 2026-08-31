@@ -1,0 +1,1359 @@
+{
+  "schemaVersion": 1,
+  "seed": "nukida-v1",
+  "shuffleSeed": "nukida-v1:render-order",
+  "datasetFile": "D:\\BotTradingV2\\apps\\bot\\annotation-output\\private\\segments.private.json",
+  "chartsDirectory": "D:\\BotTradingV2\\apps\\bot\\annotation-output\\blinded\\charts",
+  "entries": [
+    {
+      "segmentId": "seg_0001",
+      "chartFile": "seg_0001.png",
+      "sourceId": "ETHUSDT:23",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1785420000000,
+      "sourceStartIndex": 14129,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0002",
+      "chartFile": "seg_0002.png",
+      "sourceId": "HYPEUSDT:23",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1784511000000,
+      "sourceStartIndex": 13119,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0003",
+      "chartFile": "seg_0003.png",
+      "sourceId": "DOGEUSDT:19",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1782521100000,
+      "sourceStartIndex": 10908,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0004",
+      "chartFile": "seg_0004.png",
+      "sourceId": "BTCUSDT:1",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1772938800000,
+      "sourceStartIndex": 261,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0005",
+      "chartFile": "seg_0005.png",
+      "sourceId": "BTCUSDT:3",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1773569700000,
+      "sourceStartIndex": 962,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0006",
+      "chartFile": "seg_0006.png",
+      "sourceId": "SOLUSDT:21",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1781824500000,
+      "sourceStartIndex": 10134,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0007",
+      "chartFile": "seg_0007.png",
+      "sourceId": "ETHUSDT:11",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1780278300000,
+      "sourceStartIndex": 8416,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0008",
+      "chartFile": "seg_0008.png",
+      "sourceId": "SOLUSDT:1",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1773093600000,
+      "sourceStartIndex": 433,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0009",
+      "chartFile": "seg_0009.png",
+      "sourceId": "DOGEUSDT:20",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1782702900000,
+      "sourceStartIndex": 11110,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0010",
+      "chartFile": "seg_0010.png",
+      "sourceId": "DOGEUSDT:6",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1775608200000,
+      "sourceStartIndex": 3227,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0011",
+      "chartFile": "seg_0011.png",
+      "sourceId": "ETHUSDT:19",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1784123100000,
+      "sourceStartIndex": 12688,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0012",
+      "chartFile": "seg_0012.png",
+      "sourceId": "BTCUSDT:9",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1776480300000,
+      "sourceStartIndex": 4196,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0013",
+      "chartFile": "seg_0013.png",
+      "sourceId": "SOLUSDT:28",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1786914900000,
+      "sourceStartIndex": 15790,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0014",
+      "chartFile": "seg_0014.png",
+      "sourceId": "SOLUSDT:6",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1774962000000,
+      "sourceStartIndex": 2509,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0015",
+      "chartFile": "seg_0015.png",
+      "sourceId": "BTCUSDT:20",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1780501500000,
+      "sourceStartIndex": 8664,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0016",
+      "chartFile": "seg_0016.png",
+      "sourceId": "ETHUSDT:20",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1784288700000,
+      "sourceStartIndex": 12872,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0017",
+      "chartFile": "seg_0017.png",
+      "sourceId": "BTCUSDT:12",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1777133700000,
+      "sourceStartIndex": 4922,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0018",
+      "chartFile": "seg_0018.png",
+      "sourceId": "DOGEUSDT:10",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1776912300000,
+      "sourceStartIndex": 4676,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0019",
+      "chartFile": "seg_0019.png",
+      "sourceId": "BTCUSDT:30",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1786518900000,
+      "sourceStartIndex": 15350,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0020",
+      "chartFile": "seg_0020.png",
+      "sourceId": "HYPEUSDT:24",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1784658600000,
+      "sourceStartIndex": 13283,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0021",
+      "chartFile": "seg_0021.png",
+      "sourceId": "HYPEUSDT:26",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1787049900000,
+      "sourceStartIndex": 15940,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0022",
+      "chartFile": "seg_0022.png",
+      "sourceId": "ETHUSDT:6",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1779101100000,
+      "sourceStartIndex": 7108,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0023",
+      "chartFile": "seg_0023.png",
+      "sourceId": "HYPEUSDT:9",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1776556800000,
+      "sourceStartIndex": 4281,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0024",
+      "chartFile": "seg_0024.png",
+      "sourceId": "SOLUSDT:14",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1778652900000,
+      "sourceStartIndex": 6610,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0025",
+      "chartFile": "seg_0025.png",
+      "sourceId": "BTCUSDT:17",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1779757200000,
+      "sourceStartIndex": 7837,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0026",
+      "chartFile": "seg_0026.png",
+      "sourceId": "BTCUSDT:14",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1777367700000,
+      "sourceStartIndex": 5182,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0027",
+      "chartFile": "seg_0027.png",
+      "sourceId": "DOGEUSDT:11",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1777295700000,
+      "sourceStartIndex": 5102,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0028",
+      "chartFile": "seg_0028.png",
+      "sourceId": "SOLUSDT:15",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1778739300000,
+      "sourceStartIndex": 6706,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0029",
+      "chartFile": "seg_0029.png",
+      "sourceId": "HYPEUSDT:2",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1773677700000,
+      "sourceStartIndex": 1082,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0030",
+      "chartFile": "seg_0030.png",
+      "sourceId": "ETHUSDT:2",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1775188800000,
+      "sourceStartIndex": 2761,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0031",
+      "chartFile": "seg_0031.png",
+      "sourceId": "BTCUSDT:29",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1784325600000,
+      "sourceStartIndex": 12913,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0032",
+      "chartFile": "seg_0032.png",
+      "sourceId": "HYPEUSDT:16",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1779795900000,
+      "sourceStartIndex": 7880,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0033",
+      "chartFile": "seg_0033.png",
+      "sourceId": "BTCUSDT:4",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1774416600000,
+      "sourceStartIndex": 1903,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0034",
+      "chartFile": "seg_0034.png",
+      "sourceId": "HYPEUSDT:30",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1787962500000,
+      "sourceStartIndex": 16954,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0035",
+      "chartFile": "seg_0035.png",
+      "sourceId": "SOLUSDT:11",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1777363200000,
+      "sourceStartIndex": 5177,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0036",
+      "chartFile": "seg_0036.png",
+      "sourceId": "ETHUSDT:30",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1787522400000,
+      "sourceStartIndex": 16465,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0037",
+      "chartFile": "seg_0037.png",
+      "sourceId": "DOGEUSDT:21",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1782878400000,
+      "sourceStartIndex": 11305,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0038",
+      "chartFile": "seg_0038.png",
+      "sourceId": "BTCUSDT:23",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1781796600000,
+      "sourceStartIndex": 10103,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0039",
+      "chartFile": "seg_0039.png",
+      "sourceId": "DOGEUSDT:26",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1785160800000,
+      "sourceStartIndex": 13841,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0040",
+      "chartFile": "seg_0040.png",
+      "sourceId": "SOLUSDT:20",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1781580600000,
+      "sourceStartIndex": 9863,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0041",
+      "chartFile": "seg_0041.png",
+      "sourceId": "ETHUSDT:29",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1787261400000,
+      "sourceStartIndex": 16175,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0042",
+      "chartFile": "seg_0042.png",
+      "sourceId": "SOLUSDT:30",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1787715900000,
+      "sourceStartIndex": 16680,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0043",
+      "chartFile": "seg_0043.png",
+      "sourceId": "BTCUSDT:24",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1781993700000,
+      "sourceStartIndex": 10322,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0044",
+      "chartFile": "seg_0044.png",
+      "sourceId": "HYPEUSDT:22",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1784079000000,
+      "sourceStartIndex": 12639,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0045",
+      "chartFile": "seg_0045.png",
+      "sourceId": "SOLUSDT:2",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1773658800000,
+      "sourceStartIndex": 1061,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0046",
+      "chartFile": "seg_0046.png",
+      "sourceId": "DOGEUSDT:25",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1784709900000,
+      "sourceStartIndex": 13340,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0047",
+      "chartFile": "seg_0047.png",
+      "sourceId": "ETHUSDT:8",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1779458400000,
+      "sourceStartIndex": 7505,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0048",
+      "chartFile": "seg_0048.png",
+      "sourceId": "SOLUSDT:5",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1774530000000,
+      "sourceStartIndex": 2029,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0049",
+      "chartFile": "seg_0049.png",
+      "sourceId": "DOGEUSDT:18",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1781856900000,
+      "sourceStartIndex": 10170,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0050",
+      "chartFile": "seg_0050.png",
+      "sourceId": "ETHUSDT:5",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1778450400000,
+      "sourceStartIndex": 6385,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0051",
+      "chartFile": "seg_0051.png",
+      "sourceId": "SOLUSDT:13",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1778195700000,
+      "sourceStartIndex": 6102,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0052",
+      "chartFile": "seg_0052.png",
+      "sourceId": "HYPEUSDT:29",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1787837400000,
+      "sourceStartIndex": 16815,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0053",
+      "chartFile": "seg_0053.png",
+      "sourceId": "ETHUSDT:9",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1779694200000,
+      "sourceStartIndex": 7767,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0054",
+      "chartFile": "seg_0054.png",
+      "sourceId": "ETHUSDT:16",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1782567900000,
+      "sourceStartIndex": 10960,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0055",
+      "chartFile": "seg_0055.png",
+      "sourceId": "BTCUSDT:26",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1783341000000,
+      "sourceStartIndex": 11819,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0056",
+      "chartFile": "seg_0056.png",
+      "sourceId": "DOGEUSDT:29",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1786971600000,
+      "sourceStartIndex": 15853,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0057",
+      "chartFile": "seg_0057.png",
+      "sourceId": "SOLUSDT:22",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1782298800000,
+      "sourceStartIndex": 10661,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0058",
+      "chartFile": "seg_0058.png",
+      "sourceId": "ETHUSDT:21",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1784578500000,
+      "sourceStartIndex": 13194,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0059",
+      "chartFile": "seg_0059.png",
+      "sourceId": "DOGEUSDT:14",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1777912200000,
+      "sourceStartIndex": 5787,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0060",
+      "chartFile": "seg_0060.png",
+      "sourceId": "DOGEUSDT:4",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1774819800000,
+      "sourceStartIndex": 2351,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0061",
+      "chartFile": "seg_0061.png",
+      "sourceId": "HYPEUSDT:3",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1773840600000,
+      "sourceStartIndex": 1263,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0062",
+      "chartFile": "seg_0062.png",
+      "sourceId": "DOGEUSDT:24",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1784142000000,
+      "sourceStartIndex": 12709,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0063",
+      "chartFile": "seg_0063.png",
+      "sourceId": "SOLUSDT:8",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1775988000000,
+      "sourceStartIndex": 3649,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0064",
+      "chartFile": "seg_0064.png",
+      "sourceId": "HYPEUSDT:4",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1774311300000,
+      "sourceStartIndex": 1786,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0065",
+      "chartFile": "seg_0065.png",
+      "sourceId": "HYPEUSDT:17",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1780196400000,
+      "sourceStartIndex": 8325,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0066",
+      "chartFile": "seg_0066.png",
+      "sourceId": "BTCUSDT:16",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1778577300000,
+      "sourceStartIndex": 6526,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0067",
+      "chartFile": "seg_0067.png",
+      "sourceId": "SOLUSDT:29",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1787656500000,
+      "sourceStartIndex": 16614,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0068",
+      "chartFile": "seg_0068.png",
+      "sourceId": "BTCUSDT:19",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1780176600000,
+      "sourceStartIndex": 8303,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0069",
+      "chartFile": "seg_0069.png",
+      "sourceId": "DOGEUSDT:1",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1772933400000,
+      "sourceStartIndex": 255,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0070",
+      "chartFile": "seg_0070.png",
+      "sourceId": "HYPEUSDT:12",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1777353300000,
+      "sourceStartIndex": 5166,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0071",
+      "chartFile": "seg_0071.png",
+      "sourceId": "HYPEUSDT:25",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1785134700000,
+      "sourceStartIndex": 13812,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0072",
+      "chartFile": "seg_0072.png",
+      "sourceId": "SOLUSDT:25",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1785222900000,
+      "sourceStartIndex": 13910,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0073",
+      "chartFile": "seg_0073.png",
+      "sourceId": "BTCUSDT:22",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1781187300000,
+      "sourceStartIndex": 9426,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0074",
+      "chartFile": "seg_0074.png",
+      "sourceId": "DOGEUSDT:12",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1777345200000,
+      "sourceStartIndex": 5157,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0075",
+      "chartFile": "seg_0075.png",
+      "sourceId": "HYPEUSDT:19",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1781028900000,
+      "sourceStartIndex": 9250,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0076",
+      "chartFile": "seg_0076.png",
+      "sourceId": "ETHUSDT:14",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1781498700000,
+      "sourceStartIndex": 9772,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0077",
+      "chartFile": "seg_0077.png",
+      "sourceId": "SOLUSDT:18",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1779814800000,
+      "sourceStartIndex": 7901,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0078",
+      "chartFile": "seg_0078.png",
+      "sourceId": "BTCUSDT:2",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1773352800000,
+      "sourceStartIndex": 721,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0079",
+      "chartFile": "seg_0079.png",
+      "sourceId": "SOLUSDT:26",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1786257900000,
+      "sourceStartIndex": 15060,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0080",
+      "chartFile": "seg_0080.png",
+      "sourceId": "DOGEUSDT:8",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1775745000000,
+      "sourceStartIndex": 3379,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0081",
+      "chartFile": "seg_0081.png",
+      "sourceId": "ETHUSDT:24",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1785564900000,
+      "sourceStartIndex": 14290,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0082",
+      "chartFile": "seg_0082.png",
+      "sourceId": "HYPEUSDT:18",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1780455600000,
+      "sourceStartIndex": 8613,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0083",
+      "chartFile": "seg_0083.png",
+      "sourceId": "BTCUSDT:25",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1782297900000,
+      "sourceStartIndex": 10660,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0084",
+      "chartFile": "seg_0084.png",
+      "sourceId": "ETHUSDT:3",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1776165300000,
+      "sourceStartIndex": 3846,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0085",
+      "chartFile": "seg_0085.png",
+      "sourceId": "HYPEUSDT:27",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1787100300000,
+      "sourceStartIndex": 15996,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0086",
+      "chartFile": "seg_0086.png",
+      "sourceId": "BTCUSDT:11",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1776648600000,
+      "sourceStartIndex": 4383,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0087",
+      "chartFile": "seg_0087.png",
+      "sourceId": "ETHUSDT:12",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1780579800000,
+      "sourceStartIndex": 8751,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0088",
+      "chartFile": "seg_0088.png",
+      "sourceId": "ETHUSDT:22",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1785231900000,
+      "sourceStartIndex": 13920,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0089",
+      "chartFile": "seg_0089.png",
+      "sourceId": "DOGEUSDT:22",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1783401300000,
+      "sourceStartIndex": 11886,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0090",
+      "chartFile": "seg_0090.png",
+      "sourceId": "BTCUSDT:27",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1783918800000,
+      "sourceStartIndex": 12461,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0091",
+      "chartFile": "seg_0091.png",
+      "sourceId": "SOLUSDT:9",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1776301200000,
+      "sourceStartIndex": 3997,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0092",
+      "chartFile": "seg_0092.png",
+      "sourceId": "ETHUSDT:10",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1779766200000,
+      "sourceStartIndex": 7847,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0093",
+      "chartFile": "seg_0093.png",
+      "sourceId": "ETHUSDT:26",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1785791700000,
+      "sourceStartIndex": 14542,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0094",
+      "chartFile": "seg_0094.png",
+      "sourceId": "SOLUSDT:23",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1782852300000,
+      "sourceStartIndex": 11276,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0095",
+      "chartFile": "seg_0095.png",
+      "sourceId": "ETHUSDT:28",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1787062500000,
+      "sourceStartIndex": 15954,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0096",
+      "chartFile": "seg_0096.png",
+      "sourceId": "HYPEUSDT:13",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1777852800000,
+      "sourceStartIndex": 5721,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0097",
+      "chartFile": "seg_0097.png",
+      "sourceId": "ETHUSDT:13",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1780622100000,
+      "sourceStartIndex": 8798,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0098",
+      "chartFile": "seg_0098.png",
+      "sourceId": "SOLUSDT:7",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1775853900000,
+      "sourceStartIndex": 3500,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0099",
+      "chartFile": "seg_0099.png",
+      "sourceId": "BTCUSDT:13",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1777211100000,
+      "sourceStartIndex": 5008,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0100",
+      "chartFile": "seg_0100.png",
+      "sourceId": "DOGEUSDT:27",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1785396600000,
+      "sourceStartIndex": 14103,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0101",
+      "chartFile": "seg_0101.png",
+      "sourceId": "ETHUSDT:7",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1779165000000,
+      "sourceStartIndex": 7179,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0102",
+      "chartFile": "seg_0102.png",
+      "sourceId": "BTCUSDT:5",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1775027700000,
+      "sourceStartIndex": 2582,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0103",
+      "chartFile": "seg_0103.png",
+      "sourceId": "DOGEUSDT:23",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1783598400000,
+      "sourceStartIndex": 12105,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0104",
+      "chartFile": "seg_0104.png",
+      "sourceId": "ETHUSDT:4",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1778052600000,
+      "sourceStartIndex": 5943,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0105",
+      "chartFile": "seg_0105.png",
+      "sourceId": "HYPEUSDT:15",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1779740100000,
+      "sourceStartIndex": 7818,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0106",
+      "chartFile": "seg_0106.png",
+      "sourceId": "SOLUSDT:10",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1776947400000,
+      "sourceStartIndex": 4715,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0107",
+      "chartFile": "seg_0107.png",
+      "sourceId": "HYPEUSDT:21",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1782180000000,
+      "sourceStartIndex": 10529,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0108",
+      "chartFile": "seg_0108.png",
+      "sourceId": "SOLUSDT:17",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1779694200000,
+      "sourceStartIndex": 7767,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0109",
+      "chartFile": "seg_0109.png",
+      "sourceId": "DOGEUSDT:7",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1775669400000,
+      "sourceStartIndex": 3295,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0110",
+      "chartFile": "seg_0110.png",
+      "sourceId": "ETHUSDT:25",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1785690900000,
+      "sourceStartIndex": 14430,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0111",
+      "chartFile": "seg_0111.png",
+      "sourceId": "HYPEUSDT:20",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1781514900000,
+      "sourceStartIndex": 9790,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0112",
+      "chartFile": "seg_0112.png",
+      "sourceId": "DOGEUSDT:28",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1785800700000,
+      "sourceStartIndex": 14552,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0113",
+      "chartFile": "seg_0113.png",
+      "sourceId": "ETHUSDT:1",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1772793900000,
+      "sourceStartIndex": 100,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0114",
+      "chartFile": "seg_0114.png",
+      "sourceId": "BTCUSDT:15",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1778086800000,
+      "sourceStartIndex": 5981,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0115",
+      "chartFile": "seg_0115.png",
+      "sourceId": "ETHUSDT:17",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1782815400000,
+      "sourceStartIndex": 11235,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0116",
+      "chartFile": "seg_0116.png",
+      "sourceId": "HYPEUSDT:14",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1779102000000,
+      "sourceStartIndex": 7109,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0117",
+      "chartFile": "seg_0117.png",
+      "sourceId": "BTCUSDT:8",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1775454300000,
+      "sourceStartIndex": 3056,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0118",
+      "chartFile": "seg_0118.png",
+      "sourceId": "HYPEUSDT:6",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1774998000000,
+      "sourceStartIndex": 2549,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0119",
+      "chartFile": "seg_0119.png",
+      "sourceId": "DOGEUSDT:15",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1778086800000,
+      "sourceStartIndex": 5981,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0120",
+      "chartFile": "seg_0120.png",
+      "sourceId": "BTCUSDT:7",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1775401200000,
+      "sourceStartIndex": 2997,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0121",
+      "chartFile": "seg_0121.png",
+      "sourceId": "HYPEUSDT:5",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1774562400000,
+      "sourceStartIndex": 2065,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0122",
+      "chartFile": "seg_0122.png",
+      "sourceId": "DOGEUSDT:30",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1787364900000,
+      "sourceStartIndex": 16290,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0123",
+      "chartFile": "seg_0123.png",
+      "sourceId": "DOGEUSDT:5",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1775303100000,
+      "sourceStartIndex": 2888,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0124",
+      "chartFile": "seg_0124.png",
+      "sourceId": "BTCUSDT:10",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1776569400000,
+      "sourceStartIndex": 4295,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0125",
+      "chartFile": "seg_0125.png",
+      "sourceId": "SOLUSDT:24",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1783502100000,
+      "sourceStartIndex": 11998,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0126",
+      "chartFile": "seg_0126.png",
+      "sourceId": "DOGEUSDT:17",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1781678700000,
+      "sourceStartIndex": 9972,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0127",
+      "chartFile": "seg_0127.png",
+      "sourceId": "ETHUSDT:15",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1782411300000,
+      "sourceStartIndex": 10786,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0128",
+      "chartFile": "seg_0128.png",
+      "sourceId": "DOGEUSDT:2",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1773054900000,
+      "sourceStartIndex": 390,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0129",
+      "chartFile": "seg_0129.png",
+      "sourceId": "BTCUSDT:18",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1779876000000,
+      "sourceStartIndex": 7969,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0130",
+      "chartFile": "seg_0130.png",
+      "sourceId": "SOLUSDT:16",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1778877900000,
+      "sourceStartIndex": 6860,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0131",
+      "chartFile": "seg_0131.png",
+      "sourceId": "BTCUSDT:21",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1780997400000,
+      "sourceStartIndex": 9215,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0132",
+      "chartFile": "seg_0132.png",
+      "sourceId": "HYPEUSDT:1",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1773339300000,
+      "sourceStartIndex": 706,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0133",
+      "chartFile": "seg_0133.png",
+      "sourceId": "DOGEUSDT:13",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1777572900000,
+      "sourceStartIndex": 5410,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0134",
+      "chartFile": "seg_0134.png",
+      "sourceId": "SOLUSDT:27",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1786559400000,
+      "sourceStartIndex": 15395,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0135",
+      "chartFile": "seg_0135.png",
+      "sourceId": "HYPEUSDT:8",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1775315700000,
+      "sourceStartIndex": 2902,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0136",
+      "chartFile": "seg_0136.png",
+      "sourceId": "SOLUSDT:4",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1774156500000,
+      "sourceStartIndex": 1614,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0137",
+      "chartFile": "seg_0137.png",
+      "sourceId": "DOGEUSDT:9",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1775869200000,
+      "sourceStartIndex": 3517,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0138",
+      "chartFile": "seg_0138.png",
+      "sourceId": "HYPEUSDT:28",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1787484600000,
+      "sourceStartIndex": 16423,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0139",
+      "chartFile": "seg_0139.png",
+      "sourceId": "DOGEUSDT:16",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1781512200000,
+      "sourceStartIndex": 9787,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0140",
+      "chartFile": "seg_0140.png",
+      "sourceId": "BTCUSDT:6",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1775276100000,
+      "sourceStartIndex": 2858,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0141",
+      "chartFile": "seg_0141.png",
+      "sourceId": "DOGEUSDT:3",
+      "symbol": "DOGEUSDT",
+      "decisionOpenTime": 1774311300000,
+      "sourceStartIndex": 1786,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0142",
+      "chartFile": "seg_0142.png",
+      "sourceId": "HYPEUSDT:11",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1776786300000,
+      "sourceStartIndex": 4536,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0143",
+      "chartFile": "seg_0143.png",
+      "sourceId": "SOLUSDT:12",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1777700700000,
+      "sourceStartIndex": 5552,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0144",
+      "chartFile": "seg_0144.png",
+      "sourceId": "ETHUSDT:27",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1786291200000,
+      "sourceStartIndex": 15097,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0145",
+      "chartFile": "seg_0145.png",
+      "sourceId": "ETHUSDT:18",
+      "symbol": "ETHUSDT",
+      "decisionOpenTime": 1783555200000,
+      "sourceStartIndex": 12057,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0146",
+      "chartFile": "seg_0146.png",
+      "sourceId": "SOLUSDT:19",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1780709400000,
+      "sourceStartIndex": 8895,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0147",
+      "chartFile": "seg_0147.png",
+      "sourceId": "SOLUSDT:3",
+      "symbol": "SOLUSDT",
+      "decisionOpenTime": 1773890100000,
+      "sourceStartIndex": 1318,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0148",
+      "chartFile": "seg_0148.png",
+      "sourceId": "HYPEUSDT:10",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1776665700000,
+      "sourceStartIndex": 4402,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0149",
+      "chartFile": "seg_0149.png",
+      "sourceId": "BTCUSDT:28",
+      "symbol": "BTCUSDT",
+      "decisionOpenTime": 1784058300000,
+      "sourceStartIndex": 12616,
+      "candleCount": 81
+    },
+    {
+      "segmentId": "seg_0150",
+      "chartFile": "seg_0150.png",
+      "sourceId": "HYPEUSDT:7",
+      "symbol": "HYPEUSDT",
+      "decisionOpenTime": 1775091600000,
+      "sourceStartIndex": 2653,
+      "candleCount": 81
+    }
+  ]
+}
