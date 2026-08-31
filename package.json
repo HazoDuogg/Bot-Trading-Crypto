@@ -13,6 +13,7 @@
     "build": "npm run build --workspace apps/bot",
     "typecheck": "npm run typecheck --workspace apps/bot",
     "build:scripts": "tsc -p apps/bot/scripts/tsconfig.json",
+    "backtest:casper": "npm run build:scripts && node apps/bot/scripts-dist/scripts/runCasperBacktest.js",
     "fetch-ohlcv": "npm run build:scripts && node apps/bot/scripts-dist/scripts/fetchOhlcv.js"
   },
   "dependencies": {
