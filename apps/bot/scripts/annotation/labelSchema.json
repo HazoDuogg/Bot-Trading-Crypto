@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vicion.local/schemas/nukida-annotation-label.schema.json",
+  "title": "NUKIDA D1-D8 calibration annotation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "segment_id",
+    "quality",
+    "dominance",
+    "swing_points",
+    "base_zone",
+    "compression",
+    "breakout",
+    "reclaim",
+    "notes"
+  ],
+  "properties": {
+    "segment_id": {
+      "type": "string",
+      "pattern": "^seg_[0-9]{4,}$"
+    },
+    "quality": {
+      "type": ["string", "null"],
+      "enum": ["CLEAN", "CHAOTIC", "UNCLEAR", null]
+    },
+    "dominance": {
+      "type": ["string", "null"],
+      "enum": ["BULL", "BEAR", "NEUTRAL", null]
+    },
+    "swing_points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index", "type"],
+        "properties": {
+          "index": { "type": "integer", "minimum": 0 },
+          "type": { "type": "string", "enum": ["high", "low"] }
+        }
+      }
+    },
+    "base_zone": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["start_index", "end_index"],
+          "properties": {
+            "start_index": { "type": "integer", "minimum": 0 },
+            "end_index": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ]
+    },
+    "compression": { "type": ["boolean", "null"] },
+    "breakout": {
+      "type": ["string", "null"],
+      "enum": ["STRONG", "WEAK", "NONE", null]
+    },
+    "reclaim": {
+      "type": ["string", "null"],
+      "enum": ["FAILED", "SUCCESS", "NOT_APPLICABLE", null]
+    },
+    "notes": { "type": "string" }
+  }
+}
