@@ -1,4 +1,5 @@
 import { getNewYorkTimeParts, minuteOfDay } from './newYorkTime.js';
+import { isValidClosedM5Candle } from './m5Candle.js';
 import type { OpeningRangeResult } from './openingRange.js';
 import type { CasperCandle, CasperState } from './types.js';
 
@@ -56,16 +57,7 @@ export function detectM5Breakout(input: DetectM5BreakoutInput): M5BreakoutResult
     return result('WINDOW_CLOSED', closeTime.tradingDay);
   }
 
-  const prices = [candle.open, candle.high, candle.low, candle.close];
-  const validCandle =
-    candle.endTimeMs - candle.startTimeMs === 5 * 60_000 &&
-    candle.endTimeMs <= nowMs &&
-    prices.every(Number.isFinite) &&
-    candle.high >= candle.low &&
-    candle.open <= candle.high &&
-    candle.open >= candle.low &&
-    candle.close <= candle.high &&
-    candle.close >= candle.low;
+  const validCandle = isValidClosedM5Candle(candle, nowMs, openingRange.tradingDay);
   const validRange =
     Number.isFinite(openingRange.range.high) &&
     Number.isFinite(openingRange.range.low) &&

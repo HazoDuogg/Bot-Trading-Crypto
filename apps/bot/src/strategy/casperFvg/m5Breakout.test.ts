@@ -108,6 +108,13 @@ describe('detectM5Breakout', () => {
     expect(result).toMatchObject({ state: 'INVALID_DATA', signal: null });
   });
 
+  it('rejects an M5 candle that is not aligned to a New York five-minute boundary', () => {
+    const candle = m5('2026-07-15T13:47:00Z', 113, 99, 111);
+    const result = detectM5Breakout({ nowMs: candle.endTimeMs, candle, openingRange: locked });
+
+    expect(result).toMatchObject({ state: 'INVALID_DATA', signal: null });
+  });
+
   it('does not create a breakout before an opening range is locked', () => {
     const candle = m5('2026-07-15T14:00:00Z', 113, 99, 111);
     const result = detectM5Breakout({
