@@ -18,6 +18,7 @@ export interface TradePlanInput {
 
 // Class C engineering safeguard; 0.3 ATR is a convention below typical one-candle range/ATR.
 export const MIN_STOP_DISTANCE_ATR_MULTIPLE = 0.3;
+export const SETUP_B_DEFAULT_SL_BUFFER_ATR_MULTIPLE = 0.5;
 
 export interface TradePlan {
   direction: 'BULL' | 'BEAR';
@@ -94,7 +95,8 @@ export function createTradePlan(input: TradePlanInput): TradePlan | null {
   requirePositiveFinite(input.frozenAtrAtTrigger, 'frozenAtrAtTrigger');
   const takeProfitRMultiple = input.takeProfitRMultiple ?? 2;
   requirePositiveFinite(takeProfitRMultiple, 'takeProfitRMultiple');
-  const setupBSlBufferAtrMultiple = input.setupBSlBufferAtrMultiple ?? 0;
+  const setupBSlBufferAtrMultiple =
+    input.setupBSlBufferAtrMultiple ?? SETUP_B_DEFAULT_SL_BUFFER_ATR_MULTIPLE;
   if (!Number.isFinite(setupBSlBufferAtrMultiple) || setupBSlBufferAtrMultiple < 0) {
     throw new Error('setupBSlBufferAtrMultiple must be finite and non-negative');
   }

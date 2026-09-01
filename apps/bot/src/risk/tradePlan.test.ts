@@ -112,6 +112,7 @@ describe('createTradePlan', () => {
       riskBudgetUsd: 70,
       leverage: 10,
       frozenAtrAtTrigger: 10,
+      setupBSlBufferAtrMultiple: 0,
     });
 
     expect(result).toMatchObject({ direction, entryPrice, stopLoss, takeProfit, riskPerUnit: 7 });
@@ -146,7 +147,7 @@ describe('createTradePlan', () => {
     expect(result).toMatchObject({ direction, stopLoss, takeProfit, riskPerUnit: 10 });
   });
 
-  it('preserves the exact Setup B plan when the explicit SL buffer is zero', () => {
+  it('uses the official 0.5 ATR Setup B SL buffer by default', () => {
     const input = {
       signal: setupB('BULL'),
       entry: filled(6, 101),
@@ -158,7 +159,7 @@ describe('createTradePlan', () => {
       frozenAtrAtTrigger: 10,
     };
 
-    expect(createTradePlan({ ...input, setupBSlBufferAtrMultiple: 0 })).toEqual(
+    expect(createTradePlan({ ...input, setupBSlBufferAtrMultiple: 0.5 })).toEqual(
       createTradePlan(input),
     );
   });
@@ -243,6 +244,7 @@ describe('createTradePlan', () => {
         riskBudgetUsd: 70,
         leverage: 10,
         frozenAtrAtTrigger: 10,
+        setupBSlBufferAtrMultiple: 0,
       })!.stopLoss,
     ).toBe(94);
   });

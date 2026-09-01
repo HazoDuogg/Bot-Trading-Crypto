@@ -7,6 +7,7 @@ export const D6_COUNTER_TEST_WINDOW = 10;
 export const D6_RECLAIM_WINDOW = 3;
 // N=2 gets twice the baseline search horizon so two distinct touch-and-withdraw episodes can form.
 export const D6_SECOND_TEST_COUNTER_WINDOW = 20;
+export const D6_DEFAULT_MINIMUM_TEST_OCCURRENCE = 1;
 
 export type BreakDirection = 'up' | 'down';
 
@@ -85,7 +86,8 @@ export function evaluateDominance(
   const minimumTestOccurrence =
     typeof counterTestWindowOrOptions === 'number'
       ? 1
-      : (counterTestWindowOrOptions.minimumTestOccurrence ?? 1);
+      : (counterTestWindowOrOptions.minimumTestOccurrence ??
+        D6_DEFAULT_MINIMUM_TEST_OCCURRENCE);
   const counterTestWindow =
     typeof counterTestWindowOrOptions === 'number'
       ? counterTestWindowOrOptions

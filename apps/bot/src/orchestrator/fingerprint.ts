@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { SETUP_B_DEFAULT_SL_BUFFER_ATR_MULTIPLE } from '../risk/tradePlan.js';
 import {
   D3_BASE_V1_IMPULSE_RANGE_MULTIPLIER,
   D3_BASE_V1_MIN_CANDLES,
@@ -8,6 +9,7 @@ import {
   D2_BREAK_V1_ATR_BUFFER_MULTIPLIER,
   D2_BREAK_V1_ATR_PERIOD,
   D6_COUNTER_TEST_WINDOW,
+  D6_DEFAULT_MINIMUM_TEST_OCCURRENCE,
   D6_RECLAIM_WINDOW,
   D6_SECOND_TEST_COUNTER_WINDOW,
 } from '../structure/breakDetector.js';
@@ -56,9 +58,11 @@ export interface StrategyConstantManifest {
     readonly counterTestWindow: number;
     readonly secondTestCounterWindow: number;
     readonly reclaimWindow: number;
+    readonly minimumTestOccurrence: number;
   };
   readonly D7: { readonly minBodyRatio: number; readonly minRangeAtrRatio: number };
   readonly D8: { readonly maxDistanceAtrRatio: number };
+  readonly setupB: { readonly slBufferAtrMultiple: number };
 }
 
 export const STRATEGY_CONSTANTS: StrategyConstantManifest = Object.freeze({
@@ -89,12 +93,16 @@ export const STRATEGY_CONSTANTS: StrategyConstantManifest = Object.freeze({
     counterTestWindow: D6_COUNTER_TEST_WINDOW,
     secondTestCounterWindow: D6_SECOND_TEST_COUNTER_WINDOW,
     reclaimWindow: D6_RECLAIM_WINDOW,
+    minimumTestOccurrence: D6_DEFAULT_MINIMUM_TEST_OCCURRENCE,
   }),
   D7: Object.freeze({
     minBodyRatio: D7_STRONG_BREAKOUT_V1_MIN_BODY_RATIO,
     minRangeAtrRatio: D7_STRONG_BREAKOUT_V1_MIN_RANGE_ATR_RATIO,
   }),
   D8: Object.freeze({ maxDistanceAtrRatio: D8_NO_CHASE_V1_MAX_DISTANCE_ATR_RATIO }),
+  setupB: Object.freeze({
+    slBufferAtrMultiple: SETUP_B_DEFAULT_SL_BUFFER_ATR_MULTIPLE,
+  }),
 });
 
 function stableStringify(value: unknown): string {

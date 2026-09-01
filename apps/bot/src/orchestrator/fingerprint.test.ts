@@ -17,8 +17,13 @@ describe('computeStrategyFingerprint', () => {
       counterTestWindow: 10,
       secondTestCounterWindow: 20,
       reclaimWindow: 3,
+      minimumTestOccurrence: 1,
     });
+    expect(first.constants.setupB).toEqual({ slBufferAtrMultiple: 0.5 });
     expect(first.constants.D7).toEqual({ minBodyRatio: 0.55, minRangeAtrRatio: 1 });
+    expect(first.hash).not.toBe(
+      '1cb8cc7d15f2d2afe24e899b7027df8aede04ba487ae06d3c57ad9e4d77d1614',
+    );
     expect(first.hash).not.toBe('ca2fb797a389b565b5d38aa519a1a363595f8ee69b7cff5493f44144974fc07e');
   });
 

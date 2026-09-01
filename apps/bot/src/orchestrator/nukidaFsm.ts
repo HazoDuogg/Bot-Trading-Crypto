@@ -11,6 +11,7 @@ import { detectBaseZones, type BaseZone } from '../structure/baseZone.js';
 import {
   D2_BREAK_V1_ATR_PERIOD,
   D6_COUNTER_TEST_WINDOW,
+  D6_DEFAULT_MINIMUM_TEST_OCCURRENCE,
   D6_RECLAIM_WINDOW,
   D6_SECOND_TEST_COUNTER_WINDOW,
   evaluateDominance,
@@ -138,7 +139,10 @@ function createDefaultStrategyAdapter(config: Pick<FsmConfig, 'minimumTestOccurr
             breakout,
             breakoutStrength: evaluateBreakoutStrength(current, priorAtr),
           });
-          if ((config.minimumTestOccurrence ?? 1) > 1) {
+          if (
+            (config.minimumTestOccurrence ?? D6_DEFAULT_MINIMUM_TEST_OCCURRENCE) >
+            D6_DEFAULT_MINIMUM_TEST_OCCURRENCE
+          ) {
             pendingSetupBDominance.push({
               breakout,
               breakoutStrength: evaluateBreakoutStrength(current, priorAtr),
@@ -238,8 +242,14 @@ function createDefaultStrategyAdapter(config: Pick<FsmConfig, 'minimumTestOccurr
       }
 
       const setupBConfirmed =
-        (config.minimumTestOccurrence ?? 1) === 1 ? newlyConfirmed : [];
-      if ((config.minimumTestOccurrence ?? 1) > 1) {
+        (config.minimumTestOccurrence ?? D6_DEFAULT_MINIMUM_TEST_OCCURRENCE) ===
+        D6_DEFAULT_MINIMUM_TEST_OCCURRENCE
+          ? newlyConfirmed
+          : [];
+      if (
+        (config.minimumTestOccurrence ?? D6_DEFAULT_MINIMUM_TEST_OCCURRENCE) >
+        D6_DEFAULT_MINIMUM_TEST_OCCURRENCE
+      ) {
         for (let pendingIndex = pendingSetupBDominance.length - 1; pendingIndex >= 0; pendingIndex -= 1) {
           const pending = pendingSetupBDominance[pendingIndex];
           const evidence = evaluateDominance(candles, pending.breakout, {
