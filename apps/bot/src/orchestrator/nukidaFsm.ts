@@ -17,6 +17,10 @@ import {
   type BreakResult,
   type DominanceEvidence,
 } from '../structure/breakDetector.js';
+import {
+  evaluateBreakoutStrength,
+  type BreakoutStrengthResult,
+} from '../structure/breakoutStrength.js';
 import { detectCompression, type CompressionResult } from '../structure/compression.js';
 import { evaluateQuality, type QualityComposite } from '../structure/quality.js';
 import {
@@ -76,6 +80,7 @@ interface ActiveSwing extends SwingPoint {
 
 interface PendingDominance {
   breakout: BreakResult;
+  breakoutStrength: BreakoutStrengthResult;
 }
 
 interface TimedDominance {
@@ -120,9 +125,12 @@ function createDefaultStrategyAdapter(): NukidaStrategyAdapter {
         if (active === null || active.broken || index < active.eligibleFrom) continue;
         const direction = active.type === 'high' ? 'up' : 'down';
         const breakout = breakAtCurrent(current, index, active.price, direction, priorAtr);
-        if (breakout !== null) {
+        if (breakout !== null && priorAtr !== null) {
           active.broken = true;
-          pendingDominance.push({ breakout });
+          pendingDominance.push({
+            breakout,
+            breakoutStrength: evaluateBreakoutStrength(current, priorAtr),
+          });
         }
       }
 
@@ -162,26 +170,36 @@ function createDefaultStrategyAdapter(): NukidaStrategyAdapter {
       const baseBreaks: Array<{
         tracked: TrackedBase;
         breakout: BreakResult;
+        breakoutStrength: BreakoutStrengthResult;
       }> = [];
       for (const tracked of trackedBases) {
         if (!tracked.upBroken && index > tracked.zone.end_index) {
           const breakout = breakAtCurrent(current, index, tracked.zone.high, 'up', priorAtr);
-          if (breakout !== null) {
+          if (breakout !== null && priorAtr !== null) {
             tracked.upBroken = true;
-            baseBreaks.push({ tracked, breakout });
+            baseBreaks.push({
+              tracked,
+              breakout,
+              breakoutStrength: evaluateBreakoutStrength(current, priorAtr),
+            });
           }
         }
         if (!tracked.downBroken && index > tracked.zone.end_index) {
           const breakout = breakAtCurrent(current, index, tracked.zone.low, 'down', priorAtr);
-          if (breakout !== null) {
+          if (breakout !== null && priorAtr !== null) {
             tracked.downBroken = true;
-            baseBreaks.push({ tracked, breakout });
+            baseBreaks.push({
+              tracked,
+              breakout,
+              breakoutStrength: evaluateBreakoutStrength(current, priorAtr),
+            });
           }
         }
       }
 
       const newlyConfirmed: Array<{
         breakout: BreakResult;
+        breakoutStrength: BreakoutStrengthResult;
         evidence: DominanceEvidence;
       }> = [];
       for (let pendingIndex = pendingDominance.length - 1; pendingIndex >= 0; pendingIndex -= 1) {
@@ -195,7 +213,11 @@ function createDefaultStrategyAdapter(): NukidaStrategyAdapter {
           index >= pending.breakout.brokeAt + D6_COUNTER_TEST_WINDOW;
         if (evidence.side !== 'NEUTRAL') {
           dominanceTimeline.push({ confirmedAt: index, evidence });
-          newlyConfirmed.push({ breakout: pending.breakout, evidence });
+          newlyConfirmed.push({
+            breakout: pending.breakout,
+            breakoutStrength: pending.breakoutStrength,
+            evidence,
+          });
         }
         if (evidence.side !== 'NEUTRAL' || counterComplete || searchComplete) {
           pendingDominance.splice(pendingIndex, 1);
@@ -207,7 +229,12 @@ function createDefaultStrategyAdapter(): NukidaStrategyAdapter {
       const setups: SetupSignal[] = [];
       if (quality?.label === 'CLEAN') {
         for (const confirmed of newlyConfirmed) {
-          const setup = detectSetupB({ closedCandles: candles, quality, breakout: confirmed.breakout });
+          const setup = detectSetupB({
+            closedCandles: candles,
+            quality,
+            breakout: confirmed.breakout,
+            breakoutStrength: confirmed.breakoutStrength,
+          });
           if (setup !== null) setups.push(setup);
         }
         if (dominance !== null) {
@@ -218,6 +245,7 @@ function createDefaultStrategyAdapter(): NukidaStrategyAdapter {
               compression: candidate.tracked.compression,
               dominance,
               breakout: candidate.breakout,
+              breakoutStrength: candidate.breakoutStrength,
             });
             if (setup !== null) setups.push(setup);
           }

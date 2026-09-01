@@ -1,6 +1,7 @@
 import type { BaseZone } from '../structure/baseZone.js';
 import type { BreakResult, DominanceEvidence } from '../structure/breakDetector.js';
 import { D6_RECLAIM_WINDOW } from '../structure/breakDetector.js';
+import type { BreakoutStrengthResult } from '../structure/breakoutStrength.js';
 import type { CompressionResult } from '../structure/compression.js';
 import type { QualityComposite } from '../structure/quality.js';
 
@@ -19,6 +20,7 @@ export interface SetupSignal {
     d3?: { startIndex: number; endIndex: number; high: number; low: number };
     d5?: { bandwidthAtrRatio: number; isCompressed: boolean };
     d2: { brokeAt: number; level: number };
+    d7: { bodyRatio: number; rangeAtrRatio: number; isStrong: true };
   };
 }
 
@@ -28,6 +30,7 @@ export interface SetupAInput {
   compression: CompressionResult;
   dominance: DominanceEvidence;
   breakout: BreakResult | null;
+  breakoutStrength: BreakoutStrengthResult;
 }
 
 function traceDominance(dominance: DominanceEvidence): SetupSignal['reasonTrace']['dominance'] {
@@ -42,6 +45,7 @@ function traceDominance(dominance: DominanceEvidence): SetupSignal['reasonTrace'
 // Setup family A — source-backed state ordering; D1-D8 evidence values remain conventions.
 export function detectSetupA(input: SetupAInput): SetupSignal | null {
   if (input.quality.label !== 'CLEAN' || input.breakout === null) return null;
+  if (!input.breakoutStrength.isStrong) return null;
   if (
     input.dominance.side === 'NEUTRAL' ||
     !input.dominance.counterTestFailed ||
@@ -93,6 +97,11 @@ export function detectSetupA(input: SetupAInput): SetupSignal | null {
         isCompressed: input.compression.isCompressed,
       },
       d2: { brokeAt: input.breakout.brokeAt, level: input.breakout.level },
+      d7: {
+        bodyRatio: input.breakoutStrength.bodyRatio,
+        rangeAtrRatio: input.breakoutStrength.rangeAtrRatio,
+        isStrong: true,
+      },
     },
   };
 }

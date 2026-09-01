@@ -28,6 +28,7 @@ function setupA(triggerIndex = 14): SetupSignal {
       d3: { startIndex: 2, endIndex: 9, high: 100, low: 90 },
       d5: { bandwidthAtrRatio: 1.5, isCompressed: true },
       d2: { brokeAt: triggerIndex, level: 100 },
+      d7: { bodyRatio: 0.7, rangeAtrRatio: 1.2, isStrong: true },
     },
   };
 }
@@ -46,6 +47,7 @@ function setupB(triggerIndex = 14): SetupSignal {
         counterTestIndex: triggerIndex - 3,
       },
       d2: { brokeAt: triggerIndex - 6, level: 110 },
+      d7: { bodyRatio: 0.7, rangeAtrRatio: 1.2, isStrong: true },
     },
   };
 }

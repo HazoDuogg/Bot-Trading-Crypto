@@ -7,12 +7,14 @@ import { detectSetupA, type SetupSignal } from '../setup/setupDetectorA.js';
 import { detectSetupB } from '../setup/setupDetectorB.js';
 import { detectBaseZones } from '../structure/baseZone.js';
 import {
+  D2_BREAK_V1_ATR_PERIOD,
   D6_RECLAIM_WINDOW,
   detectMeaningfulBreak,
   evaluateDominance,
   type BreakResult,
   type DominanceEvidence,
 } from '../structure/breakDetector.js';
+import { evaluateBreakoutStrength } from '../structure/breakoutStrength.js';
 import { detectCompression } from '../structure/compression.js';
 import { evaluateQuality } from '../structure/quality.js';
 import { detectSwingPoints } from '../structure/swingPoints.js';
@@ -36,6 +38,7 @@ function signal(direction: 'BULL' | 'BEAR', triggerIndex = 0, level = 100): Setu
         counterTestIndex: triggerIndex - 3,
       },
       d2: { brokeAt: Math.max(0, triggerIndex - 6), level },
+      d7: { bodyRatio: 0.7, rangeAtrRatio: 1.2, isStrong: true },
     },
   };
 }
@@ -86,6 +89,14 @@ function latestDominanceBefore(
 
 function collectSetupSignals(candles: readonly Candle[]): SetupSignal[] {
   const breaks = collectCausalBreaks(candles);
+  const tracker = createAtrTracker(D2_BREAK_V1_ATR_PERIOD);
+  const atrAtIndex = candles.map((item) => tracker.next(item));
+  const strengthForBreak = (breakout: BreakResult) => {
+    const frozenAtr = atrAtIndex[breakout.brokeAt - 1];
+    return frozenAtr === null || frozenAtr === undefined
+      ? null
+      : evaluateBreakoutStrength(candles[breakout.brokeAt], frozenAtr);
+  };
   const qualityByEndIndex = candles.map((_, index) => evaluateQuality(candles, index));
   const timeline: TimedDominance[] = [];
   const dominanceByBreak = new Map<BreakResult, DominanceEvidence>();
@@ -104,7 +115,9 @@ function collectSetupSignals(candles: readonly Candle[]): SetupSignal[] {
     if (dominance.counterTestIndex === null) continue;
     const quality = qualityByEndIndex[dominance.counterTestIndex + D6_RECLAIM_WINDOW];
     if (quality?.label !== 'CLEAN') continue;
-    const setup = detectSetupB({ closedCandles: candles, quality, breakout });
+    const breakoutStrength = strengthForBreak(breakout);
+    if (breakoutStrength === null) continue;
+    const setup = detectSetupB({ closedCandles: candles, quality, breakout, breakoutStrength });
     if (setup !== null) signals.push(setup);
   }
 
@@ -128,7 +141,16 @@ function collectSetupSignals(candles: readonly Candle[]): SetupSignal[] {
       const dominance = latestDominanceBefore(timeline, breakout.brokeAt);
       const quality = qualityByEndIndex[breakout.brokeAt];
       if (dominance === null || quality?.label !== 'CLEAN') continue;
-      const setup = detectSetupA({ baseZone, quality, compression, dominance, breakout });
+      const breakoutStrength = strengthForBreak(breakout);
+      if (breakoutStrength === null) continue;
+      const setup = detectSetupA({
+        baseZone,
+        quality,
+        compression,
+        dominance,
+        breakout,
+        breakoutStrength,
+      });
       if (setup !== null) signals.push(setup);
     }
   }
@@ -255,7 +277,7 @@ describe('BTCUSDT six-month setup-to-entry sanity diagnostic', () => {
     const cutoff = all.at(-1)!.openTime - 180 * 24 * 60 * 60 * 1000;
     const recent = all.filter((item) => item.openTime >= cutoff);
     const signals = collectSetupSignals(recent);
-    const tracker = createAtrTracker(14);
+    const tracker = createAtrTracker(D2_BREAK_V1_ATR_PERIOD);
     const atrAtIndex = recent.map((item) => tracker.next(item));
     const outcomes = { FILLED: 0, EXPIRED: 0, CANCELLED_OVER_EXTENDED: 0 };
     let evaluatedSignals = 0;

@@ -1,15 +1,18 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { createAtrTracker } from '../noTradeZone/atr.js';
 import type { Candle } from '../noTradeZone/types.js';
 import { detectBaseZones } from '../structure/baseZone.js';
 import {
+  D2_BREAK_V1_ATR_PERIOD,
   D6_RECLAIM_WINDOW,
   detectMeaningfulBreak,
   evaluateDominance,
   type BreakResult,
   type DominanceEvidence,
 } from '../structure/breakDetector.js';
+import { evaluateBreakoutStrength } from '../structure/breakoutStrength.js';
 import { detectCompression } from '../structure/compression.js';
 import { evaluateQuality } from '../structure/quality.js';
 import { detectSwingPoints } from '../structure/swingPoints.js';
@@ -74,6 +77,14 @@ async function countSetups(symbol: string): Promise<{
   const cutoff = all.at(-1)!.openTime - 180 * 24 * 60 * 60 * 1000;
   const recent = all.filter((item) => item.openTime >= cutoff);
   const breaks = collectCausalBreaks(recent);
+  const tracker = createAtrTracker(D2_BREAK_V1_ATR_PERIOD);
+  const atrAtIndex = recent.map((item) => tracker.next(item));
+  const strengthForBreak = (breakout: BreakResult) => {
+    const frozenAtr = atrAtIndex[breakout.brokeAt - 1];
+    return frozenAtr === null || frozenAtr === undefined
+      ? null
+      : evaluateBreakoutStrength(recent[breakout.brokeAt], frozenAtr);
+  };
   const qualityByEndIndex = recent.map((_, windowEndIndex) =>
     evaluateQuality(recent, windowEndIndex),
   );
@@ -100,9 +111,11 @@ async function countSetups(symbol: string): Promise<{
     if (dominance.counterTestIndex === null) continue;
     const triggerIndex = dominance.counterTestIndex + D6_RECLAIM_WINDOW;
     const quality = qualityByEndIndex[triggerIndex];
+    const breakoutStrength = strengthForBreak(breakout);
     if (
       quality?.label === 'CLEAN' &&
-      detectSetupB({ closedCandles: recent, quality, breakout }) !== null
+      breakoutStrength !== null &&
+      detectSetupB({ closedCandles: recent, quality, breakout, breakoutStrength }) !== null
     ) {
       setupBCount += 1;
     }
@@ -128,10 +141,19 @@ async function countSetups(symbol: string): Promise<{
     for (const breakout of candidates) {
       const dominance = latestDominanceBefore(timeline, breakout.brokeAt);
       const quality = qualityByEndIndex[breakout.brokeAt];
+      const breakoutStrength = strengthForBreak(breakout);
       if (
         quality?.label === 'CLEAN' &&
         dominance !== null &&
-        detectSetupA({ baseZone, quality, compression, dominance, breakout }) !== null
+        breakoutStrength !== null &&
+        detectSetupA({
+          baseZone,
+          quality,
+          compression,
+          dominance,
+          breakout,
+          breakoutStrength,
+        }) !== null
       ) {
         setupACount += 1;
       }

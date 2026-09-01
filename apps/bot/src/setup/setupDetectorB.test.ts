@@ -21,6 +21,7 @@ function validInput(): SetupBInput {
     ],
     quality: { label: 'CLEAN', efficiency: 0.18, sweepCount: 1 },
     breakout: { brokeAt: 15, direction: 'up', level: 100 },
+    breakoutStrength: { isStrong: true, bodyRatio: 0.7, rangeAtrRatio: 1.2 },
   };
 }
 
@@ -39,6 +40,7 @@ describe('detectSetupB', () => {
           counterTestIndex: 22,
         },
         d2: { brokeAt: 15, level: 100 },
+        d7: { bodyRatio: 0.7, rangeAtrRatio: 1.2, isStrong: true },
       },
     });
   });
@@ -52,6 +54,12 @@ describe('detectSetupB', () => {
   it('does not activate without a D2 break', () => {
     const input = validInput();
     input.breakout = null;
+    expect(detectSetupB(input)).toBeNull();
+  });
+
+  it('does not activate when the D7 breakout is not strong', () => {
+    const input = validInput();
+    input.breakoutStrength.isStrong = false;
     expect(detectSetupB(input)).toBeNull();
   });
 

@@ -11,6 +11,10 @@ import {
   D6_RECLAIM_WINDOW,
 } from '../structure/breakDetector.js';
 import {
+  D7_STRONG_BREAKOUT_V1_MIN_BODY_RATIO,
+  D7_STRONG_BREAKOUT_V1_MIN_RANGE_ATR_RATIO,
+} from '../structure/breakoutStrength.js';
+import {
   D5_COMPRESSION_V1_ATR_PERIOD,
   D5_COMPRESSION_V1_MAX_BANDWIDTH_ATR_RATIO,
   D5_COMPRESSION_V1_WINDOW,
@@ -48,7 +52,7 @@ export interface StrategyConstantManifest {
     readonly maxBandwidthAtrRatio: number;
   };
   readonly D6: { readonly counterTestWindow: number; readonly reclaimWindow: number };
-  readonly D7: { readonly status: 'UNSPECIFIED' };
+  readonly D7: { readonly minBodyRatio: number; readonly minRangeAtrRatio: number };
   readonly D8: { readonly maxDistanceAtrRatio: number };
 }
 
@@ -80,7 +84,10 @@ export const STRATEGY_CONSTANTS: StrategyConstantManifest = Object.freeze({
     counterTestWindow: D6_COUNTER_TEST_WINDOW,
     reclaimWindow: D6_RECLAIM_WINDOW,
   }),
-  D7: Object.freeze({ status: 'UNSPECIFIED' }),
+  D7: Object.freeze({
+    minBodyRatio: D7_STRONG_BREAKOUT_V1_MIN_BODY_RATIO,
+    minRangeAtrRatio: D7_STRONG_BREAKOUT_V1_MIN_RANGE_ATR_RATIO,
+  }),
   D8: Object.freeze({ maxDistanceAtrRatio: D8_NO_CHASE_V1_MAX_DISTANCE_ATR_RATIO }),
 });
 

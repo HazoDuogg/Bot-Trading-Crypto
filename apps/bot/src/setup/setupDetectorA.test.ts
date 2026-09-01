@@ -19,6 +19,7 @@ function validInput(): SetupAInput {
       counterTestIndex: 4,
     },
     breakout: { brokeAt: 8, direction: 'up', level: 105 },
+    breakoutStrength: { isStrong: true, bodyRatio: 0.7, rangeAtrRatio: 1.2 },
   };
 }
 
@@ -39,6 +40,7 @@ describe('detectSetupA', () => {
         d3: { startIndex: 0, endIndex: 7, high: 105, low: 95 },
         d5: { bandwidthAtrRatio: 1.5, isCompressed: true },
         d2: { brokeAt: 8, level: 105 },
+        d7: { bodyRatio: 0.7, rangeAtrRatio: 1.2, isStrong: true },
       },
     });
   });
@@ -51,6 +53,7 @@ describe('detectSetupA', () => {
     ['D5 is not the final eight candles of D3', (input: SetupAInput) => { input.compression.windowStartIndex = 1; }],
     ['D3 has fewer than eight candles', (input: SetupAInput) => { input.baseZone.start_index = 2; }],
     ['D2 break is missing', (input: SetupAInput) => { input.breakout = null; }],
+    ['D7 breakout is not strong', (input: SetupAInput) => { input.breakoutStrength.isStrong = false; }],
     ['D2 direction opposes dominance', (input: SetupAInput) => { input.breakout = { brokeAt: 8, direction: 'down', level: 95 }; }],
     ['D2 level is not the dominant base boundary', (input: SetupAInput) => { input.breakout = { brokeAt: 8, direction: 'up', level: 104 }; }],
     ['dominance is confirmed only after the breakout', (input: SetupAInput) => { input.dominance.counterTestIndex = 6; }],

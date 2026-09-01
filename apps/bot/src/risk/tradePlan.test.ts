@@ -24,6 +24,7 @@ function setupA(direction: 'BULL' | 'BEAR', low = 95, high = 105): SetupSignal {
       d3: { startIndex: 0, endIndex: 7, high, low },
       d5: { bandwidthAtrRatio: 1.5, isCompressed: true },
       d2: { brokeAt: 8, level: direction === 'BULL' ? high : low },
+      d7: { bodyRatio: 0.7, rangeAtrRatio: 1.2, isStrong: true },
     },
   };
 }
@@ -42,6 +43,7 @@ function setupB(direction: 'BULL' | 'BEAR'): SetupSignal {
         counterTestIndex: 2,
       },
       d2: { brokeAt: 1, level: 100 },
+      d7: { bodyRatio: 0.7, rangeAtrRatio: 1.2, isStrong: true },
     },
   };
 }
