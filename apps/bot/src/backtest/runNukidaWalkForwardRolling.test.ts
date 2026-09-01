@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'node:url';
 import {
   DAY_MS,
   M15_MS,
   assertRollingFingerprint,
   buildCoinWindowAssignments,
   buildRollingWindows,
+  runNukidaWalkForwardRolling,
 } from './runNukidaWalkForwardRolling.js';
 
 describe('buildRollingWindows', () => {
@@ -39,9 +41,9 @@ describe('buildRollingWindows', () => {
     });
 
     expect(assignments.map(({ status, reason }) => ({ status, reason }))).toEqual([
-      { status: 'SKIPPED', reason: 'NO_DATA_IN_WINDOW' },
-      { status: 'SKIPPED', reason: 'MISSING_WINDOW_START' },
-      { status: 'SKIPPED', reason: 'MISSING_WINDOW_END' },
+      { status: 'SKIPPED_NO_DATA', reason: 'NO_DATA_IN_WINDOW' },
+      { status: 'SKIPPED_NO_DATA', reason: 'MISSING_WINDOW_START' },
+      { status: 'SKIPPED_NO_DATA', reason: 'MISSING_WINDOW_END' },
     ]);
   });
 });
@@ -53,4 +55,46 @@ describe('assertRollingFingerprint', () => {
     );
     expect(() => assertRollingFingerprint('locked-hash', 'locked-hash', 3)).not.toThrow();
   });
+});
+
+describe('SOLUSDT historical tick-size integration', () => {
+  it(
+    'completes rolling windows 0-2 with a machine-derived M1 close tick size',
+    async () => {
+      const dataDirectory = fileURLToPath(new URL('../../data/', import.meta.url));
+      const result = await runNukidaWalkForwardRolling(dataDirectory, {
+        coins: ['SOLUSDT'],
+        windowIndexes: [0, 1, 2],
+      });
+
+      expect(result.windows.map((window) => window.coinResults[0].status)).toEqual([
+        'COMPLETED',
+        'COMPLETED',
+        'COMPLETED',
+      ]);
+      expect(
+        result.windows.map((window) => window.coinResults[0].tickSizeInference?.tickSize),
+      ).toEqual([0.001, 0.001, 0.001]);
+      expect(result.engineErrorWarnings).toEqual([]);
+    },
+    60_000,
+  );
+
+  it(
+    'classifies a genuine off-grid historical price as a hard engine error',
+    async () => {
+      const dataDirectory = fileURLToPath(new URL('../../data/', import.meta.url));
+      const result = await runNukidaWalkForwardRolling(dataDirectory, {
+        coins: ['BTCUSDT'],
+        windowIndexes: [1],
+      });
+      const coin = result.windows[0].coinResults[0];
+
+      expect(coin.status).toBe('SKIPPED_ENGINE_ERROR');
+      expect(coin.tickSizeInference?.tickSize).toBe(0.1);
+      expect(coin.engineErrorWarning).toContain('sample=55181.35');
+      expect(result.engineErrorWarnings).toEqual([coin.engineErrorWarning]);
+    },
+    60_000,
+  );
 });

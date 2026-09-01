@@ -4,6 +4,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { computeStrategyFingerprint } from '../orchestrator/fingerprint.js';
 import { loadM1CandlesBetween } from './controlTest.js';
 import {
+  inferTickSize,
+  validatePricesAlignToTickSize,
+  type TickSizeInferenceResult,
+} from './tickSizeInference.js';
+import {
   DEFAULT_COIN_BACKTEST_CONFIG,
   buildBacktestReport,
   defaultDataGate,
@@ -40,7 +45,7 @@ export interface TimestampCoverage {
 
 export interface CoinWindowAssignment {
   window: RollingWindow;
-  status: 'READY' | 'SKIPPED';
+  status: 'READY' | 'SKIPPED_NO_DATA';
   reason: 'NO_DATA_IN_WINDOW' | 'MISSING_WINDOW_START' | 'MISSING_WINDOW_END' | null;
 }
 
@@ -66,11 +71,14 @@ export interface RollingCoinResult {
   windowIndex: number;
   requested: { startInclusive: number; endExclusive: number };
   requestedIso: { startInclusive: string; endExclusive: string };
-  status: 'COMPLETED' | 'SKIPPED';
+  status: 'COMPLETED' | 'SKIPPED_NO_DATA' | 'SKIPPED_ENGINE_ERROR';
   reason?: string;
   m15Candles: number;
   m1Candles: number;
   actual?: { startInclusive: number; endExclusive: number };
+  configuredTickSize?: number;
+  tickSizeInference?: TickSizeInferenceResult;
+  engineErrorWarning?: string;
   warnings: string[];
   report?: BacktestReport;
 }
@@ -81,6 +89,12 @@ export interface RollingWindowResult {
   coinResults: RollingCoinResult[];
   report: BacktestReport;
   warnings: string[];
+  engineErrorWarnings: string[];
+}
+
+export interface RollingRunOptions {
+  coins?: readonly string[];
+  windowIndexes?: readonly number[];
 }
 
 export interface RollingStabilityReport {
@@ -88,6 +102,25 @@ export interface RollingStabilityReport {
   bySetupFamily: Record<string, Record<'zeroCost' | 'realisticCost', StabilitySnapshot>>;
   byDirection: Record<string, Record<'zeroCost' | 'realisticCost', StabilitySnapshot>>;
   byCoin: Record<string, Record<'zeroCost' | 'realisticCost', StabilitySnapshot>>;
+}
+
+export interface TickInferenceComparisonSide {
+  completedCoins: number;
+  noDataSkips: number;
+  engineErrorSkips: number;
+  overall: Record<'zeroCost' | 'realisticCost', MetricSnapshot>;
+  sol: {
+    status: string;
+    reason?: string;
+    inferredTickSize?: number;
+    metrics?: Record<'zeroCost' | 'realisticCost', MetricSnapshot>;
+  };
+}
+
+export interface TickInferenceComparisonRow {
+  windowIndex: number;
+  before: TickInferenceComparisonSide;
+  after: TickInferenceComparisonSide;
 }
 
 export function buildRollingWindows(
@@ -127,13 +160,13 @@ export function buildCoinWindowAssignments(
       coverageEndExclusive <= window.startInclusive ||
       coverage.firstOpenTime >= window.endExclusive
     ) {
-      return { window, status: 'SKIPPED', reason: 'NO_DATA_IN_WINDOW' };
+      return { window, status: 'SKIPPED_NO_DATA', reason: 'NO_DATA_IN_WINDOW' };
     }
     if (coverage.firstOpenTime > window.startInclusive) {
-      return { window, status: 'SKIPPED', reason: 'MISSING_WINDOW_START' };
+      return { window, status: 'SKIPPED_NO_DATA', reason: 'MISSING_WINDOW_START' };
     }
     if (coverageEndExclusive < window.endExclusive) {
-      return { window, status: 'SKIPPED', reason: 'MISSING_WINDOW_END' };
+      return { window, status: 'SKIPPED_NO_DATA', reason: 'MISSING_WINDOW_END' };
     }
     return { window, status: 'READY', reason: null };
   });
@@ -198,6 +231,72 @@ function metricSnapshot(metric: PerformanceMetrics): MetricSnapshot {
   };
 }
 
+function dualSnapshot(
+  metrics: DualCostMetrics,
+): Record<'zeroCost' | 'realisticCost', MetricSnapshot> {
+  return {
+    zeroCost: metricSnapshot(metrics.zeroCost),
+    realisticCost: metricSnapshot(metrics.realisticCost),
+  };
+}
+
+function comparisonSide(window: {
+  coinResults: Array<{
+    coin: string;
+    status: string;
+    reason?: string;
+    tickSizeInference?: TickSizeInferenceResult;
+    report?: BacktestReport;
+  }>;
+  report: BacktestReport;
+}): TickInferenceComparisonSide {
+  const sol = window.coinResults.find((coin) => coin.coin === 'SOLUSDT');
+  const normalizedStatus =
+    sol?.status === 'SKIPPED' && sol.reason?.startsWith('BACKTEST_ERROR')
+      ? 'SKIPPED_ENGINE_ERROR'
+      : (sol?.status ?? 'MISSING');
+  return {
+    completedCoins: window.coinResults.filter((coin) => coin.status === 'COMPLETED').length,
+    noDataSkips: window.coinResults.filter(
+      (coin) =>
+        coin.status === 'SKIPPED_NO_DATA' ||
+        (coin.status === 'SKIPPED' && !coin.reason?.startsWith('BACKTEST_ERROR')),
+    ).length,
+    engineErrorSkips: window.coinResults.filter(
+      (coin) =>
+        coin.status === 'SKIPPED_ENGINE_ERROR' ||
+        (coin.status === 'SKIPPED' && coin.reason?.startsWith('BACKTEST_ERROR')),
+    ).length,
+    overall: dualSnapshot(window.report.overall),
+    sol: {
+      status: normalizedStatus,
+      reason: sol?.reason,
+      inferredTickSize: sol?.tickSizeInference?.tickSize,
+      metrics: sol?.report === undefined ? undefined : dualSnapshot(sol.report.overall),
+    },
+  };
+}
+
+function buildTickInferenceComparison(
+  previousArtifact: unknown,
+  currentWindows: readonly RollingWindowResult[],
+): TickInferenceComparisonRow[] {
+  const previous = previousArtifact as {
+    windows?: Array<RollingWindowResult>;
+    tickInferenceComparison?: TickInferenceComparisonRow[];
+  } | null;
+  const previousRows = previous?.tickInferenceComparison;
+  return [0, 1, 2].flatMap((windowIndex) => {
+    const current = currentWindows.find((window) => window.window.index === windowIndex);
+    const preservedBefore = previousRows?.find((row) => row.windowIndex === windowIndex)?.before;
+    const previousWindow = previous?.windows?.find((window) => window.window.index === windowIndex);
+    const before = preservedBefore ?? (previousWindow === undefined ? undefined : comparisonSide(previousWindow));
+    return current === undefined || before === undefined
+      ? []
+      : [{ windowIndex, before, after: comparisonSide(current) }];
+  });
+}
+
 async function readM15Coverage(csvPath: string): Promise<TimestampCoverage> {
   const rows = (await readFile(csvPath, 'utf8')).trim().split(/\r?\n/u);
   if (rows.length < 2) throw new Error('M15 CSV contains no data rows');
@@ -255,7 +354,7 @@ function buildStability(windowResults: readonly RollingWindowResult[]): RollingS
       ['BULL', 'BEAR'],
     ),
     byCoin: Object.fromEntries(
-      Object.keys(DEFAULT_COIN_BACKTEST_CONFIG).map((coin) => [
+      [...new Set(windowResults.flatMap((window) => window.coinResults.map((coin) => coin.coin)))].map((coin) => [
         coin,
         summarizeDual(
           completedCoinResults
@@ -279,15 +378,27 @@ function printDual(label: string, metrics: DualCostMetrics): void {
   }
 }
 
-export async function runNukidaWalkForwardRolling(dataDirectory: string): Promise<{
+export async function runNukidaWalkForwardRolling(
+  dataDirectory: string,
+  options: RollingRunOptions = {},
+): Promise<{
   windows: RollingWindowResult[];
   stability: RollingStabilityReport;
+  engineErrorWarnings: string[];
 }> {
   const btcCoverage = await readM15Coverage(resolve(dataDirectory, 'BTCUSDT_15m_3y.csv'));
-  const windows = buildRollingWindows(btcCoverage.firstOpenTime, btcCoverage.lastOpenTime);
+  const allWindows = buildRollingWindows(btcCoverage.firstOpenTime, btcCoverage.lastOpenTime);
+  const windows =
+    options.windowIndexes === undefined
+      ? allWindows
+      : allWindows.filter((window) => options.windowIndexes!.includes(window.index));
+  const configuredCoins = Object.keys(DEFAULT_COIN_BACKTEST_CONFIG);
+  const selectedCoins = options.coins ?? configuredCoins;
+  const unknownCoins = selectedCoins.filter((coin) => !configuredCoins.includes(coin));
+  if (unknownCoins.length > 0) throw new Error(`Unknown rolling coin(s): ${unknownCoins.join(', ')}`);
   const coverages = Object.fromEntries(
     await Promise.all(
-      Object.keys(DEFAULT_COIN_BACKTEST_CONFIG).map(async (coin) => [
+      selectedCoins.map(async (coin) => [
         coin,
         await readM15Coverage(resolve(dataDirectory, `${coin}_15m_3y.csv`)),
       ]),
@@ -306,8 +417,9 @@ export async function runNukidaWalkForwardRolling(dataDirectory: string): Promis
     assertRollingFingerprint(TICKET_020_STRATEGY_FINGERPRINT, fingerprint, window.index);
     const completedInputs: CoinBacktestInput[] = [];
     const coinResults: RollingCoinResult[] = [];
-    for (const [coin, config] of Object.entries(DEFAULT_COIN_BACKTEST_CONFIG)) {
-      const assignment = assignments[coin][window.index];
+    for (const coin of selectedCoins) {
+      const config = DEFAULT_COIN_BACKTEST_CONFIG[coin as keyof typeof DEFAULT_COIN_BACKTEST_CONFIG];
+      const assignment = assignments[coin].find((candidate) => candidate.window.index === window.index)!;
       const requested = {
         startInclusive: window.startInclusive,
         endExclusive: window.endExclusive,
@@ -316,7 +428,7 @@ export async function runNukidaWalkForwardRolling(dataDirectory: string): Promis
         startInclusive: new Date(window.startInclusive).toISOString(),
         endExclusive: new Date(window.endExclusive).toISOString(),
       };
-      if (assignment.status === 'SKIPPED') {
+      if (assignment.status === 'SKIPPED_NO_DATA') {
         let m15Candles = 0;
         let m1Candles = 0;
         let actual: RollingCoinResult['actual'];
@@ -352,7 +464,7 @@ export async function runNukidaWalkForwardRolling(dataDirectory: string): Promis
           windowIndex: window.index,
           requested,
           requestedIso,
-          status: 'SKIPPED',
+          status: 'SKIPPED_NO_DATA',
           reason: assignment.reason ?? 'MISSING_DATA',
           m15Candles,
           m1Candles,
@@ -361,6 +473,10 @@ export async function runNukidaWalkForwardRolling(dataDirectory: string): Promis
         });
         continue;
       }
+      let attemptedTickInference: TickSizeInferenceResult | undefined;
+      let attemptedM15Candles = 0;
+      let attemptedM1Candles = 0;
+      let attemptedActual: RollingCoinResult['actual'];
       try {
         const m15Candles = await loadM15CandlesBetween(
           resolve(dataDirectory, `${coin}_15m_3y.csv`),
@@ -372,6 +488,12 @@ export async function runNukidaWalkForwardRolling(dataDirectory: string): Promis
           window.startInclusive,
           window.endExclusive,
         );
+        attemptedM15Candles = m15Candles.length;
+        attemptedM1Candles = m1Candles.length;
+        attemptedActual = {
+          startInclusive: m15Candles[0].openTime,
+          endExclusive: m15Candles.at(-1)!.openTime + M15_MS,
+        };
         const m15CoverageReason = coverageReason(
           m15Candles[0].openTime,
           m15Candles.at(-1)!.openTime,
@@ -390,7 +512,7 @@ export async function runNukidaWalkForwardRolling(dataDirectory: string): Promis
             windowIndex: window.index,
             requested,
             requestedIso,
-            status: 'SKIPPED',
+            status: 'SKIPPED_NO_DATA',
             reason: `INCOMPLETE_DATA: M15=${m15CoverageReason ?? 'OK'}, M1=${m1CoverageReason ?? 'OK'}`,
             m15Candles: m15Candles.length,
             m1Candles: m1Candles.length,
@@ -398,11 +520,22 @@ export async function runNukidaWalkForwardRolling(dataDirectory: string): Promis
           });
           continue;
         }
+        const tickSizeInference = inferTickSize(m1Candles.map((candle) => candle.close));
+        attemptedTickInference = tickSizeInference;
+        validatePricesAlignToTickSize(
+          m1Candles.map((candle) => candle.close),
+          tickSizeInference.tickSize,
+        );
         completedInputs.push({
           coin,
           m15Candles,
           m1Candles,
-          fsmConfig: { ...config, riskBudgetUsd: 100, dataGate: defaultDataGate },
+          fsmConfig: {
+            ...config,
+            tickSize: tickSizeInference.tickSize,
+            riskBudgetUsd: 100,
+            dataGate: defaultDataGate,
+          },
         });
         coinResults.push({
           coin,
@@ -416,19 +549,28 @@ export async function runNukidaWalkForwardRolling(dataDirectory: string): Promis
             startInclusive: m15Candles[0].openTime,
             endExclusive: m15Candles.at(-1)!.openTime + M15_MS,
           },
+          configuredTickSize: config.tickSize,
+          tickSizeInference,
           warnings: [],
         });
       } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        const engineErrorWarning =
+          `ENGINE_ERROR: window=${window.index} coin=${coin} during data/tick preparation: ${reason}`;
         coinResults.push({
           coin,
           windowIndex: window.index,
           requested,
           requestedIso,
-          status: 'SKIPPED',
-          reason: error instanceof Error ? error.message : String(error),
-          m15Candles: 0,
-          m1Candles: 0,
+          status: 'SKIPPED_ENGINE_ERROR',
+          reason,
+          m15Candles: attemptedM15Candles,
+          m1Candles: attemptedM1Candles,
+          actual: attemptedActual,
+          configuredTickSize: config.tickSize,
+          tickSizeInference: attemptedTickInference,
           warnings: [],
+          engineErrorWarning,
         });
       }
     }
@@ -449,8 +591,11 @@ export async function runNukidaWalkForwardRolling(dataDirectory: string): Promis
         minimumStopBlockedByCoin[input.coin] =
           coinBacktest.report.minimumStopDistanceBlocked.byCoin[input.coin] ?? 0;
       } catch (error) {
-        coinResult.status = 'SKIPPED';
-        coinResult.reason = `BACKTEST_ERROR: ${error instanceof Error ? error.message : String(error)}`;
+        const reason = error instanceof Error ? error.message : String(error);
+        coinResult.status = 'SKIPPED_ENGINE_ERROR';
+        coinResult.reason = reason;
+        coinResult.engineErrorWarning =
+          `ENGINE_ERROR: window=${window.index} coin=${input.coin} during backtest: ${reason}`;
         coinResult.warnings = [];
       }
     }
@@ -469,28 +614,69 @@ export async function runNukidaWalkForwardRolling(dataDirectory: string): Promis
       ),
       ...coinResults.flatMap((coin) => coin.warnings),
     ];
-    windowResults.push({ window, fingerprint, coinResults, report, warnings });
+    const engineErrorWarnings = coinResults.flatMap((coin) =>
+      coin.engineErrorWarning === undefined ? [] : [coin.engineErrorWarning],
+    );
+    windowResults.push({
+      window,
+      fingerprint,
+      coinResults,
+      report,
+      warnings,
+      engineErrorWarnings,
+    });
   }
-  return { windows: windowResults, stability: buildStability(windowResults) };
+  return {
+    windows: windowResults,
+    stability: buildStability(windowResults),
+    engineErrorWarnings: windowResults.flatMap((window) => window.engineErrorWarnings),
+  };
 }
 
 async function main(): Promise<void> {
   const dataDirectory = fileURLToPath(new URL('../../data/', import.meta.url));
+  const outputPath = resolve(dataDirectory, 'nukida-backtest-walkforward-rolling.json');
+  let previousArtifact: unknown = null;
+  try {
+    previousArtifact = JSON.parse(await readFile(outputPath, 'utf8')) as unknown;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') throw error;
+  }
   console.info(ROLLING_WARNING);
   const result = await runNukidaWalkForwardRolling(dataDirectory);
+  const tickInferenceComparison = buildTickInferenceComparison(
+    previousArtifact,
+    result.windows,
+  );
   for (const windowResult of result.windows) {
     const { window } = windowResult;
     console.info(
       `WINDOW ${window.index}: ${new Date(window.startInclusive).toISOString()} -> ` +
         `${new Date(window.endExclusive).toISOString()} (exclusive)${window.partial ? ' PARTIAL' : ''}`,
     );
+    const completed = windowResult.coinResults.filter((coin) => coin.status === 'COMPLETED').length;
+    const noData = windowResult.coinResults.filter(
+      (coin) => coin.status === 'SKIPPED_NO_DATA',
+    ).length;
+    const engineErrors = windowResult.coinResults.filter(
+      (coin) => coin.status === 'SKIPPED_ENGINE_ERROR',
+    ).length;
+    console.info(
+      `WINDOW ${window.index} COVERAGE: completed=${completed}, noData=${noData}, engineErrors=${engineErrors}`,
+    );
     for (const coin of windowResult.coinResults) {
-      if (coin.status === 'SKIPPED') {
-        console.info(`WINDOW ${window.index} ${coin.coin}: SKIPPED reason=${coin.reason}`);
+      if (coin.status === 'SKIPPED_NO_DATA') {
+        console.info(`WINDOW ${window.index} ${coin.coin}: SKIPPED_NO_DATA reason=${coin.reason}`);
+        continue;
+      }
+      if (coin.status === 'SKIPPED_ENGINE_ERROR') {
+        console.error(coin.engineErrorWarning);
         continue;
       }
       console.info(
-        `WINDOW ${window.index} ${coin.coin}: M15=${coin.m15Candles} M1=${coin.m1Candles}`,
+        `WINDOW ${window.index} ${coin.coin}: M15=${coin.m15Candles} M1=${coin.m1Candles} ` +
+          `tickSize=${coin.tickSizeInference?.tickSize} source=${coin.tickSizeInference?.source}`,
       );
       printDual(`WINDOW ${window.index} ${coin.coin}`, coin.report!.overall);
       for (const warning of coin.warnings) console.info(warning);
@@ -505,7 +691,19 @@ async function main(): Promise<void> {
     for (const warning of windowResult.warnings) console.info(warning);
   }
 
-  const outputPath = resolve(dataDirectory, 'nukida-backtest-walkforward-rolling.json');
+  for (const row of tickInferenceComparison) {
+    const before = row.before.overall.realisticCost;
+    const after = row.after.overall.realisticCost;
+    console.info(
+      `TICKET-022 WINDOW ${row.windowIndex} BEFORE/AFTER: ` +
+        `overall netR ${before.netR.toFixed(2)} -> ${after.netR.toFixed(2)}, ` +
+        `PF ${before.profitFactor?.toFixed(2) ?? 'N/A'} -> ${after.profitFactor?.toFixed(2) ?? 'N/A'}, ` +
+        `SOL ${row.before.sol.status} -> ${row.after.sol.status}, ` +
+        `SOL tick=${row.after.sol.inferredTickSize ?? 'N/A'}, ` +
+        `SOL netR=${row.after.sol.metrics?.realisticCost.netR.toFixed(2) ?? 'N/A'}`,
+    );
+  }
+
   await writeFile(
     outputPath,
     `${JSON.stringify(
@@ -515,6 +713,8 @@ async function main(): Promise<void> {
         strategyFingerprint: computeStrategyFingerprint(),
         windowDays: ROLLING_WINDOW_DAYS,
         lowSampleClosedTrades: LOW_SAMPLE_CLOSED_TRADES,
+        engineErrorWarnings: result.engineErrorWarnings,
+        tickInferenceComparison,
         windows: result.windows,
         stability: result.stability,
       },
