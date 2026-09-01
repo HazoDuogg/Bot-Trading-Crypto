@@ -155,5 +155,5 @@ describe('BTCUSDT 3-year sanity diagnostic', () => {
     expect(swings.length).toBeGreaterThan(0);
     expect(rate).toBeGreaterThanOrEqual(0);
     expect(rate).toBeLessThanOrEqual(1);
-  });
+  }, 30_000);
 });

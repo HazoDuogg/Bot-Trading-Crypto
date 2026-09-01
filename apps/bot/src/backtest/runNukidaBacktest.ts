@@ -260,6 +260,7 @@ export function buildBacktestReport(
   logs: readonly TradeLogEntry[],
   coins: readonly string[],
   minimumStopBlockedByCoin: Readonly<Record<string, number>> = {},
+  note = IN_SAMPLE_WARNING,
 ): BacktestReport {
   const ambiguous = logs.filter(
     (log): log is TradeLogEntry & {
@@ -267,7 +268,7 @@ export function buildBacktestReport(
     } => log.execution.outcome === 'AMBIGUOUS' && log.costs !== null && 'bestCase' in log.costs,
   );
   return {
-    note: IN_SAMPLE_WARNING,
+    note,
     baselineVariant: 'RETEST_LIMIT_ONLY',
     overall: dualMetrics(logs),
     ambiguousScenarios: {
@@ -293,6 +294,7 @@ export function buildBacktestReport(
 
 export function runNukidaBacktest(input: {
   coins: readonly CoinBacktestInput[];
+  warning?: string;
 }): NukidaBacktestResult {
   const coinResults = input.coins.map((coin) => ({ coin: coin.coin, ...runCoin(coin) }));
   const tradeLogs = coinResults.flatMap((result) => result.logs).sort(
@@ -302,12 +304,13 @@ export function runNukidaBacktest(input: {
     coinResults.map((result) => [result.coin, result.minimumStopBlocked]),
   );
   return {
-    warning: IN_SAMPLE_WARNING,
+    warning: input.warning ?? IN_SAMPLE_WARNING,
     tradeLogs,
     report: buildBacktestReport(
       tradeLogs,
       input.coins.map((coin) => coin.coin),
       minimumStopBlockedByCoin,
+      input.warning ?? IN_SAMPLE_WARNING,
     ),
   };
 }
@@ -320,7 +323,7 @@ export const DEFAULT_COIN_BACKTEST_CONFIG = Object.freeze({
   DOGEUSDT: { tickSize: 0.00001, lotSize: 1, leverage: 10 },
 });
 
-async function loadRecentM15(csvPath: string): Promise<Candle[]> {
+async function loadM15File(csvPath: string): Promise<Candle[]> {
   const rows = (await readFile(csvPath, 'utf8')).trim().split(/\r?\n/u).slice(1);
   const all = rows.map((row, index) => {
     const values = row.split(',').map(Number);
@@ -331,11 +334,32 @@ async function loadRecentM15(csvPath: string): Promise<Candle[]> {
     return { openTime, open, high, low, close, volume };
   });
   if (all.length === 0) throw new Error('M15 CSV contains no candles');
+  return all;
+}
+
+export async function loadM15CandlesBetween(
+  csvPath: string,
+  startInclusive: number,
+  endExclusive: number,
+): Promise<Candle[]> {
+  if (!Number.isSafeInteger(startInclusive) || !Number.isSafeInteger(endExclusive)) {
+    throw new Error('M15 window bounds must be UTC epoch millisecond integers');
+  }
+  if (endExclusive <= startInclusive) throw new Error('M15 window end must be after start');
+  const result = (await loadM15File(csvPath)).filter(
+    (candle) => candle.openTime >= startInclusive && candle.openTime < endExclusive,
+  );
+  if (result.length === 0) throw new Error('M15 CSV has no candles in the requested window');
+  return result;
+}
+
+async function loadRecentM15(csvPath: string): Promise<Candle[]> {
+  const all = await loadM15File(csvPath);
   const cutoff = all.at(-1)!.openTime - 180 * DAY_MS;
   return all.filter((candle) => candle.openTime >= cutoff);
 }
 
-function defaultDataGate(candles: readonly Candle[], index: number) {
+export function defaultDataGate(candles: readonly Candle[], index: number) {
   if (index === 0) return { accepted: true };
   const accepted = candles[index].openTime - candles[index - 1].openTime === 900_000;
   return { accepted, reasonCode: accepted ? undefined : 'M15_GAP_OR_DUPLICATE' };
@@ -381,9 +405,10 @@ export async function writeBacktestArtifacts(
   dataDirectory: string,
   result: NukidaBacktestResult,
   coinRuns: Record<string, { status: 'COMPLETED' | 'SKIPPED'; error?: string }>,
+  artifactStem = 'nukida-backtest',
 ): Promise<{ tradesPath: string; reportPath: string }> {
-  const tradesPath = resolve(dataDirectory, 'nukida-backtest-trades-6m.json');
-  const reportPath = resolve(dataDirectory, 'nukida-backtest-report-6m.json');
+  const tradesPath = resolve(dataDirectory, `${artifactStem}-trades-6m.json`);
+  const reportPath = resolve(dataDirectory, `${artifactStem}-report-6m.json`);
   await writeFile(tradesPath, `${JSON.stringify(result.tradeLogs, null, 2)}\n`, 'utf8');
   await writeFile(
     reportPath,

@@ -105,6 +105,38 @@ export async function loadRecentM1Candles(
   return result;
 }
 
+export async function loadM1CandlesBetween(
+  csvPath: string,
+  startInclusive: number,
+  endExclusive: number,
+): Promise<Candle[]> {
+  if (!Number.isSafeInteger(startInclusive) || !Number.isSafeInteger(endExclusive)) {
+    throw new Error('M1 window bounds must be UTC epoch millisecond integers');
+  }
+  if (endExclusive <= startInclusive) throw new Error('M1 window end must be after start');
+  const reader = createInterface({
+    input: createReadStream(csvPath, { encoding: 'utf8' }),
+    crlfDelay: Number.POSITIVE_INFINITY,
+  });
+  const result: Candle[] = [];
+  let lineNumber = 0;
+  let previousTimestamp = -1;
+  for await (const row of reader) {
+    lineNumber += 1;
+    if (lineNumber === 1 || row.trim().length === 0) continue;
+    const current = parseM1Row(row, lineNumber);
+    if (current.openTime <= previousTimestamp) {
+      throw new Error(`M1 candles must be strictly chronological at line ${lineNumber}`);
+    }
+    previousTimestamp = current.openTime;
+    if (current.openTime < startInclusive) continue;
+    if (current.openTime >= endExclusive) break;
+    result.push(current);
+  }
+  if (result.length < 2) throw new Error('M1 CSV has fewer than two candles in the requested window');
+  return result;
+}
+
 export function runBuyAndHoldControl(candles: readonly Candle[]): BuyAndHoldControlResult {
   if (candles.length < 2) throw new Error('Buy-and-hold control requires at least two M1 candles');
   const first = candles[0];
