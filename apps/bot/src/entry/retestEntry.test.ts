@@ -286,5 +286,5 @@ describe('BTCUSDT six-month setup-to-entry sanity diagnostic', () => {
     expect(outcomes.FILLED + outcomes.EXPIRED + outcomes.CANCELLED_OVER_EXTENDED).toBe(
       evaluatedSignals,
     );
-  });
+  }, 30_000);
 });

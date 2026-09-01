@@ -1,5 +1,8 @@
 import type { Candle } from '../noTradeZone/types.js';
 
+export const D1_SWING_V1_WINDOW = 5;
+export const D1_SWING_V1_SIDE_CANDLES = 2;
+
 export interface SwingPoint {
   index: number;
   type: 'high' | 'low';
@@ -9,11 +12,11 @@ export interface SwingPoint {
 // D1 — CONVENTION: strict five-candle fractal, confirmed only after both right-side candles close.
 export function detectSwingPoints(candles: readonly Candle[]): SwingPoint[] {
   const swings: SwingPoint[] = [];
-  for (let confirmedAt = 4; confirmedAt < candles.length; confirmedAt += 1) {
-    const window = candles.slice(confirmedAt - 4, confirmedAt + 1);
-    const center = window[2];
-    const neighbors = [window[0], window[1], window[3], window[4]];
-    const index = confirmedAt - 2;
+  for (let confirmedAt = D1_SWING_V1_WINDOW - 1; confirmedAt < candles.length; confirmedAt += 1) {
+    const window = candles.slice(confirmedAt - D1_SWING_V1_WINDOW + 1, confirmedAt + 1);
+    const center = window[D1_SWING_V1_SIDE_CANDLES];
+    const neighbors = window.filter((_, index) => index !== D1_SWING_V1_SIDE_CANDLES);
+    const index = confirmedAt - D1_SWING_V1_SIDE_CANDLES;
 
     if (neighbors.every((item) => center.high > item.high)) {
       swings.push({ index, type: 'high', price: center.high });

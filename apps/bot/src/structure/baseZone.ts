@@ -1,7 +1,8 @@
 import type { Candle } from '../noTradeZone/types.js';
 
-const MIN_BASE_CANDLES = 3;
-const IMPULSE_RANGE_MULTIPLIER = 1.5;
+export const D3_BASE_V1_MIN_CANDLES = 3;
+export const D3_BASE_V1_IMPULSE_RANGE_MULTIPLIER = 1.5;
+export const D3_BASE_V1_REQUIRED_OVERLAP_RATIO = 1;
 
 export interface BaseZone {
   start_index: number;
@@ -28,7 +29,7 @@ export function detectBaseZones(candles: readonly Candle[]): BaseZone[] {
   const zones: BaseZone[] = [];
   let searchFloor = 0;
 
-  for (let impulseIndex = MIN_BASE_CANDLES; impulseIndex < candles.length; impulseIndex += 1) {
+  for (let impulseIndex = D3_BASE_V1_MIN_CANDLES; impulseIndex < candles.length; impulseIndex += 1) {
     const endIndex = impulseIndex - 1;
     let startIndex = endIndex;
     while (
@@ -39,10 +40,15 @@ export function detectBaseZones(candles: readonly Candle[]): BaseZone[] {
     }
 
     const base = candles.slice(startIndex, endIndex + 1);
-    if (base.length < MIN_BASE_CANDLES || calculateOverlapRatio(base) !== 1) continue;
+    if (
+      base.length < D3_BASE_V1_MIN_CANDLES ||
+      calculateOverlapRatio(base) !== D3_BASE_V1_REQUIRED_OVERLAP_RATIO
+    ) {
+      continue;
+    }
     const averageRange = base.reduce((sum, item) => sum + item.high - item.low, 0) / base.length;
     const impulseRange = candles[impulseIndex].high - candles[impulseIndex].low;
-    if (impulseRange < averageRange * IMPULSE_RANGE_MULTIPLIER) continue;
+    if (impulseRange < averageRange * D3_BASE_V1_IMPULSE_RANGE_MULTIPLIER) continue;
 
     zones.push({
       start_index: startIndex,

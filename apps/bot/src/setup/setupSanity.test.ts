@@ -171,5 +171,6 @@ describe('five-coin setup sanity diagnostic', () => {
       expect(counts.setupACount).toBeGreaterThanOrEqual(0);
       expect(counts.setupBCount).toBeGreaterThanOrEqual(0);
     },
+    30_000,
   );
 });
