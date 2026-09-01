@@ -3,7 +3,8 @@ import type { Candle } from '../noTradeZone/types.js';
 
 const ATR_PERIOD = 14;
 const ATR_BUFFER_MULTIPLIER = 0.1;
-const COUNTER_TEST_CANDLES = 3;
+export const D6_COUNTER_TEST_WINDOW = 10;
+export const D6_RECLAIM_WINDOW = 3;
 
 export type BreakDirection = 'up' | 'down';
 
@@ -24,6 +25,7 @@ export interface DominanceEvidence {
   side: 'BULL' | 'BEAR' | 'NEUTRAL';
   brokeLevel: number;
   counterTestFailed: boolean;
+  counterTestIndex: number | null;
 }
 
 // D2 — CONVENTION: close must clear the level by 0.1 × prior closed-candle ATR14.
@@ -49,33 +51,52 @@ export function detectMeaningfulBreak(candles: readonly Candle[], request: Break
   return null;
 }
 
-export function evaluateDominance(candles: readonly Candle[], breakout: BreakResult): DominanceEvidence {
+export function evaluateDominance(
+  candles: readonly Candle[],
+  breakout: BreakResult,
+  counterTestWindow = D6_COUNTER_TEST_WINDOW,
+  reclaimWindow = D6_RECLAIM_WINDOW,
+): DominanceEvidence {
+  if (!Number.isSafeInteger(counterTestWindow) || counterTestWindow <= 0) {
+    throw new Error('counterTestWindow must be a positive integer');
+  }
+  if (!Number.isSafeInteger(reclaimWindow) || reclaimWindow <= 0) {
+    throw new Error('reclaimWindow must be a positive integer');
+  }
   const neutral: DominanceEvidence = {
     side: 'NEUTRAL',
     brokeLevel: breakout.level,
     counterTestFailed: false,
+    counterTestIndex: null,
   };
-  const endIndex = breakout.brokeAt + COUNTER_TEST_CANDLES;
-  if (endIndex >= candles.length) return neutral;
+  const counterSearchEnd = Math.min(breakout.brokeAt + counterTestWindow, candles.length - 1);
+  let counterTestIndex: number | null = null;
+  for (let index = breakout.brokeAt + 1; index <= counterSearchEnd; index += 1) {
+    const counterTested =
+      breakout.direction === 'up' ? candles[index].low <= breakout.level : candles[index].high >= breakout.level;
+    if (counterTested) {
+      counterTestIndex = index;
+      break;
+    }
+  }
+  if (counterTestIndex === null) return neutral;
 
-  const counterCandles = candles.slice(breakout.brokeAt + 1, endIndex + 1);
-  const counterTested = counterCandles.some((item) =>
-    breakout.direction === 'up' ? item.low <= breakout.level : item.high >= breakout.level,
-  );
-  if (!counterTested) return neutral;
+  const neutralAfterCounterTest = { ...neutral, counterTestIndex };
+  const reclaimEndIndex = counterTestIndex + reclaimWindow;
 
   const reclaimDirection: BreakDirection = breakout.direction === 'up' ? 'down' : 'up';
   const reclaim = detectMeaningfulBreak(candles, {
     level: breakout.level,
     direction: reclaimDirection,
-    startIndex: breakout.brokeAt + 1,
-    endIndex,
+    startIndex: counterTestIndex,
+    endIndex: Math.min(reclaimEndIndex, candles.length - 1),
   });
-  if (reclaim !== null) return neutral;
+  if (reclaim !== null || reclaimEndIndex >= candles.length) return neutralAfterCounterTest;
 
   return {
     side: breakout.direction === 'up' ? 'BULL' : 'BEAR',
     brokeLevel: breakout.level,
     counterTestFailed: true,
+    counterTestIndex,
   };
 }

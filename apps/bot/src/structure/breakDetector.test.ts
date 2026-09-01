@@ -49,6 +49,7 @@ describe('evaluateDominance', () => {
       candle(16, 100.3, 100.5, 99.9, 100.1),
       candle(17, 100.1, 100.4, 99.95, 100.2),
       candle(18, 100.2, 100.6, 100.05, 100.4),
+      candle(19, 100.4, 100.7, 100.1, 100.5),
     ];
     const breakout = detectMeaningfulBreak(candles, { level: 100, direction: 'up', startIndex: 15 });
 
@@ -57,6 +58,7 @@ describe('evaluateDominance', () => {
       side: 'BULL',
       brokeLevel: 100,
       counterTestFailed: true,
+      counterTestIndex: 16,
     });
   });
 
@@ -74,6 +76,7 @@ describe('evaluateDominance', () => {
       side: 'NEUTRAL',
       brokeLevel: 100,
       counterTestFailed: false,
+      counterTestIndex: 16,
     });
   });
 
@@ -84,6 +87,7 @@ describe('evaluateDominance', () => {
       candle(16, 97.7, 98.1, 97.5, 97.9),
       candle(17, 97.9, 98, 97.4, 97.6),
       candle(18, 97.6, 97.9, 97.2, 97.4),
+      candle(19, 97.4, 97.8, 97.1, 97.3),
     ];
     const breakout = detectMeaningfulBreak(candles, { level: 98, direction: 'down', startIndex: 15 });
 
@@ -91,6 +95,27 @@ describe('evaluateDominance', () => {
       side: 'BEAR',
       brokeLevel: 98,
       counterTestFailed: true,
+      counterTestIndex: 16,
+    });
+  });
+
+  it('finds a late counter-test within 10 candles and starts reclaim timing there', () => {
+    const candles = [
+      ...flatAtrHistory(),
+      candle(15, 99, 101, 99, 100.3),
+      ...Array.from({ length: 6 }, (_, offset) => candle(16 + offset, 100.4, 100.8, 100.1, 100.5)),
+      candle(22, 100.5, 100.7, 99.9, 100.2),
+      candle(23, 100.2, 100.5, 100.05, 100.3),
+      candle(24, 100.3, 100.6, 100.1, 100.4),
+      candle(25, 100.4, 100.7, 100.2, 100.5),
+    ];
+    const breakout = detectMeaningfulBreak(candles, { level: 100, direction: 'up', startIndex: 15 });
+
+    expect(evaluateDominance(candles, breakout!)).toEqual({
+      side: 'BULL',
+      brokeLevel: 100,
+      counterTestFailed: true,
+      counterTestIndex: 22,
     });
   });
 });
