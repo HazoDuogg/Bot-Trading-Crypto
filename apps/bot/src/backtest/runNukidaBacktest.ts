@@ -327,6 +327,12 @@ export const DEFAULT_COIN_BACKTEST_CONFIG = Object.freeze({
   DOGEUSDT: { tickSize: 0.00001, lotSize: 1, leverage: 10 },
 });
 
+export interface BacktestStrategyVariantOptions {
+  takeProfitRMultiple?: number;
+  setupBSlBufferAtrMultiple?: number;
+  minimumTestOccurrence?: number;
+}
+
 async function loadM15File(csvPath: string): Promise<Candle[]> {
   const rows = (await readFile(csvPath, 'utf8')).trim().split(/\r?\n/u).slice(1);
   const all = rows.map((row, index) => {
@@ -371,7 +377,7 @@ export function defaultDataGate(candles: readonly Candle[], index: number) {
 
 export async function runFullNukidaBacktest(
   dataDirectory: string,
-  options: { takeProfitRMultiple?: number } = {},
+  options: BacktestStrategyVariantOptions = {},
 ): Promise<{
   result: NukidaBacktestResult;
   coinRuns: Record<string, { status: 'COMPLETED' | 'SKIPPED'; error?: string }>;
@@ -395,6 +401,8 @@ export async function runFullNukidaBacktest(
           ...config,
           riskBudgetUsd: 100,
           takeProfitRMultiple: options.takeProfitRMultiple,
+          setupBSlBufferAtrMultiple: options.setupBSlBufferAtrMultiple,
+          minimumTestOccurrence: options.minimumTestOccurrence,
           dataGate: defaultDataGate,
         },
       });

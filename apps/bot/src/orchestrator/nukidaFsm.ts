@@ -12,6 +12,7 @@ import {
   D2_BREAK_V1_ATR_PERIOD,
   D6_COUNTER_TEST_WINDOW,
   D6_RECLAIM_WINDOW,
+  D6_SECOND_TEST_COUNTER_WINDOW,
   evaluateDominance,
   isMeaningfulBreakAtClose,
   type BreakResult,
@@ -71,6 +72,8 @@ export interface FsmConfig {
   riskBudgetUsd: number;
   leverage: number;
   takeProfitRMultiple?: number;
+  setupBSlBufferAtrMultiple?: number;
+  minimumTestOccurrence?: number;
   availableCapitalUsd?: number;
   dataGate: (candles: readonly Candle[], index: number) => FsmDataGateResult;
   strategyAdapter?: NukidaStrategyAdapter;
@@ -111,13 +114,14 @@ function breakAtCurrent(
     : null;
 }
 
-function createDefaultStrategyAdapter(): NukidaStrategyAdapter {
+function createDefaultStrategyAdapter(config: Pick<FsmConfig, 'minimumTestOccurrence'>): NukidaStrategyAdapter {
   const atrTracker = createAtrTracker(D2_BREAK_V1_ATR_PERIOD);
   let priorAtr: number | null = null;
   let activeHigh: ActiveSwing | null = null;
   let activeLow: ActiveSwing | null = null;
   let baseSearchFloor = 0;
   const pendingDominance: PendingDominance[] = [];
+  const pendingSetupBDominance: PendingDominance[] = [];
   const dominanceTimeline: TimedDominance[] = [];
   const trackedBases: TrackedBase[] = [];
 
@@ -134,6 +138,12 @@ function createDefaultStrategyAdapter(): NukidaStrategyAdapter {
             breakout,
             breakoutStrength: evaluateBreakoutStrength(current, priorAtr),
           });
+          if ((config.minimumTestOccurrence ?? 1) > 1) {
+            pendingSetupBDominance.push({
+              breakout,
+              breakoutStrength: evaluateBreakoutStrength(current, priorAtr),
+            });
+          }
         }
       }
 
@@ -227,16 +237,41 @@ function createDefaultStrategyAdapter(): NukidaStrategyAdapter {
         }
       }
 
+      const setupBConfirmed =
+        (config.minimumTestOccurrence ?? 1) === 1 ? newlyConfirmed : [];
+      if ((config.minimumTestOccurrence ?? 1) > 1) {
+        for (let pendingIndex = pendingSetupBDominance.length - 1; pendingIndex >= 0; pendingIndex -= 1) {
+          const pending = pendingSetupBDominance[pendingIndex];
+          const evidence = evaluateDominance(candles, pending.breakout, {
+            minimumTestOccurrence: config.minimumTestOccurrence,
+          });
+          if (evidence.side !== 'NEUTRAL') {
+            setupBConfirmed.push({
+              breakout: pending.breakout,
+              breakoutStrength: pending.breakoutStrength,
+              evidence,
+            });
+            pendingSetupBDominance.splice(pendingIndex, 1);
+          } else if (
+            evidence.counterTestIndex === null &&
+            index >= pending.breakout.brokeAt + D6_SECOND_TEST_COUNTER_WINDOW
+          ) {
+            pendingSetupBDominance.splice(pendingIndex, 1);
+          }
+        }
+      }
+
       const quality = evaluateQuality(candles, index);
       const dominance = dominanceTimeline.at(-1)?.evidence ?? null;
       const setups: SetupSignal[] = [];
       if (quality?.label === 'CLEAN') {
-        for (const confirmed of newlyConfirmed) {
+        for (const confirmed of setupBConfirmed) {
           const setup = detectSetupB({
             closedCandles: candles,
             quality,
             breakout: confirmed.breakout,
             breakoutStrength: confirmed.breakoutStrength,
+            minimumTestOccurrence: config.minimumTestOccurrence,
           });
           if (setup !== null) setups.push(setup);
         }
@@ -256,7 +291,8 @@ function createDefaultStrategyAdapter(): NukidaStrategyAdapter {
       }
 
       priorAtr = atrTracker.next(current);
-      return { quality, dominance, setups };
+      const stageDominance = setupBConfirmed.at(-1)?.evidence ?? dominance;
+      return { quality, dominance: stageDominance, setups };
     },
   };
 }
@@ -272,7 +308,7 @@ function isIncompleteEntryWindow(error: unknown, index: number, signal: SetupSig
 export function createNukidaFsm(config: FsmConfig): {
   onClosedCandle(candles: readonly Candle[], index: number): FsmEvent[];
 } {
-  const strategy = config.strategyAdapter ?? createDefaultStrategyAdapter();
+  const strategy = config.strategyAdapter ?? createDefaultStrategyAdapter(config);
   const entryAtrTracker = createAtrTracker(D2_BREAK_V1_ATR_PERIOD);
   const state: FsmState = { pendingSetups: [] };
   const frozenAtrBySetup = new Map<SetupSignal, number>();
@@ -323,6 +359,7 @@ export function createNukidaFsm(config: FsmConfig): {
               leverage: config.leverage,
               frozenAtrAtTrigger,
               takeProfitRMultiple: config.takeProfitRMultiple,
+              setupBSlBufferAtrMultiple: config.setupBSlBufferAtrMultiple,
               availableCapitalUsd: config.availableCapitalUsd,
             });
             events.push(

@@ -118,6 +118,51 @@ describe('createTradePlan', () => {
     expect(result.positionSize).toBe(10);
   });
 
+  it.each([
+    ['BULL' as const, 101, 91, 121],
+    ['BEAR' as const, 99, 109, 79],
+  ])('adds a 0.3 frozen-ATR stop buffer only to Setup B %s', (direction, entryPrice, stopLoss, takeProfit) => {
+    const candles = [
+      candle(0, 1, 1_000),
+      candle(1, 1, 1_000),
+      candle(2, 98, 102),
+      candle(3, 96, 104),
+      candle(4, 97, 103),
+      candle(5, 95, 105),
+      candle(6, 96, 104),
+    ];
+    const result = createTradePlan({
+      signal: setupB(direction),
+      entry: filled(6, entryPrice),
+      closedCandles: candles,
+      tickSize: 1,
+      lotSize: 1,
+      riskBudgetUsd: 100,
+      leverage: 10,
+      frozenAtrAtTrigger: 10,
+      setupBSlBufferAtrMultiple: 0.3,
+    });
+
+    expect(result).toMatchObject({ direction, stopLoss, takeProfit, riskPerUnit: 10 });
+  });
+
+  it('preserves the exact Setup B plan when the explicit SL buffer is zero', () => {
+    const input = {
+      signal: setupB('BULL'),
+      entry: filled(6, 101),
+      closedCandles: Array.from({ length: 7 }, (_, index) => candle(index, 95, 105)),
+      tickSize: 1,
+      lotSize: 1,
+      riskBudgetUsd: 70,
+      leverage: 10,
+      frozenAtrAtTrigger: 10,
+    };
+
+    expect(createTradePlan({ ...input, setupBSlBufferAtrMultiple: 0 })).toEqual(
+      createTradePlan(input),
+    );
+  });
+
   it('recalculates risk from the outward tick-rounded stop and rounds size down by lot', () => {
     const result = createTradePlan({
       signal: setupA('BULL', 95.13, 99),

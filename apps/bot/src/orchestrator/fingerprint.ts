@@ -9,6 +9,7 @@ import {
   D2_BREAK_V1_ATR_PERIOD,
   D6_COUNTER_TEST_WINDOW,
   D6_RECLAIM_WINDOW,
+  D6_SECOND_TEST_COUNTER_WINDOW,
 } from '../structure/breakDetector.js';
 import {
   D7_STRONG_BREAKOUT_V1_MIN_BODY_RATIO,
@@ -51,7 +52,11 @@ export interface StrategyConstantManifest {
     readonly atrPeriod: number;
     readonly maxBandwidthAtrRatio: number;
   };
-  readonly D6: { readonly counterTestWindow: number; readonly reclaimWindow: number };
+  readonly D6: {
+    readonly counterTestWindow: number;
+    readonly secondTestCounterWindow: number;
+    readonly reclaimWindow: number;
+  };
   readonly D7: { readonly minBodyRatio: number; readonly minRangeAtrRatio: number };
   readonly D8: { readonly maxDistanceAtrRatio: number };
 }
@@ -82,6 +87,7 @@ export const STRATEGY_CONSTANTS: StrategyConstantManifest = Object.freeze({
   }),
   D6: Object.freeze({
     counterTestWindow: D6_COUNTER_TEST_WINDOW,
+    secondTestCounterWindow: D6_SECOND_TEST_COUNTER_WINDOW,
     reclaimWindow: D6_RECLAIM_WINDOW,
   }),
   D7: Object.freeze({

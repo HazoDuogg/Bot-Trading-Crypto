@@ -11,6 +11,7 @@ import {
   runNukidaBacktest,
   writeBacktestArtifacts,
   type BacktestReport,
+  type BacktestStrategyVariantOptions,
   type CoinBacktestInput,
   type NukidaBacktestResult,
   type PerformanceMetrics,
@@ -133,7 +134,7 @@ export function buildComparisonReport(
 export async function runFullNukidaBacktestOOS(
   dataDirectory: string,
   lastM15OpenTime?: number,
-  options: { takeProfitRMultiple?: number } = {},
+  options: BacktestStrategyVariantOptions = {},
 ): Promise<{
   result: NukidaBacktestResult;
   windows: WalkForwardWindows;
@@ -169,6 +170,8 @@ export async function runFullNukidaBacktestOOS(
           ...config,
           riskBudgetUsd: 100,
           takeProfitRMultiple: options.takeProfitRMultiple,
+          setupBSlBufferAtrMultiple: options.setupBSlBufferAtrMultiple,
+          minimumTestOccurrence: options.minimumTestOccurrence,
           dataGate: defaultDataGate,
         },
       });

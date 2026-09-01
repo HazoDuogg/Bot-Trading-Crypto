@@ -60,6 +60,9 @@ describe('evaluateDominance', () => {
       counterTestFailed: true,
       counterTestIndex: 16,
     });
+    expect(evaluateDominance(candles, breakout!, { minimumTestOccurrence: 1 })).toEqual(
+      evaluateDominance(candles, breakout!),
+    );
   });
 
   it('stays neutral when the counter side reclaims through the D2 buffer', () => {
@@ -116,6 +119,38 @@ describe('evaluateDominance', () => {
       brokeLevel: 100,
       counterTestFailed: true,
       counterTestIndex: 22,
+    });
+  });
+
+  it('counts separate touch-and-withdraw episodes and blocks the first test when N=2', () => {
+    const candles = [
+      ...flatAtrHistory(),
+      candle(15, 99, 101, 99, 100.3),
+      candle(16, 100.3, 100.5, 99.9, 100.3),
+      candle(17, 100.3, 100.7, 100.2, 100.5),
+      ...Array.from({ length: 10 }, (_, offset) =>
+        candle(18 + offset, 100.4, 100.8, 100.1, 100.5),
+      ),
+      candle(28, 100.5, 100.6, 99.9, 100.2),
+      candle(29, 100.2, 100.6, 100.05, 100.4),
+      candle(30, 100.4, 100.7, 100.1, 100.5),
+      candle(31, 100.5, 100.8, 100.2, 100.6),
+    ];
+    const breakout = { brokeAt: 15, direction: 'up' as const, level: 100 };
+
+    expect(
+      evaluateDominance(candles.slice(0, 18), breakout, { minimumTestOccurrence: 2 }),
+    ).toEqual({
+      side: 'NEUTRAL',
+      brokeLevel: 100,
+      counterTestFailed: false,
+      counterTestIndex: null,
+    });
+    expect(evaluateDominance(candles, breakout, { minimumTestOccurrence: 2 })).toEqual({
+      side: 'BULL',
+      brokeLevel: 100,
+      counterTestFailed: true,
+      counterTestIndex: 28,
     });
   });
 });

@@ -5,6 +5,8 @@ export const D2_BREAK_V1_ATR_PERIOD = 14;
 export const D2_BREAK_V1_ATR_BUFFER_MULTIPLIER = 0.1;
 export const D6_COUNTER_TEST_WINDOW = 10;
 export const D6_RECLAIM_WINDOW = 3;
+// N=2 gets twice the baseline search horizon so two distinct touch-and-withdraw episodes can form.
+export const D6_SECOND_TEST_COUNTER_WINDOW = 20;
 
 export type BreakDirection = 'up' | 'down';
 
@@ -26,6 +28,12 @@ export interface DominanceEvidence {
   brokeLevel: number;
   counterTestFailed: boolean;
   counterTestIndex: number | null;
+}
+
+export interface DominanceEvaluationOptions {
+  counterTestWindow?: number;
+  reclaimWindow?: number;
+  minimumTestOccurrence?: number;
 }
 
 export function isMeaningfulBreakAtClose(
@@ -71,14 +79,32 @@ export function detectMeaningfulBreak(candles: readonly Candle[], request: Break
 export function evaluateDominance(
   candles: readonly Candle[],
   breakout: BreakResult,
-  counterTestWindow = D6_COUNTER_TEST_WINDOW,
-  reclaimWindow = D6_RECLAIM_WINDOW,
+  counterTestWindowOrOptions: number | DominanceEvaluationOptions = D6_COUNTER_TEST_WINDOW,
+  legacyReclaimWindow = D6_RECLAIM_WINDOW,
 ): DominanceEvidence {
+  const minimumTestOccurrence =
+    typeof counterTestWindowOrOptions === 'number'
+      ? 1
+      : (counterTestWindowOrOptions.minimumTestOccurrence ?? 1);
+  const counterTestWindow =
+    typeof counterTestWindowOrOptions === 'number'
+      ? counterTestWindowOrOptions
+      : (counterTestWindowOrOptions.counterTestWindow ??
+        (minimumTestOccurrence === 1
+          ? D6_COUNTER_TEST_WINDOW
+          : D6_SECOND_TEST_COUNTER_WINDOW));
+  const reclaimWindow =
+    typeof counterTestWindowOrOptions === 'number'
+      ? legacyReclaimWindow
+      : (counterTestWindowOrOptions.reclaimWindow ?? D6_RECLAIM_WINDOW);
   if (!Number.isSafeInteger(counterTestWindow) || counterTestWindow <= 0) {
     throw new Error('counterTestWindow must be a positive integer');
   }
   if (!Number.isSafeInteger(reclaimWindow) || reclaimWindow <= 0) {
     throw new Error('reclaimWindow must be a positive integer');
+  }
+  if (!Number.isSafeInteger(minimumTestOccurrence) || minimumTestOccurrence <= 0) {
+    throw new Error('minimumTestOccurrence must be a positive integer');
   }
   const neutral: DominanceEvidence = {
     side: 'NEUTRAL',
@@ -87,33 +113,60 @@ export function evaluateDominance(
     counterTestIndex: null,
   };
   const counterSearchEnd = Math.min(breakout.brokeAt + counterTestWindow, candles.length - 1);
-  let counterTestIndex: number | null = null;
-  for (let index = breakout.brokeAt + 1; index <= counterSearchEnd; index += 1) {
-    const counterTested =
-      breakout.direction === 'up' ? candles[index].low <= breakout.level : candles[index].high >= breakout.level;
-    if (counterTested) {
-      counterTestIndex = index;
-      break;
-    }
-  }
-  if (counterTestIndex === null) return neutral;
-
-  const neutralAfterCounterTest = { ...neutral, counterTestIndex };
-  const reclaimEndIndex = counterTestIndex + reclaimWindow;
-
   const reclaimDirection: BreakDirection = breakout.direction === 'up' ? 'down' : 'up';
-  const reclaim = detectMeaningfulBreak(candles, {
-    level: breakout.level,
-    direction: reclaimDirection,
-    startIndex: counterTestIndex,
-    endIndex: Math.min(reclaimEndIndex, candles.length - 1),
-  });
-  if (reclaim !== null || reclaimEndIndex >= candles.length) return neutralAfterCounterTest;
-
-  return {
-    side: breakout.direction === 'up' ? 'BULL' : 'BEAR',
-    brokeLevel: breakout.level,
-    counterTestFailed: true,
-    counterTestIndex,
+  const evaluateOccurrence = (counterTestIndex: number): DominanceEvidence => {
+    const neutralAfterCounterTest = { ...neutral, counterTestIndex };
+    const reclaimEndIndex = counterTestIndex + reclaimWindow;
+    const reclaim = detectMeaningfulBreak(candles, {
+      level: breakout.level,
+      direction: reclaimDirection,
+      startIndex: counterTestIndex,
+      endIndex: Math.min(reclaimEndIndex, candles.length - 1),
+    });
+    if (reclaim !== null || reclaimEndIndex >= candles.length) return neutralAfterCounterTest;
+    return {
+      side: breakout.direction === 'up' ? 'BULL' : 'BEAR',
+      brokeLevel: breakout.level,
+      counterTestFailed: true,
+      counterTestIndex,
+    };
   };
+
+  if (minimumTestOccurrence === 1) {
+    for (let index = breakout.brokeAt + 1; index <= counterSearchEnd; index += 1) {
+      const touched =
+        breakout.direction === 'up'
+          ? candles[index].low <= breakout.level
+          : candles[index].high >= breakout.level;
+      if (touched) return evaluateOccurrence(index);
+    }
+    return neutral;
+  }
+
+  let occurrence = 0;
+  let inTestEpisode = false;
+  for (let index = breakout.brokeAt + 1; index <= counterSearchEnd; index += 1) {
+    const current = candles[index];
+    const touched =
+      breakout.direction === 'up'
+        ? current.low <= breakout.level
+        : current.high >= breakout.level;
+    if (!inTestEpisode && touched) {
+      occurrence += 1;
+      inTestEpisode = true;
+      if (occurrence >= minimumTestOccurrence) {
+        const result = evaluateOccurrence(index);
+        if (
+          result.side !== 'NEUTRAL' ||
+          (result.counterTestIndex !== null && index + reclaimWindow >= candles.length)
+        ) {
+          return result;
+        }
+      }
+    }
+    const withdrew =
+      breakout.direction === 'up' ? current.close > breakout.level : current.close < breakout.level;
+    if (inTestEpisode && withdrew) inTestEpisode = false;
+  }
+  return neutral;
 }

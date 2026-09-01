@@ -72,6 +72,20 @@ describe('detectSetupB', () => {
     expect(detectSetupB(input)).toBeNull();
   });
 
+  it('waits for the second distinct test when minimumTestOccurrence is two', () => {
+    const input = validInput();
+    input.closedCandles[16] = candle(16, 100.3, 100.7, 99.9, 100.4);
+    input.minimumTestOccurrence = 2;
+
+    expect(detectSetupB(input)).toMatchObject({
+      triggerIndex: 25,
+      reasonTrace: { dominance: { counterTestIndex: 22 } },
+    });
+
+    input.closedCandles = input.closedCandles.slice(0, 22);
+    expect(detectSetupB(input)).toBeNull();
+  });
+
   it('does not activate when the counter side successfully reclaims', () => {
     const input = validInput();
     input.closedCandles[22] = candle(22, 100.6, 100.7, 97, 99.7);

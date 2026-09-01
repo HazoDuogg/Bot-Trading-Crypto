@@ -13,13 +13,16 @@ export interface SetupBInput {
   quality: QualityComposite;
   breakout: BreakResult | null;
   breakoutStrength: BreakoutStrengthResult;
+  minimumTestOccurrence?: number;
 }
 
 // Setup family B — source-backed break/pullback/failure ordering; D1-D8 evidence values remain conventions.
 export function detectSetupB(input: SetupBInput): SetupSignal | null {
   if (input.quality.label !== 'CLEAN' || input.breakout === null) return null;
   if (!input.breakoutStrength.isStrong) return null;
-  const dominance = evaluateDominance(input.closedCandles, input.breakout);
+  const dominance = evaluateDominance(input.closedCandles, input.breakout, {
+    minimumTestOccurrence: input.minimumTestOccurrence,
+  });
   const expectedSide = input.breakout.direction === 'up' ? 'BULL' : 'BEAR';
   if (
     dominance.side !== expectedSide ||

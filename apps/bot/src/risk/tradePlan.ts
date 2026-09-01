@@ -12,6 +12,7 @@ export interface TradePlanInput {
   leverage: number;
   frozenAtrAtTrigger: number;
   takeProfitRMultiple?: number;
+  setupBSlBufferAtrMultiple?: number;
   availableCapitalUsd?: number;
 }
 
@@ -93,6 +94,10 @@ export function createTradePlan(input: TradePlanInput): TradePlan | null {
   requirePositiveFinite(input.frozenAtrAtTrigger, 'frozenAtrAtTrigger');
   const takeProfitRMultiple = input.takeProfitRMultiple ?? 2;
   requirePositiveFinite(takeProfitRMultiple, 'takeProfitRMultiple');
+  const setupBSlBufferAtrMultiple = input.setupBSlBufferAtrMultiple ?? 0;
+  if (!Number.isFinite(setupBSlBufferAtrMultiple) || setupBSlBufferAtrMultiple < 0) {
+    throw new Error('setupBSlBufferAtrMultiple must be finite and non-negative');
+  }
   if (input.availableCapitalUsd !== undefined) {
     requirePositiveFinite(input.availableCapitalUsd, 'availableCapitalUsd');
   }
@@ -114,10 +119,15 @@ export function createTradePlan(input: TradePlanInput): TradePlan | null {
     throw new Error('Structural invalidation boundary must be finite');
   }
 
+  // Setup B's optional ATR stop buffer is a convention; zero preserves the source-backed baseline.
+  const setupBBuffer =
+    input.signal.setupFamily === 'B_BREAK_PULLBACK_FAILURE'
+      ? setupBSlBufferAtrMultiple * input.frozenAtrAtTrigger
+      : 0;
   const rawStop =
     input.signal.direction === 'BULL'
-      ? invalidationBoundary - input.tickSize
-      : invalidationBoundary + input.tickSize;
+      ? invalidationBoundary - setupBBuffer - input.tickSize
+      : invalidationBoundary + setupBBuffer + input.tickSize;
   const stopLoss =
     input.signal.direction === 'BULL'
       ? floorToStep(rawStop, input.tickSize)
