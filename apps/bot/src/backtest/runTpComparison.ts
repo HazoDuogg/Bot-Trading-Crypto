@@ -151,6 +151,7 @@ function priceResolvedTrade(
     const costs = calculateExecutionCosts({
       tradePlan: source.tradePlan,
       exitPrice: leg.exitPrice,
+      exitReason: leg.reason === 'PARTIAL_EXIT' ? 'TAKE_PROFIT' : 'STOP_LOSS',
       entryM1Candle: entryCandle,
       exitM1Candle: candleAt(source.m1Candles, leg.exitTimestamp),
     });

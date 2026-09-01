@@ -4,7 +4,11 @@ import { createInterface } from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { Candle } from '../noTradeZone/types.js';
 import type { TradePlan } from '../risk/tradePlan.js';
-import { calculateExecutionCosts, type ExecutionCostResult } from './costModel.js';
+import {
+  BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE,
+  calculateExecutionCosts,
+  type ExecutionCostResult,
+} from './costModel.js';
 import {
   M15_CANDLE_DURATION_MS,
   simulateIntrabarExecution,
@@ -163,6 +167,9 @@ export function runBuyAndHoldControl(candles: readonly Candle[]): BuyAndHoldCont
   const costs = calculateExecutionCosts({
     tradePlan: plan,
     exitPrice: last.close,
+    exitReason: 'STOP_LOSS',
+    entryFeeRate: BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE,
+    exitFeeRate: BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE,
     entryM1Candle: first,
     exitM1Candle: last,
   });

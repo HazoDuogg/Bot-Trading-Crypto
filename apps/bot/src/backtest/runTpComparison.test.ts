@@ -105,12 +105,26 @@ describe('TP and position-management comparison report', () => {
       combined: {
         closedTrades: 1,
         grossR: -1,
-        netR: -1.2333,
-        expectancyPerTrade: -1.2333,
+        netR: -1.2303,
+        expectancyPerTrade: -1.2303,
         ambiguousTrades: 0,
       },
       fixedTpBaseline: { inSampleNetR: 1, outOfSampleNetR: 2, combinedNetR: 3 },
-      netRDeltaVsFixedTp: { inSample: -1, outOfSample: -3.2333, combined: -4.2333 },
+      netRDeltaVsFixedTp: { inSample: -1, outOfSample: -3.2303, combined: -4.2303 },
     });
+  });
+
+  it('prices a partial limit as maker and its breakeven stop as taker', () => {
+    const rows = buildPositionManagementMatrix([
+      {
+        coin: 'TESTUSDT',
+        period: 'OUT_OF_SAMPLE',
+        tradePlan: plan(),
+        entryFillTimestamp: 0,
+        m1Candles: [m1(60_000, 101, 116, 114), m1(120_000, 99, 102, 100)],
+      },
+    ]);
+
+    expect(rows[0].combined).toMatchObject({ closedTrades: 1, grossR: 0.75, feeR: 0.00565 });
   });
 });

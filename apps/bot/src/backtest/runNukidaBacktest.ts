@@ -14,6 +14,7 @@ import {
 import type { SetupSignal } from '../setup/setupDetectorA.js';
 import { loadRecentM1Candles } from './controlTest.js';
 import {
+  BINANCE_USDM_REGULAR_USER_MAKER_FEE_RATE,
   BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE,
   calculateExecutionCosts,
   DEFAULT_ADVERSE_SLIPPAGE_RATE,
@@ -128,12 +129,14 @@ function executionCosts(
       bestCase: calculateExecutionCosts({
         tradePlan,
         exitPrice: execution.bestCase!.exitPrice,
+        exitReason: 'TAKE_PROFIT',
         entryM1Candle: entryCandle,
         exitM1Candle: exitCandle,
       }),
       worstCase: calculateExecutionCosts({
         tradePlan,
         exitPrice: execution.worstCase!.exitPrice,
+        exitReason: 'STOP_LOSS',
         entryM1Candle: entryCandle,
         exitM1Candle: exitCandle,
       }),
@@ -142,6 +145,7 @@ function executionCosts(
   return calculateExecutionCosts({
     tradePlan,
     exitPrice: execution.exitPrice!,
+    exitReason: execution.outcome === 'WIN' ? 'TAKE_PROFIT' : 'STOP_LOSS',
     entryM1Candle: entryCandle,
     exitM1Candle: exitCandle,
   });
@@ -425,7 +429,9 @@ export async function writeBacktestArtifacts(
           periodDays: 180,
           riskBudgetUsd: 100,
           minimumStopDistanceAtrMultiple: MIN_STOP_DISTANCE_ATR_MULTIPLE,
-          takerFeeRate: BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE,
+          entryMakerFeeRate: BINANCE_USDM_REGULAR_USER_MAKER_FEE_RATE,
+          takeProfitMakerFeeRate: BINANCE_USDM_REGULAR_USER_MAKER_FEE_RATE,
+          stopLossTakerFeeRate: BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE,
           adverseSlippageRate: DEFAULT_ADVERSE_SLIPPAGE_RATE,
           spreadProxy: 'M1_RANGE_FRACTION_AT_ENTRY_AND_EXIT',
           spreadProxyM1RangeFraction: SPREAD_PROXY_M1_RANGE_FRACTION,

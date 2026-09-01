@@ -138,6 +138,39 @@ describe('runNukidaBacktest', () => {
     });
   });
 
+  it('prices an ambiguous TP-first case as maker and SL-first case as taker', () => {
+    const signal = setupA();
+    const candles = [
+      ...Array.from({ length: 15 }, (_, index) => m15(index)),
+      m15(15, 100, 105, 103),
+      m15(16, 98, 101, 100),
+    ];
+    const firstPostFillM1 = candles[16].openTime + 900_000;
+    const result = runNukidaBacktest({
+      coins: [
+        {
+          coin: 'TESTUSDT',
+          m15Candles: candles,
+          m1Candles: [m1(firstPostFillM1, 88, 120)],
+          fsmConfig: {
+            tickSize: 1,
+            lotSize: 1,
+            riskBudgetUsd: 20,
+            leverage: 10,
+            dataGate: () => ({ accepted: true }),
+            strategyAdapter: fixtureAdapter(signal),
+          },
+        },
+      ],
+    });
+
+    expect(result.tradeLogs[0].execution.outcome).toBe('AMBIGUOUS');
+    expect(result.tradeLogs[0].costs).toMatchObject({
+      bestCase: { feeR: 0.00436 },
+      worstCase: { feeR: 0.00643 },
+    });
+  });
+
   it('orders drawdown by exit time and keeps AMBIGUOUS/OPEN outside PF and expectancy', () => {
     const signal = setupA();
     const plan = {

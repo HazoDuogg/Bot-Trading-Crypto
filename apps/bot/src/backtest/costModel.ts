@@ -1,9 +1,10 @@
 import type { Candle } from '../noTradeZone/types.js';
 import type { TradePlan } from '../risk/tradePlan.js';
 
-// Binance USDⓈ-M Regular User USDT taker rate, no BNB discount, checked 2026-09-01.
+// Binance USDⓈ-M Regular User USDT maker/taker rates, no BNB discount, checked 2026-09-01.
 // Source: https://www.binance.com/en/fee/futureFee
 export const BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE = 0.0005;
+export const BINANCE_USDM_REGULAR_USER_MAKER_FEE_RATE = 0.0002;
 
 // Conservative all-taker adverse slippage scenario: 2 bps on both entry and exit notionals.
 export const DEFAULT_ADVERSE_SLIPPAGE_RATE = 0.0002;
@@ -14,9 +15,11 @@ export const SPREAD_PROXY_M1_RANGE_FRACTION = 0.1;
 export interface ExecutionCostInput {
   tradePlan: TradePlan;
   exitPrice: number;
+  exitReason: 'TAKE_PROFIT' | 'STOP_LOSS';
   entryM1Candle: Candle;
   exitM1Candle: Candle;
-  takerFeeRate?: number;
+  entryFeeRate?: number;
+  exitFeeRate?: number;
   adverseSlippageRate?: number;
 }
 
@@ -42,9 +45,15 @@ function candleRange(candle: Candle, name: string): number {
 }
 
 export function calculateExecutionCosts(input: ExecutionCostInput): ExecutionCostResult {
-  const feeRate = input.takerFeeRate ?? BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE;
+  const entryFeeRate = input.entryFeeRate ?? BINANCE_USDM_REGULAR_USER_MAKER_FEE_RATE;
+  const exitFeeRate =
+    input.exitFeeRate ??
+    (input.exitReason === 'TAKE_PROFIT'
+      ? BINANCE_USDM_REGULAR_USER_MAKER_FEE_RATE
+      : BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE);
   const slippageRate = input.adverseSlippageRate ?? DEFAULT_ADVERSE_SLIPPAGE_RATE;
-  requireNonNegativeFinite(feeRate, 'takerFeeRate');
+  requireNonNegativeFinite(entryFeeRate, 'entryFeeRate');
+  requireNonNegativeFinite(exitFeeRate, 'exitFeeRate');
   requireNonNegativeFinite(slippageRate, 'adverseSlippageRate');
   if (!Number.isFinite(input.exitPrice) || input.exitPrice <= 0) {
     throw new Error('exitPrice must be finite and greater than zero');
@@ -64,9 +73,10 @@ export function calculateExecutionCosts(input: ExecutionCostInput): ExecutionCos
   const direction = input.tradePlan.direction === 'BULL' ? 1 : -1;
   const grossPnlUsd =
     direction * (input.exitPrice - input.tradePlan.entryPrice) * input.tradePlan.positionSize;
-  const roundTripNotionalUsd =
-    (input.tradePlan.entryPrice + input.exitPrice) * input.tradePlan.positionSize;
-  const feeUsd = roundTripNotionalUsd * feeRate;
+  const entryNotionalUsd = input.tradePlan.entryPrice * input.tradePlan.positionSize;
+  const exitNotionalUsd = input.exitPrice * input.tradePlan.positionSize;
+  const roundTripNotionalUsd = entryNotionalUsd + exitNotionalUsd;
+  const feeUsd = entryNotionalUsd * entryFeeRate + exitNotionalUsd * exitFeeRate;
 
   const spreadUsd =
     (candleRange(input.entryM1Candle, 'entryM1Candle') +
