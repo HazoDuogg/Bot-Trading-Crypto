@@ -10,8 +10,12 @@ export interface TradePlanInput {
   lotSize: number;
   riskBudgetUsd: number;
   leverage: number;
+  frozenAtrAtTrigger: number;
   availableCapitalUsd?: number;
 }
+
+// Class C engineering safeguard; 0.3 ATR is a convention below typical one-candle range/ATR.
+export const MIN_STOP_DISTANCE_ATR_MULTIPLE = 0.3;
 
 export interface TradePlan {
   direction: 'BULL' | 'BEAR';
@@ -73,7 +77,7 @@ function setupBExtreme(input: TradePlanInput): number {
 }
 
 // Structural-invalidation SL and fixed 2R TP are source-backed; family-specific placement is convention.
-export function createTradePlan(input: TradePlanInput): TradePlan {
+export function createTradePlan(input: TradePlanInput): TradePlan | null {
   if (input.entry.status !== 'FILLED' || input.entry.fillPrice === undefined) {
     throw new Error('Trade plan requires a FILLED retest entry');
   }
@@ -85,6 +89,7 @@ export function createTradePlan(input: TradePlanInput): TradePlan {
   requirePositiveFinite(input.lotSize, 'lotSize');
   requirePositiveFinite(input.riskBudgetUsd, 'riskBudgetUsd');
   requirePositiveFinite(input.leverage, 'leverage');
+  requirePositiveFinite(input.frozenAtrAtTrigger, 'frozenAtrAtTrigger');
   if (input.availableCapitalUsd !== undefined) {
     requirePositiveFinite(input.availableCapitalUsd, 'availableCapitalUsd');
   }
@@ -122,6 +127,7 @@ export function createTradePlan(input: TradePlanInput): TradePlan {
   }
 
   const riskPerUnit = normalizeToStep(Math.abs(entryPrice - stopLoss), input.tickSize);
+  if (riskPerUnit < input.frozenAtrAtTrigger * MIN_STOP_DISTANCE_ATR_MULTIPLE) return null;
   const rawTakeProfit =
     input.signal.direction === 'BULL'
       ? entryPrice + 2 * riskPerUnit

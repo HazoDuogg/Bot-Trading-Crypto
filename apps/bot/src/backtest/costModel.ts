@@ -8,6 +8,9 @@ export const BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE = 0.0005;
 // Conservative all-taker adverse slippage scenario: 2 bps on both entry and exit notionals.
 export const DEFAULT_ADVERSE_SLIPPAGE_RATE = 0.0002;
 
+// Temporary OHLC proxy: use 10% of each M1 range; replace with tick/order-book spread data later.
+export const SPREAD_PROXY_M1_RANGE_FRACTION = 0.1;
+
 export interface ExecutionCostInput {
   tradePlan: TradePlan;
   exitPrice: number;
@@ -65,11 +68,10 @@ export function calculateExecutionCosts(input: ExecutionCostInput): ExecutionCos
     (input.tradePlan.entryPrice + input.exitPrice) * input.tradePlan.positionSize;
   const feeUsd = roundTripNotionalUsd * feeRate;
 
-  // Half of each M1 high-low range proxies adverse midpoint-to-edge spread; this is not order-book data.
   const spreadUsd =
-    ((candleRange(input.entryM1Candle, 'entryM1Candle') +
-      candleRange(input.exitM1Candle, 'exitM1Candle')) /
-      2) *
+    (candleRange(input.entryM1Candle, 'entryM1Candle') +
+      candleRange(input.exitM1Candle, 'exitM1Candle')) *
+    SPREAD_PROXY_M1_RANGE_FRACTION *
     input.tradePlan.positionSize;
   const slippageUsd = roundTripNotionalUsd * slippageRate;
 

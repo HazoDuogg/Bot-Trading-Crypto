@@ -218,7 +218,7 @@ describe('createNukidaFsm', () => {
   it('keeps simultaneous A and B pending setups independent', () => {
     const candles = [
       ...Array.from({ length: 15 }, (_, index) => candle(index)),
-      candle(15, 98, 112, 105),
+      candle(15, 98, 115, 105),
     ];
     const fsm = createNukidaFsm(
       config(adapterAt({ 14: { ...cleanBull, setups: [setupA(), setupB()] } })),
@@ -231,6 +231,27 @@ describe('createNukidaFsm', () => {
       'A_COMPRESSION_BREAKOUT',
       'B_BREAK_PULLBACK_FAILURE',
     ]);
+  });
+
+  it('emits a distinct minimum-stop rejection after entry fills', () => {
+    const narrowSetup = setupA();
+    narrowSetup.reasonTrace.d3!.low = 98;
+    const candles = [
+      ...Array.from({ length: 15 }, (_, index) => candle(index)),
+      candle(15, 100, 105, 103),
+      candle(16, 98, 101, 100),
+    ];
+    const fsm = createNukidaFsm(
+      config(adapterAt({ 14: { ...cleanBull, setups: [narrowSetup] } })),
+    );
+
+    expect(runThrough(candles, fsm)).toContainEqual({
+      index: 16,
+      state: 'TRADE_PLAN_REJECTED',
+      reasonCode: 'MIN_STOP_DISTANCE',
+      setupFamily: 'A_COMPRESSION_BREAKOUT',
+      setupSignal: narrowSetup,
+    });
   });
 
   it('never reads a candle beyond the supplied index', () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Candle } from '../noTradeZone/types.js';
 import type { TradePlan } from '../risk/tradePlan.js';
-import { calculateExecutionCosts } from './costModel.js';
+import { calculateExecutionCosts, SPREAD_PROXY_M1_RANGE_FRACTION } from './costModel.js';
 
 function candle(low: number, high: number): Candle {
   return { openTime: 0, open: low, high, low, close: high, volume: 1 };
@@ -18,7 +18,7 @@ const plan: TradePlan = {
 };
 
 describe('calculateExecutionCosts', () => {
-  it('converts gross PnL, two-sided fees, half-range spread proxies, and slippage to R', () => {
+  it('uses 10% of each M1 range, exactly one fifth of the former half-range proxy', () => {
     const result = calculateExecutionCosts({
       tradePlan: plan,
       exitPrice: 120,
@@ -30,9 +30,10 @@ describe('calculateExecutionCosts', () => {
 
     expect(result.grossR).toBeCloseTo(2);
     expect(result.feeR).toBeCloseTo(0.022);
-    expect(result.spreadR).toBeCloseTo(0.5);
+    expect(SPREAD_PROXY_M1_RANGE_FRACTION).toBe(0.1);
+    expect(result.spreadR).toBeCloseTo(0.5 / 5);
     expect(result.slippageR).toBeCloseTo(0.044);
-    expect(result.netR).toBeCloseTo(1.434);
+    expect(result.netR).toBeCloseTo(1.834);
   });
 
   it('keeps a bearish loss negative before subtracting costs', () => {
@@ -51,6 +52,6 @@ describe('calculateExecutionCosts', () => {
       adverseSlippageRate: 0,
     });
 
-    expect(result).toEqual({ grossR: -1, feeR: 0, spreadR: 0.2, slippageR: 0, netR: -1.2 });
+    expect(result).toEqual({ grossR: -1, feeR: 0, spreadR: 0.04, slippageR: 0, netR: -1.04 });
   });
 });

@@ -41,6 +41,7 @@ export interface FsmEvent {
     | 'SETUP_DETECTED'
     | 'ENTRY_PENDING'
     | 'TRADE_PLAN_READY'
+    | 'TRADE_PLAN_REJECTED'
     | 'ENTRY_EXPIRED'
     | 'ENTRY_CANCELLED';
   reasonCode?: string;
@@ -311,22 +312,34 @@ export function createNukidaFsm(config: FsmConfig): {
             tickSize: config.tickSize,
           });
           if (entry.status === 'FILLED') {
-            events.push({
-              index,
-              state: 'TRADE_PLAN_READY',
-              setupFamily: signal.setupFamily,
-              setupSignal: signal,
-              tradePlan: createTradePlan({
-                signal,
-                entry,
-                closedCandles: visibleCandles,
-                tickSize: config.tickSize,
-                lotSize: config.lotSize,
-                riskBudgetUsd: config.riskBudgetUsd,
-                leverage: config.leverage,
-                availableCapitalUsd: config.availableCapitalUsd,
-              }),
+            const tradePlan = createTradePlan({
+              signal,
+              entry,
+              closedCandles: visibleCandles,
+              tickSize: config.tickSize,
+              lotSize: config.lotSize,
+              riskBudgetUsd: config.riskBudgetUsd,
+              leverage: config.leverage,
+              frozenAtrAtTrigger,
+              availableCapitalUsd: config.availableCapitalUsd,
             });
+            events.push(
+              tradePlan === null
+                ? {
+                    index,
+                    state: 'TRADE_PLAN_REJECTED',
+                    reasonCode: 'MIN_STOP_DISTANCE',
+                    setupFamily: signal.setupFamily,
+                    setupSignal: signal,
+                  }
+                : {
+                    index,
+                    state: 'TRADE_PLAN_READY',
+                    setupFamily: signal.setupFamily,
+                    setupSignal: signal,
+                    tradePlan,
+                  },
+            );
           } else if (entry.status === 'EXPIRED') {
             events.push({
               index,

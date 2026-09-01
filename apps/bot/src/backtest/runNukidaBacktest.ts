@@ -7,13 +7,17 @@ import {
   type FsmConfig,
 } from '../orchestrator/nukidaFsm.js';
 import { computeStrategyFingerprint } from '../orchestrator/fingerprint.js';
-import type { TradePlan } from '../risk/tradePlan.js';
+import {
+  MIN_STOP_DISTANCE_ATR_MULTIPLE,
+  type TradePlan,
+} from '../risk/tradePlan.js';
 import type { SetupSignal } from '../setup/setupDetectorA.js';
 import { loadRecentM1Candles } from './controlTest.js';
 import {
   BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE,
   calculateExecutionCosts,
   DEFAULT_ADVERSE_SLIPPAGE_RATE,
+  SPREAD_PROXY_M1_RANGE_FRACTION,
   type ExecutionCostResult,
 } from './costModel.js';
 import {
@@ -80,6 +84,7 @@ export interface BacktestReport {
   byCoin: Record<string, DualCostMetrics>;
   bySetupFamily: Record<string, DualCostMetrics>;
   byDirection: Record<string, DualCostMetrics>;
+  minimumStopDistanceBlocked: { total: number; byCoin: Record<string, number> };
 }
 
 export interface NukidaBacktestResult {
@@ -142,12 +147,20 @@ function executionCosts(
   });
 }
 
-function runCoin(input: CoinBacktestInput): TradeLogEntry[] {
+function runCoin(input: CoinBacktestInput): { logs: TradeLogEntry[]; minimumStopBlocked: number } {
   const fsm = createNukidaFsm(input.fsmConfig);
   const logs: TradeLogEntry[] = [];
+  let minimumStopBlocked = 0;
   for (let index = 0; index < input.m15Candles.length; index += 1) {
     const events = fsm.onClosedCandle(input.m15Candles, index);
     for (const event of events) {
+      if (
+        event.state === 'TRADE_PLAN_REJECTED' &&
+        event.reasonCode === 'MIN_STOP_DISTANCE'
+      ) {
+        minimumStopBlocked += 1;
+        continue;
+      }
       if (event.state !== 'TRADE_PLAN_READY') continue;
       if (event.tradePlan === undefined || event.setupSignal === undefined) {
         throw new Error('TRADE_PLAN_READY must include tradePlan and setupSignal');
@@ -177,7 +190,7 @@ function runCoin(input: CoinBacktestInput): TradeLogEntry[] {
       });
     }
   }
-  return logs;
+  return { logs, minimumStopBlocked };
 }
 
 function isResolvedCosts(costs: TradeLogEntry['costs']): costs is ExecutionCostResult {
@@ -246,6 +259,7 @@ function groupMetrics(
 export function buildBacktestReport(
   logs: readonly TradeLogEntry[],
   coins: readonly string[],
+  minimumStopBlockedByCoin: Readonly<Record<string, number>> = {},
 ): BacktestReport {
   const ambiguous = logs.filter(
     (log): log is TradeLogEntry & {
@@ -270,14 +284,22 @@ export function buildBacktestReport(
       (log) => log.setupFamily,
     ),
     byDirection: groupMetrics(logs, ['BULL', 'BEAR'], (log) => log.tradePlan.direction),
+    minimumStopDistanceBlocked: {
+      total: Object.values(minimumStopBlockedByCoin).reduce((sum, count) => sum + count, 0),
+      byCoin: Object.fromEntries(coins.map((coin) => [coin, minimumStopBlockedByCoin[coin] ?? 0])),
+    },
   };
 }
 
 export function runNukidaBacktest(input: {
   coins: readonly CoinBacktestInput[];
 }): NukidaBacktestResult {
-  const tradeLogs = input.coins.flatMap(runCoin).sort(
+  const coinResults = input.coins.map((coin) => ({ coin: coin.coin, ...runCoin(coin) }));
+  const tradeLogs = coinResults.flatMap((result) => result.logs).sort(
     (left, right) => left.entryFillTimestamp - right.entryFillTimestamp,
+  );
+  const minimumStopBlockedByCoin = Object.fromEntries(
+    coinResults.map((result) => [result.coin, result.minimumStopBlocked]),
   );
   return {
     warning: IN_SAMPLE_WARNING,
@@ -285,6 +307,7 @@ export function runNukidaBacktest(input: {
     report: buildBacktestReport(
       tradeLogs,
       input.coins.map((coin) => coin.coin),
+      minimumStopBlockedByCoin,
     ),
   };
 }
@@ -372,9 +395,11 @@ export async function writeBacktestArtifacts(
         executionAssumptions: {
           periodDays: 180,
           riskBudgetUsd: 100,
+          minimumStopDistanceAtrMultiple: MIN_STOP_DISTANCE_ATR_MULTIPLE,
           takerFeeRate: BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE,
           adverseSlippageRate: DEFAULT_ADVERSE_SLIPPAGE_RATE,
-          spreadProxy: 'HALF_M1_RANGE_AT_ENTRY_PLUS_HALF_M1_RANGE_AT_EXIT',
+          spreadProxy: 'M1_RANGE_FRACTION_AT_ENTRY_AND_EXIT',
+          spreadProxyM1RangeFraction: SPREAD_PROXY_M1_RANGE_FRACTION,
           exchangeFilterSource: 'BINANCE_FUTURES_EXCHANGE_INFO_2026-09-01',
           coinConfig: DEFAULT_COIN_BACKTEST_CONFIG,
         },
@@ -416,6 +441,12 @@ async function main(): Promise<void> {
       .join(', ')}`,
   );
   printMetrics('OVERALL', result.report.overall);
+  console.info(
+    `MIN_STOP_DISTANCE blocked=${result.report.minimumStopDistanceBlocked.total}; ` +
+      Object.entries(result.report.minimumStopDistanceBlocked.byCoin)
+        .map(([coin, count]) => `${coin}=${count}`)
+        .join(', '),
+  );
   console.info(
     `AMBIGUOUS scenarios: count=${result.report.ambiguousScenarios.count}, ` +
       `bestGrossR=${result.report.ambiguousScenarios.bestCaseGrossR.toFixed(2)}, ` +

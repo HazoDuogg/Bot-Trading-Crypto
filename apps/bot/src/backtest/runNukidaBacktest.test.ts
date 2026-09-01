@@ -104,6 +104,39 @@ describe('runNukidaBacktest', () => {
     expect(result.report.byDirection.BULL).toBeDefined();
   });
 
+  it('counts minimum-stop rejections separately without creating a trade log', () => {
+    const signal = setupA();
+    signal.reasonTrace.d3!.low = 98;
+    const candles = [
+      ...Array.from({ length: 15 }, (_, index) => m15(index)),
+      m15(15, 100, 105, 103),
+      m15(16, 98, 101, 100),
+    ];
+    const result = runNukidaBacktest({
+      coins: [
+        {
+          coin: 'TESTUSDT',
+          m15Candles: candles,
+          m1Candles: [],
+          fsmConfig: {
+            tickSize: 1,
+            lotSize: 1,
+            riskBudgetUsd: 20,
+            leverage: 10,
+            dataGate: () => ({ accepted: true }),
+            strategyAdapter: fixtureAdapter(signal),
+          },
+        },
+      ],
+    });
+
+    expect(result.tradeLogs).toHaveLength(0);
+    expect(result.report.minimumStopDistanceBlocked).toEqual({
+      total: 1,
+      byCoin: { TESTUSDT: 1 },
+    });
+  });
+
   it('orders drawdown by exit time and keeps AMBIGUOUS/OPEN outside PF and expectancy', () => {
     const signal = setupA();
     const plan = {
