@@ -11,6 +11,7 @@ export interface TradePlanInput {
   riskBudgetUsd: number;
   leverage: number;
   frozenAtrAtTrigger: number;
+  takeProfitRMultiple?: number;
   availableCapitalUsd?: number;
 }
 
@@ -76,7 +77,7 @@ function setupBExtreme(input: TradePlanInput): number {
   return extreme;
 }
 
-// Structural-invalidation SL and fixed 2R TP are source-backed; family-specific placement is convention.
+// Structural-invalidation SL and baseline 2R TP are source-backed; alternate TP multiples are Class D experiments.
 export function createTradePlan(input: TradePlanInput): TradePlan | null {
   if (input.entry.status !== 'FILLED' || input.entry.fillPrice === undefined) {
     throw new Error('Trade plan requires a FILLED retest entry');
@@ -90,6 +91,8 @@ export function createTradePlan(input: TradePlanInput): TradePlan | null {
   requirePositiveFinite(input.riskBudgetUsd, 'riskBudgetUsd');
   requirePositiveFinite(input.leverage, 'leverage');
   requirePositiveFinite(input.frozenAtrAtTrigger, 'frozenAtrAtTrigger');
+  const takeProfitRMultiple = input.takeProfitRMultiple ?? 2;
+  requirePositiveFinite(takeProfitRMultiple, 'takeProfitRMultiple');
   if (input.availableCapitalUsd !== undefined) {
     requirePositiveFinite(input.availableCapitalUsd, 'availableCapitalUsd');
   }
@@ -130,8 +133,8 @@ export function createTradePlan(input: TradePlanInput): TradePlan | null {
   if (riskPerUnit < input.frozenAtrAtTrigger * MIN_STOP_DISTANCE_ATR_MULTIPLE) return null;
   const rawTakeProfit =
     input.signal.direction === 'BULL'
-      ? entryPrice + 2 * riskPerUnit
-      : entryPrice - 2 * riskPerUnit;
+      ? entryPrice + takeProfitRMultiple * riskPerUnit
+      : entryPrice - takeProfitRMultiple * riskPerUnit;
   const takeProfit = nearestToStep(rawTakeProfit, input.tickSize);
 
   const riskSizedPosition = floorToStep(input.riskBudgetUsd / riskPerUnit, input.lotSize);

@@ -133,6 +133,7 @@ export function buildComparisonReport(
 export async function runFullNukidaBacktestOOS(
   dataDirectory: string,
   lastM15OpenTime?: number,
+  options: { takeProfitRMultiple?: number } = {},
 ): Promise<{
   result: NukidaBacktestResult;
   windows: WalkForwardWindows;
@@ -167,6 +168,7 @@ export async function runFullNukidaBacktestOOS(
         fsmConfig: {
           ...config,
           riskBudgetUsd: 100,
+          takeProfitRMultiple: options.takeProfitRMultiple,
           dataGate: defaultDataGate,
         },
       });

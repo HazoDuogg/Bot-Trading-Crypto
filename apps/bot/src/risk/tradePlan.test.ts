@@ -53,6 +53,22 @@ function filled(atIndex: number, fillPrice: number): RetestEntryResult {
 }
 
 describe('createTradePlan', () => {
+  it('uses an explicit take-profit R multiple while preserving the 2R default', () => {
+    const input = {
+      signal: setupA('BULL'),
+      entry: { status: 'FILLED' as const, atIndex: 9, fillPrice: 106 },
+      closedCandles: [],
+      tickSize: 1,
+      lotSize: 1,
+      riskBudgetUsd: 120,
+      leverage: 10,
+      frozenAtrAtTrigger: 10,
+    };
+
+    expect(createTradePlan({ ...input, takeProfitRMultiple: 1.5 })?.takeProfit).toBe(124);
+    expect(createTradePlan(input)?.takeProfit).toBe(130);
+  });
+
   it.each([
     ['BULL' as const, 106, 94, 130],
     ['BEAR' as const, 94, 106, 70],

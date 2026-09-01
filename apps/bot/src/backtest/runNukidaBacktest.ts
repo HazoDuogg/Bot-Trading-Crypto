@@ -365,7 +365,10 @@ export function defaultDataGate(candles: readonly Candle[], index: number) {
   return { accepted, reasonCode: accepted ? undefined : 'M15_GAP_OR_DUPLICATE' };
 }
 
-export async function runFullNukidaBacktest(dataDirectory: string): Promise<{
+export async function runFullNukidaBacktest(
+  dataDirectory: string,
+  options: { takeProfitRMultiple?: number } = {},
+): Promise<{
   result: NukidaBacktestResult;
   coinRuns: Record<string, { status: 'COMPLETED' | 'SKIPPED'; error?: string }>;
 }> {
@@ -387,6 +390,7 @@ export async function runFullNukidaBacktest(dataDirectory: string): Promise<{
         fsmConfig: {
           ...config,
           riskBudgetUsd: 100,
+          takeProfitRMultiple: options.takeProfitRMultiple,
           dataGate: defaultDataGate,
         },
       });

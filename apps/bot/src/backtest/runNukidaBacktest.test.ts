@@ -71,6 +71,7 @@ describe('runNukidaBacktest', () => {
             lotSize: 1,
             riskBudgetUsd: 20,
             leverage: 10,
+            takeProfitRMultiple: 1.5,
             dataGate: () => ({ accepted: true }),
             strategyAdapter: fixtureAdapter(signal),
           },
@@ -84,21 +85,21 @@ describe('runNukidaBacktest', () => {
       coin: 'TESTUSDT',
       setupFamily: 'A_COMPRESSION_BREAKOUT',
       reasonTrace: signal.reasonTrace,
-      execution: { outcome: 'WIN', exitPrice: 119, m1CandlesConsumed: 1 },
+      execution: { outcome: 'WIN', exitPrice: 114, m1CandlesConsumed: 1 },
     });
     expect(result.tradeLogs[0].costs).not.toBeNull();
     expect(result.report.overall.zeroCost).toMatchObject({
       closedTrades: 1,
-      grossR: 2,
-      netR: 2,
+      grossR: 1.5,
+      netR: 1.5,
       profitFactor: null,
-      expectancyPerTrade: 2,
+      expectancyPerTrade: 1.5,
       maxDrawdownR: 0,
       winRate: 1,
       ambiguousTrades: 0,
       openTrades: 0,
     });
-    expect(result.report.overall.realisticCost.netR).toBeLessThan(2);
+    expect(result.report.overall.realisticCost.netR).toBeLessThan(1.5);
     expect(result.report.byCoin.TESTUSDT).toBeDefined();
     expect(result.report.bySetupFamily.A_COMPRESSION_BREAKOUT).toBeDefined();
     expect(result.report.byDirection.BULL).toBeDefined();

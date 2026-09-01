@@ -70,6 +70,7 @@ export interface FsmConfig {
   lotSize: number;
   riskBudgetUsd: number;
   leverage: number;
+  takeProfitRMultiple?: number;
   availableCapitalUsd?: number;
   dataGate: (candles: readonly Candle[], index: number) => FsmDataGateResult;
   strategyAdapter?: NukidaStrategyAdapter;
@@ -321,6 +322,7 @@ export function createNukidaFsm(config: FsmConfig): {
               riskBudgetUsd: config.riskBudgetUsd,
               leverage: config.leverage,
               frozenAtrAtTrigger,
+              takeProfitRMultiple: config.takeProfitRMultiple,
               availableCapitalUsd: config.availableCapitalUsd,
             });
             events.push(
