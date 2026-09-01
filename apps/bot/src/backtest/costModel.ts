@@ -1,0 +1,87 @@
+import type { Candle } from '../noTradeZone/types.js';
+import type { TradePlan } from '../risk/tradePlan.js';
+
+// Binance USDⓈ-M Regular User USDT taker rate, no BNB discount, checked 2026-09-01.
+// Source: https://www.binance.com/en/fee/futureFee
+export const BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE = 0.0005;
+
+// Conservative all-taker adverse slippage scenario: 2 bps on both entry and exit notionals.
+export const DEFAULT_ADVERSE_SLIPPAGE_RATE = 0.0002;
+
+export interface ExecutionCostInput {
+  tradePlan: TradePlan;
+  exitPrice: number;
+  entryM1Candle: Candle;
+  exitM1Candle: Candle;
+  takerFeeRate?: number;
+  adverseSlippageRate?: number;
+}
+
+export interface ExecutionCostResult {
+  grossR: number;
+  feeR: number;
+  spreadR: number;
+  slippageR: number;
+  netR: number;
+}
+
+function requireNonNegativeFinite(value: number, name: string): void {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${name} must be finite and non-negative`);
+  }
+}
+
+function candleRange(candle: Candle, name: string): number {
+  if (!Number.isFinite(candle.high) || !Number.isFinite(candle.low) || candle.high < candle.low) {
+    throw new Error(`${name} must have finite high/low with high >= low`);
+  }
+  return candle.high - candle.low;
+}
+
+export function calculateExecutionCosts(input: ExecutionCostInput): ExecutionCostResult {
+  const feeRate = input.takerFeeRate ?? BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE;
+  const slippageRate = input.adverseSlippageRate ?? DEFAULT_ADVERSE_SLIPPAGE_RATE;
+  requireNonNegativeFinite(feeRate, 'takerFeeRate');
+  requireNonNegativeFinite(slippageRate, 'adverseSlippageRate');
+  if (!Number.isFinite(input.exitPrice) || input.exitPrice <= 0) {
+    throw new Error('exitPrice must be finite and greater than zero');
+  }
+  if (
+    !Number.isFinite(input.tradePlan.entryPrice) ||
+    !Number.isFinite(input.tradePlan.riskPerUnit) ||
+    !Number.isFinite(input.tradePlan.positionSize) ||
+    input.tradePlan.entryPrice <= 0 ||
+    input.tradePlan.riskPerUnit <= 0 ||
+    input.tradePlan.positionSize <= 0
+  ) {
+    throw new Error('Trade plan entry, riskPerUnit, and positionSize must be positive and finite');
+  }
+
+  const riskUsd = input.tradePlan.riskPerUnit * input.tradePlan.positionSize;
+  const direction = input.tradePlan.direction === 'BULL' ? 1 : -1;
+  const grossPnlUsd =
+    direction * (input.exitPrice - input.tradePlan.entryPrice) * input.tradePlan.positionSize;
+  const roundTripNotionalUsd =
+    (input.tradePlan.entryPrice + input.exitPrice) * input.tradePlan.positionSize;
+  const feeUsd = roundTripNotionalUsd * feeRate;
+
+  // Half of each M1 high-low range proxies adverse midpoint-to-edge spread; this is not order-book data.
+  const spreadUsd =
+    ((candleRange(input.entryM1Candle, 'entryM1Candle') +
+      candleRange(input.exitM1Candle, 'exitM1Candle')) /
+      2) *
+    input.tradePlan.positionSize;
+  const slippageUsd = roundTripNotionalUsd * slippageRate;
+
+  const grossR = grossPnlUsd / riskUsd;
+  const feeR = feeUsd / riskUsd;
+  const spreadR = spreadUsd / riskUsd;
+  const slippageR = slippageUsd / riskUsd;
+  return {
+    grossR,
+    feeR,
+    spreadR,
+    slippageR,
+    netR: grossR - feeR - spreadR - slippageR,
+  };
+}
