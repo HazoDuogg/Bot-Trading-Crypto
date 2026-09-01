@@ -2,12 +2,7 @@ import type { BaseZone } from '../structure/baseZone.js';
 import type { BreakResult, DominanceEvidence } from '../structure/breakDetector.js';
 import { D6_RECLAIM_WINDOW } from '../structure/breakDetector.js';
 import type { CompressionResult } from '../structure/compression.js';
-
-export interface QualityComposite {
-  label: 'CLEAN' | 'CHAOTIC' | 'UNCLEAR';
-  efficiency: number;
-  sweepCount: number;
-}
+import type { QualityComposite } from '../structure/quality.js';
 
 export interface SetupSignal {
   setupFamily: 'A_COMPRESSION_BREAKOUT' | 'B_BREAK_PULLBACK_FAILURE';

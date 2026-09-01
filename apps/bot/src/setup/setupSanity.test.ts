@@ -12,7 +12,8 @@ import {
 } from '../structure/breakDetector.js';
 import { detectCompression } from '../structure/compression.js';
 import { detectSwingPoints } from '../structure/swingPoints.js';
-import { detectSetupA, type QualityComposite } from './setupDetectorA.js';
+import type { QualityComposite } from '../structure/quality.js';
+import { detectSetupA } from './setupDetectorA.js';
 import { detectSetupB } from './setupDetectorB.js';
 
 interface TimedDominance {

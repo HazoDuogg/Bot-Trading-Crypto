@@ -4,7 +4,8 @@ import {
   evaluateDominance,
   type BreakResult,
 } from '../structure/breakDetector.js';
-import type { QualityComposite, SetupSignal } from './setupDetectorA.js';
+import type { QualityComposite } from '../structure/quality.js';
+import type { SetupSignal } from './setupDetectorA.js';
 
 export interface SetupBInput {
   closedCandles: readonly Candle[];
