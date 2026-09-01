@@ -70,7 +70,7 @@ describe('detectCompression', () => {
     );
 
     expect(detectCompression(tooShort.slice(0, -1))).toBeNull();
-    expect(D5_COMPRESSION_V1_MAX_BANDWIDTH_ATR_RATIO).toBe(2.22);
+    expect(D5_COMPRESSION_V1_MAX_BANDWIDTH_ATR_RATIO).toBe(1.95);
   });
 });
 

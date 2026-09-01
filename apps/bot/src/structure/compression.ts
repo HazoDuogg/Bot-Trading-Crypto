@@ -4,7 +4,7 @@ import type { Candle } from '../noTradeZone/types.js';
 // D5 — CONVENTION v1: distribution-selected constants, not a Nukida rule or outcome/PnL optimization.
 export const D5_COMPRESSION_V1_WINDOW = 8;
 export const D5_COMPRESSION_V1_ATR_PERIOD = 14;
-export const D5_COMPRESSION_V1_MAX_BANDWIDTH_ATR_RATIO = 2.22;
+export const D5_COMPRESSION_V1_MAX_BANDWIDTH_ATR_RATIO = 1.95;
 
 export interface CompressionResult {
   isCompressed: boolean;
