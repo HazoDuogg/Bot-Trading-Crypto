@@ -45,6 +45,7 @@ export interface FsmEvent {
     | 'ENTRY_CANCELLED';
   reasonCode?: string;
   setupFamily?: SetupSignal['setupFamily'];
+  setupSignal?: SetupSignal;
   tradePlan?: TradePlan;
 }
 
@@ -314,6 +315,7 @@ export function createNukidaFsm(config: FsmConfig): {
               index,
               state: 'TRADE_PLAN_READY',
               setupFamily: signal.setupFamily,
+              setupSignal: signal,
               tradePlan: createTradePlan({
                 signal,
                 entry,

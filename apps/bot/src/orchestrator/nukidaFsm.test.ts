@@ -98,13 +98,14 @@ function runThrough(candles: readonly Candle[], fsm: ReturnType<typeof createNuk
 
 describe('createNukidaFsm', () => {
   it('runs a setup through pending entry to a complete trade plan', () => {
+    const emittedSetup = setupA();
     const candles = [
       ...Array.from({ length: 15 }, (_, index) => candle(index)),
       candle(15, 100, 105, 103),
       candle(16, 98, 101, 100),
     ];
     const fsm = createNukidaFsm(
-      config(adapterAt({ 14: { ...cleanBull, setups: [setupA()] } })),
+      config(adapterAt({ 14: { ...cleanBull, setups: [emittedSetup] } })),
     );
     const events = runThrough(candles, fsm);
 
@@ -122,6 +123,7 @@ describe('createNukidaFsm', () => {
       index: 16,
       state: 'TRADE_PLAN_READY',
       setupFamily: 'A_COMPRESSION_BREAKOUT',
+      setupSignal: emittedSetup,
       tradePlan: {
         direction: 'BULL',
         entryPrice: 99,
