@@ -1,7 +1,5 @@
-import {
-  RETEST_ENTRY_EXPIRY_CANDLES,
-  evaluateRetestEntry,
-} from '../entry/retestEntry.js';
+import { M15_CANDLE_DURATION_MS } from '../backtest/intrabarExecution.js';
+import { evaluateM1RetestWindow, type M1RetestWindowResult } from '../entry/retestEntry.js';
 import { createAtrTracker } from '../noTradeZone/atr.js';
 import type { Candle } from '../noTradeZone/types.js';
 import { createTradePlan, type TradePlan } from '../risk/tradePlan.js';
@@ -48,6 +46,8 @@ export interface FsmEvent {
   setupFamily?: SetupSignal['setupFamily'];
   setupSignal?: SetupSignal;
   tradePlan?: TradePlan;
+  // TICKET-039: the fill that produced tradePlan, so callers don't need a separate M1 lookup.
+  entry?: Extract<M1RetestWindowResult, { status: 'FILLED' }>;
 }
 
 export interface FsmStageEvaluation {
@@ -74,6 +74,8 @@ export interface FsmConfig {
   availableCapitalUsd?: number;
   // TICKET-038: BTC trend alignment gate. Omitted keeps current (ungated) behavior exactly.
   btcM15Candles?: readonly Candle[];
+  // TICKET-039: core retest-fill mechanism now runs on M1 candles, not optional like btcM15Candles.
+  m1Candles: readonly Candle[];
   dataGate: (candles: readonly Candle[], index: number) => FsmDataGateResult;
   strategyAdapter?: NukidaStrategyAdapter;
 }
@@ -284,11 +286,13 @@ export function createDefaultStrategyAdapter(options?: {
   };
 }
 
+// TICKET-039: window is now exactly 1 M15 candle wide (was RETEST_ENTRY_EXPIRY_CANDLES=8),
+// so only the very next step may legitimately still be missing M1 data for it.
 function isIncompleteEntryWindow(error: unknown, index: number, signal: SetupSignal): boolean {
   return (
     error instanceof Error &&
-    error.message === 'closedCandles must reach expiry unless the entry fills or cancels earlier' &&
-    index < signal.triggerIndex + RETEST_ENTRY_EXPIRY_CANDLES
+    error.message === 'm1Candles must cover the full 15-minute retest window before it can be evaluated' &&
+    index < signal.triggerIndex + 2
   );
 }
 
@@ -330,9 +334,12 @@ export function createNukidaFsm(config: FsmConfig): {
         const frozenAtrAtTrigger = frozenAtrBySetup.get(signal);
         if (frozenAtrAtTrigger === undefined) throw new Error('Pending setup is missing frozen ATR');
         try {
-          const entry = evaluateRetestEntry({
+          const windowStartTimestamp =
+            visibleCandles[signal.triggerIndex].openTime + M15_CANDLE_DURATION_MS;
+          const entry = evaluateM1RetestWindow({
             signal,
-            closedCandles: visibleCandles,
+            m1Candles: config.m1Candles,
+            windowStartTimestamp,
             frozenAtrAtTrigger,
             tickSize: config.tickSize,
           });
@@ -364,9 +371,10 @@ export function createNukidaFsm(config: FsmConfig): {
                     setupFamily: signal.setupFamily,
                     setupSignal: signal,
                     tradePlan,
+                    entry,
                   },
             );
-          } else if (entry.status === 'EXPIRED') {
+          } else if (entry.status === 'EXPIRED_15M') {
             events.push({
               index,
               state: 'ENTRY_EXPIRED',

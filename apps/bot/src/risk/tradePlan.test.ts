@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import type { SetupSignal } from '../setup/setupDetectorA.js';
-import type { RetestEntryResult } from '../entry/retestEntry.js';
+import type { Candle } from '../noTradeZone/types.js';
+import type { M1RetestWindowResult } from '../entry/retestEntry.js';
 import { createTradePlan, MIN_STOP_DISTANCE_ATR_MULTIPLE } from './tradePlan.js';
+
+function candle(index: number): Candle {
+  return { openTime: index * 900_000, open: 100, high: 100, low: 100, close: 100, volume: 1 };
+}
+
+function closedCandlesThrough(triggerIndex: number): Candle[] {
+  return Array.from({ length: triggerIndex + 1 }, (_, index) => candle(index));
+}
 
 function setupA(direction: 'BULL' | 'BEAR', low = 95, high = 105): SetupSignal {
   return {
@@ -24,16 +33,17 @@ function setupA(direction: 'BULL' | 'BEAR', low = 95, high = 105): SetupSignal {
   };
 }
 
-function filled(atIndex: number, fillPrice: number): RetestEntryResult {
-  return { status: 'FILLED', atIndex, fillPrice };
+// Fill timestamp defaults to candle(9)'s openTime — one M15 candle after the triggerIndex=8 used above.
+function filled(fillPrice: number, fillTimestamp = candle(9).openTime): M1RetestWindowResult {
+  return { status: 'FILLED', fillTimestamp, fillPrice };
 }
 
 describe('createTradePlan', () => {
   it('uses an explicit take-profit R multiple while preserving the 2R default', () => {
     const input = {
       signal: setupA('BULL'),
-      entry: { status: 'FILLED' as const, atIndex: 9, fillPrice: 106 },
-      closedCandles: [],
+      entry: filled(106),
+      closedCandles: closedCandlesThrough(8),
       tickSize: 1,
       lotSize: 1,
       riskBudgetUsd: 120,
@@ -51,8 +61,8 @@ describe('createTradePlan', () => {
   ])('uses the opposite D3 boundary for Setup A %s', (direction, entryPrice, stopLoss, takeProfit) => {
     const result = createTradePlan({
       signal: setupA(direction),
-      entry: filled(9, entryPrice),
-      closedCandles: [],
+      entry: filled(entryPrice),
+      closedCandles: closedCandlesThrough(8),
       tickSize: 1,
       lotSize: 0.1,
       riskBudgetUsd: 120,
@@ -68,8 +78,8 @@ describe('createTradePlan', () => {
   it('recalculates risk from the outward tick-rounded stop and rounds size down by lot', () => {
     const result = createTradePlan({
       signal: setupA('BULL', 95.13, 99),
-      entry: filled(9, 100.1),
-      closedCandles: [],
+      entry: filled(100.1),
+      closedCandles: closedCandlesThrough(8),
       tickSize: 0.1,
       lotSize: 0.1,
       riskBudgetUsd: 10.3,
@@ -87,8 +97,8 @@ describe('createTradePlan', () => {
   it('caps rounded position size so required margin does not exceed optional available capital', () => {
     const result = createTradePlan({
       signal: setupA('BULL', 180, 199),
-      entry: filled(9, 200),
-      closedCandles: [],
+      entry: filled(200),
+      closedCandles: closedCandlesThrough(8),
       tickSize: 1,
       lotSize: 0.5,
       riskBudgetUsd: 1_000,
@@ -105,8 +115,8 @@ describe('createTradePlan', () => {
     expect(() =>
       createTradePlan({
         signal: setupA('BULL'),
-        entry: { status: 'EXPIRED', atIndex: 16 },
-        closedCandles: [],
+        entry: { status: 'EXPIRED_15M', expiryTimestamp: candle(16).openTime },
+        closedCandles: closedCandlesThrough(8),
         tickSize: 1,
         lotSize: 0.1,
         riskBudgetUsd: 100,
@@ -116,12 +126,27 @@ describe('createTradePlan', () => {
     ).toThrow('Trade plan requires a FILLED retest entry');
   });
 
+  it('rejects a fill timestamp that is not after the trigger candle', () => {
+    expect(() =>
+      createTradePlan({
+        signal: setupA('BULL'),
+        entry: filled(100, candle(8).openTime),
+        closedCandles: closedCandlesThrough(8),
+        tickSize: 1,
+        lotSize: 0.1,
+        riskBudgetUsd: 100,
+        leverage: 20,
+        frozenAtrAtTrigger: 10,
+      }),
+    ).toThrow('entry.fillTimestamp must be after the trigger candle');
+  });
+
   it('returns null when the rounded stop distance is below 1.2 ATR', () => {
     expect(
       createTradePlan({
         signal: setupA('BULL', 99.8, 105),
-        entry: filled(9, 100),
-        closedCandles: [],
+        entry: filled(100),
+        closedCandles: closedCandlesThrough(8),
         tickSize: 0.1,
         lotSize: 0.1,
         riskBudgetUsd: 100,
@@ -135,8 +160,8 @@ describe('createTradePlan', () => {
     expect(
       createTradePlan({
         signal: setupA('BULL', 97, 105),
-        entry: filled(9, 100),
-        closedCandles: [],
+        entry: filled(100),
+        closedCandles: closedCandlesThrough(8),
         tickSize: 0.1,
         lotSize: 0.1,
         riskBudgetUsd: 100,
@@ -149,8 +174,8 @@ describe('createTradePlan', () => {
   it('accepts the exact 1.2 ATR boundary', () => {
     const result = createTradePlan({
       signal: setupA('BULL', 97.7, 105),
-      entry: filled(9, 100),
-      closedCandles: [],
+      entry: filled(100),
+      closedCandles: closedCandlesThrough(8),
       tickSize: 0.1,
       lotSize: 0.1,
       riskBudgetUsd: 100,

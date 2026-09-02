@@ -892,6 +892,7 @@ export async function runNukidaWalkForwardRolling(
             riskBudgetUsd: 100,
             dataGate: defaultDataGate,
             btcM15Candles: btcM15CandlesForWindow,
+            m1Candles: usableM1Candles,
             ...options.fsmConfigOverride,
           },
         });

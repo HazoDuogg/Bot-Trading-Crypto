@@ -12,6 +12,20 @@ function candle(index: number, low = 98, high = 102, close = 100): Candle {
   return { openTime: index * 900_000, open: 100, high, low, close, volume: 100 };
 }
 
+function m1(openTime: number, low: number, high: number, close: number): Candle {
+  return { openTime, open: close, high, low, close, volume: 10 };
+}
+
+// Expands each M15 candle into 15 flat M1 sub-candles sharing its OHLC — enough to resolve
+// fill/no-fill/expiry for tests that don't need minute-level control within a single window.
+function buildM1(m15Candles: readonly Candle[]): Candle[] {
+  return m15Candles.flatMap((m15Candle) =>
+    Array.from({ length: 15 }, (_, offset) =>
+      m1(m15Candle.openTime + offset * 60_000, m15Candle.low, m15Candle.high, m15Candle.close),
+    ),
+  );
+}
+
 function setupA(triggerIndex = 14): SetupSignal {
   return {
     setupFamily: 'A_COMPRESSION_BREAKOUT',
@@ -58,12 +72,13 @@ function adapterAt(overrides: Record<number, FsmStageEvaluation>): NukidaStrateg
   };
 }
 
-function config(strategyAdapter: NukidaStrategyAdapter) {
+function config(strategyAdapter: NukidaStrategyAdapter, m1Candles: readonly Candle[] = []) {
   return {
     tickSize: 1,
     lotSize: 1,
     riskBudgetUsd: 20,
     leverage: 10,
+    m1Candles,
     dataGate: () => ({ accepted: true }),
     strategyAdapter,
   };
@@ -78,15 +93,17 @@ function runThrough(candles: readonly Candle[], fsm: ReturnType<typeof createNuk
 }
 
 describe('createNukidaFsm', () => {
-  it('runs a setup through pending entry to a complete trade plan', () => {
+  it('runs a setup through pending entry to a complete trade plan within the single M1 window', () => {
     const emittedSetup = setupA();
-    const candles = [
-      ...Array.from({ length: 15 }, (_, index) => candle(index)),
-      candle(15, 100, 105, 103),
-      candle(16, 98, 101, 100),
+    const candles = Array.from({ length: 16 }, (_, index) => candle(index));
+    const windowStart = candle(15).openTime;
+    const m1Candles = [
+      m1(windowStart, 100, 105, 103),
+      m1(windowStart + 60_000, 100, 105, 103),
+      m1(windowStart + 120_000, 98, 101, 100),
     ];
     const fsm = createNukidaFsm(
-      config(adapterAt({ 14: { ...cleanBull, setups: [emittedSetup] } })),
+      config(adapterAt({ 14: { ...cleanBull, setups: [emittedSetup] } }), m1Candles),
     );
     const events = runThrough(candles, fsm);
 
@@ -95,13 +112,8 @@ describe('createNukidaFsm', () => {
       state: 'SETUP_DETECTED',
       setupFamily: 'A_COMPRESSION_BREAKOUT',
     });
-    expect(events).toContainEqual({
-      index: 15,
-      state: 'ENTRY_PENDING',
-      setupFamily: 'A_COMPRESSION_BREAKOUT',
-    });
     expect(events.find((event) => event.state === 'TRADE_PLAN_READY')).toEqual({
-      index: 16,
+      index: 15,
       state: 'TRADE_PLAN_READY',
       setupFamily: 'A_COMPRESSION_BREAKOUT',
       setupSignal: emittedSetup,
@@ -114,6 +126,7 @@ describe('createNukidaFsm', () => {
         positionSize: 2,
         requiredMargin: 19.8,
       },
+      entry: { status: 'FILLED', fillTimestamp: windowStart + 120_000, fillPrice: 99 },
     });
   });
 
@@ -163,15 +176,15 @@ describe('createNukidaFsm', () => {
     });
   });
 
-  it('expires an unfilled pending setup at candle eight', () => {
-    const candles = Array.from({ length: 23 }, (_, index) => candle(index, 100, 105, 103));
+  it('expires 15M on the very first retry once the single M1 window closes with no fill', () => {
+    const candles = Array.from({ length: 16 }, (_, index) => candle(index, 100, 105, 103));
     const fsm = createNukidaFsm(
-      config(adapterAt({ 14: { ...cleanBull, setups: [setupA()] } })),
+      config(adapterAt({ 14: { ...cleanBull, setups: [setupA()] } }), buildM1(candles)),
     );
     const events = runThrough(candles, fsm);
 
     expect(events).toContainEqual({
-      index: 22,
+      index: 15,
       state: 'ENTRY_EXPIRED',
       reasonCode: 'ENTRY_EXPIRED',
       setupFamily: 'A_COMPRESSION_BREAKOUT',
@@ -179,12 +192,14 @@ describe('createNukidaFsm', () => {
   });
 
   it('cancels over-extension immediately and reports its reason code', () => {
+    // low=105 stays above limitPrice=99 (no fill match) while close=125 trips the
+    // over-extension check first, within the single M1 window right after trigger.
     const candles = [
       ...Array.from({ length: 15 }, (_, index) => candle(index)),
-      candle(15, 98, 125, 121),
+      candle(15, 105, 130, 125),
     ];
     const fsm = createNukidaFsm(
-      config(adapterAt({ 14: { ...cleanBull, setups: [setupA()] } })),
+      config(adapterAt({ 14: { ...cleanBull, setups: [setupA()] } }), buildM1(candles)),
     );
     const events = runThrough(candles, fsm);
 
@@ -199,17 +214,19 @@ describe('createNukidaFsm', () => {
   it('emits a distinct minimum-stop rejection after entry fills', () => {
     const narrowSetup = setupA();
     narrowSetup.reasonTrace.d3!.low = 98;
-    const candles = [
-      ...Array.from({ length: 15 }, (_, index) => candle(index)),
-      candle(15, 100, 105, 103),
-      candle(16, 98, 101, 100),
+    const candles = Array.from({ length: 16 }, (_, index) => candle(index));
+    const windowStart = candle(15).openTime;
+    const m1Candles = [
+      m1(windowStart, 100, 105, 103),
+      m1(windowStart + 60_000, 100, 105, 103),
+      m1(windowStart + 120_000, 98, 101, 100),
     ];
     const fsm = createNukidaFsm(
-      config(adapterAt({ 14: { ...cleanBull, setups: [narrowSetup] } })),
+      config(adapterAt({ 14: { ...cleanBull, setups: [narrowSetup] } }), m1Candles),
     );
 
     expect(runThrough(candles, fsm)).toContainEqual({
-      index: 16,
+      index: 15,
       state: 'TRADE_PLAN_REJECTED',
       reasonCode: 'MIN_STOP_DISTANCE',
       setupFamily: 'A_COMPRESSION_BREAKOUT',

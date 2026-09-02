@@ -1,11 +1,11 @@
 import { BINANCE_USDM_VIP0_BNB_DISCOUNT_MAKER_FEE_RATE } from '../backtest/costModel.js';
-import type { RetestEntryResult } from '../entry/retestEntry.js';
+import type { M1RetestWindowResult } from '../entry/retestEntry.js';
 import type { Candle } from '../noTradeZone/types.js';
 import type { SetupSignal } from '../setup/setupDetectorA.js';
 
 export interface TradePlanInput {
   signal: SetupSignal;
-  entry: RetestEntryResult;
+  entry: M1RetestWindowResult;
   closedCandles: readonly Candle[];
   tickSize: number;
   lotSize: number;
@@ -64,12 +64,16 @@ function requirePositiveFinite(value: number, name: string): void {
 
 // Structural-invalidation SL and baseline 2R TP are source-backed; alternate TP multiples are Class D experiments.
 export function createTradePlan(input: TradePlanInput): TradePlan | null {
-  if (input.entry.status !== 'FILLED' || input.entry.fillPrice === undefined) {
+  if (input.entry.status !== 'FILLED') {
     throw new Error('Trade plan requires a FILLED retest entry');
   }
   requirePositiveFinite(input.entry.fillPrice, 'entry.fillPrice');
-  if (!Number.isSafeInteger(input.entry.atIndex) || input.entry.atIndex <= input.signal.triggerIndex) {
-    throw new Error('entry.atIndex must be after signal.triggerIndex');
+  const triggerCandle = input.closedCandles[input.signal.triggerIndex];
+  if (triggerCandle === undefined) {
+    throw new Error('signal.triggerIndex must reference an available candle in closedCandles');
+  }
+  if (input.entry.fillTimestamp <= triggerCandle.openTime) {
+    throw new Error('entry.fillTimestamp must be after the trigger candle');
   }
   requirePositiveFinite(input.tickSize, 'tickSize');
   requirePositiveFinite(input.lotSize, 'lotSize');

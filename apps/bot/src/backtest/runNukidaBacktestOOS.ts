@@ -166,6 +166,7 @@ export async function runFullNukidaBacktestOOS(
           riskBudgetUsd: 100,
           takeProfitRMultiple: options.takeProfitRMultiple,
           dataGate: defaultDataGate,
+          m1Candles,
         },
       });
       coinWindows[coin] = {

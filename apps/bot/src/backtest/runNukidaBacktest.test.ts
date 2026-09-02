@@ -51,27 +51,29 @@ function fixtureAdapter(signal: SetupSignal): NukidaStrategyAdapter {
   };
 }
 
+// The single M1 retest window opens the instant the trigger M15 candle (index 14) closes,
+// i.e. at m15(15)'s openTime — the fill must land inside that one 15-minute window now.
+const windowStart = m15(15).openTime;
+
 describe('runNukidaBacktest', () => {
   it('wires a ready FSM trade through M1 execution, costs, reason trace, and both reports', () => {
     const signal = setupA();
-    const candles = [
-      ...Array.from({ length: 15 }, (_, index) => m15(index)),
-      m15(15, 100, 105, 103),
-      m15(16, 98, 101, 100),
-    ];
-    const firstTouchFillTimestamp = candles[16].openTime + 60_000;
+    const candles = Array.from({ length: 16 }, (_, index) => m15(index));
+    const firstTouchFillTimestamp = windowStart + 60_000;
+    const m1Candles = [m1(firstTouchFillTimestamp, 95, 120)];
     const result = runNukidaBacktest({
       coins: [
         {
           coin: 'TESTUSDT',
           m15Candles: candles,
-          m1Candles: [m1(firstTouchFillTimestamp, 95, 120)],
+          m1Candles,
           fsmConfig: {
             tickSize: 1,
             lotSize: 1,
             riskBudgetUsd: 20,
             leverage: 10,
             takeProfitRMultiple: 1.5,
+            m1Candles,
             dataGate: () => ({ accepted: true }),
             strategyAdapter: fixtureAdapter(signal),
           },
@@ -84,12 +86,12 @@ describe('runNukidaBacktest', () => {
     expect(result.tradeLogs[0]).toMatchObject({
       coin: 'TESTUSDT',
       setupFamily: 'A_COMPRESSION_BREAKOUT',
-      signalTime: candles[15].openTime,
-      orderActiveTime: candles[15].openTime,
+      signalTime: windowStart,
+      orderActiveTime: windowStart,
       firstTouchFillTimestamp,
       firstTouchFillPrice: 99,
       entryFillTimestamp: firstTouchFillTimestamp - 1,
-      minutesSignalToFill: 16,
+      minutesSignalToFill: 1,
       MFE: 2.1,
       MAE: 0.4,
       postStopHorizons: {
@@ -124,11 +126,8 @@ describe('runNukidaBacktest', () => {
   it('counts minimum-stop rejections separately without creating a trade log', () => {
     const signal = setupA();
     signal.reasonTrace.d3!.low = 98;
-    const candles = [
-      ...Array.from({ length: 15 }, (_, index) => m15(index)),
-      m15(15, 100, 105, 103),
-      m15(16, 98, 101, 100),
-    ];
+    const candles = Array.from({ length: 16 }, (_, index) => m15(index));
+    const m1Candles = [m1(windowStart + 60_000, 98, 101)];
     const result = runNukidaBacktest({
       coins: [
         {
@@ -140,6 +139,7 @@ describe('runNukidaBacktest', () => {
             lotSize: 1,
             riskBudgetUsd: 20,
             leverage: 10,
+            m1Candles,
             dataGate: () => ({ accepted: true }),
             strategyAdapter: fixtureAdapter(signal),
           },
@@ -156,23 +156,21 @@ describe('runNukidaBacktest', () => {
 
   it('prices an ambiguous TP-first case as maker and SL-first case as taker', () => {
     const signal = setupA();
-    const candles = [
-      ...Array.from({ length: 15 }, (_, index) => m15(index)),
-      m15(15, 100, 105, 103),
-      m15(16, 98, 101, 100),
-    ];
-    const firstTouchFillTimestamp = candles[16].openTime + 60_000;
+    const candles = Array.from({ length: 16 }, (_, index) => m15(index));
+    const firstTouchFillTimestamp = windowStart + 60_000;
+    const m1Candles = [m1(firstTouchFillTimestamp, 88, 120)];
     const result = runNukidaBacktest({
       coins: [
         {
           coin: 'TESTUSDT',
           m15Candles: candles,
-          m1Candles: [m1(firstTouchFillTimestamp, 88, 120)],
+          m1Candles,
           fsmConfig: {
             tickSize: 1,
             lotSize: 1,
             riskBudgetUsd: 20,
             leverage: 10,
+            m1Candles,
             dataGate: () => ({ accepted: true }),
             strategyAdapter: fixtureAdapter(signal),
           },
@@ -189,24 +187,22 @@ describe('runNukidaBacktest', () => {
 
   it('returns AMBIGUOUS when the first-touch M1 fill candle contains both SL and TP', () => {
     const signal = setupA();
-    const candles = [
-      ...Array.from({ length: 15 }, (_, index) => m15(index)),
-      m15(15, 100, 105, 103),
-      m15(16, 88, 120, 100),
-    ];
-    const fillM1OpenTime = candles[16].openTime + 60_000;
+    const candles = Array.from({ length: 16 }, (_, index) => m15(index));
+    const fillM1OpenTime = windowStart + 60_000;
+    const m1Candles = [m1(fillM1OpenTime, 88, 120)];
 
     const result = runNukidaBacktest({
       coins: [
         {
           coin: 'TESTUSDT',
           m15Candles: candles,
-          m1Candles: [m1(fillM1OpenTime, 88, 120)],
+          m1Candles,
           fsmConfig: {
             tickSize: 1,
             lotSize: 1,
             riskBudgetUsd: 20,
             leverage: 10,
+            m1Candles,
             dataGate: () => ({ accepted: true }),
             strategyAdapter: fixtureAdapter(signal),
           },
@@ -223,29 +219,27 @@ describe('runNukidaBacktest', () => {
 
   it('observes an exit a few M1 candles after fill inside the same M15 candle', () => {
     const signal = setupA();
-    const candles = [
-      ...Array.from({ length: 15 }, (_, index) => m15(index)),
-      m15(15, 100, 105, 103),
-      m15(16, 98, 120, 100),
+    const candles = Array.from({ length: 16 }, (_, index) => m15(index));
+    const fillM1OpenTime = windowStart + 60_000;
+    const m1Candles = [
+      m1(fillM1OpenTime, 98, 101),
+      m1(fillM1OpenTime + 60_000, 96, 105),
+      m1(fillM1OpenTime + 120_000, 95, 120),
     ];
-    const fillM1OpenTime = candles[16].openTime + 60_000;
 
     const result = runNukidaBacktest({
       coins: [
         {
           coin: 'TESTUSDT',
           m15Candles: candles,
-          m1Candles: [
-            m1(fillM1OpenTime, 98, 101),
-            m1(fillM1OpenTime + 60_000, 96, 105),
-            m1(fillM1OpenTime + 120_000, 95, 120),
-          ],
+          m1Candles,
           fsmConfig: {
             tickSize: 1,
             lotSize: 1,
             riskBudgetUsd: 20,
             leverage: 10,
             takeProfitRMultiple: 1.5,
+            m1Candles,
             dataGate: () => ({ accepted: true }),
             strategyAdapter: fixtureAdapter(signal),
           },
@@ -263,27 +257,22 @@ describe('runNukidaBacktest', () => {
 
   it('attributes a 1.5R recovery at minute 20 to min30 but not min15', () => {
     const signal = setupA();
-    const candles = [
-      ...Array.from({ length: 15 }, (_, index) => m15(index)),
-      m15(15, 100, 105, 103),
-      m15(16, 88, 101, 90),
-    ];
-    const fillM1OpenTime = candles[16].openTime + 60_000;
+    const candles = Array.from({ length: 16 }, (_, index) => m15(index));
+    const fillM1OpenTime = windowStart + 60_000;
+    const m1Candles = [m1(fillM1OpenTime, 88, 101), m1(fillM1OpenTime + 20 * 60_000, 98, 114)];
 
     const result = runNukidaBacktest({
       coins: [
         {
           coin: 'TESTUSDT',
           m15Candles: candles,
-          m1Candles: [
-            m1(fillM1OpenTime, 88, 101),
-            m1(fillM1OpenTime + 20 * 60_000, 98, 114),
-          ],
+          m1Candles,
           fsmConfig: {
             tickSize: 1,
             lotSize: 1,
             riskBudgetUsd: 20,
             leverage: 10,
+            m1Candles,
             dataGate: () => ({ accepted: true }),
             strategyAdapter: fixtureAdapter(signal),
           },
@@ -305,27 +294,22 @@ describe('runNukidaBacktest', () => {
 
   it('does not attribute a recovery after minute 300 to any bounded horizon', () => {
     const signal = setupA();
-    const candles = [
-      ...Array.from({ length: 15 }, (_, index) => m15(index)),
-      m15(15, 100, 105, 103),
-      m15(16, 88, 101, 90),
-    ];
-    const fillM1OpenTime = candles[16].openTime + 60_000;
+    const candles = Array.from({ length: 16 }, (_, index) => m15(index));
+    const fillM1OpenTime = windowStart + 60_000;
+    const m1Candles = [m1(fillM1OpenTime, 88, 101), m1(fillM1OpenTime + 300 * 60_000, 98, 120)];
 
     const result = runNukidaBacktest({
       coins: [
         {
           coin: 'TESTUSDT',
           m15Candles: candles,
-          m1Candles: [
-            m1(fillM1OpenTime, 88, 101),
-            m1(fillM1OpenTime + 300 * 60_000, 98, 120),
-          ],
+          m1Candles,
           fsmConfig: {
             tickSize: 1,
             lotSize: 1,
             riskBudgetUsd: 20,
             leverage: 10,
+            m1Candles,
             dataGate: () => ({ accepted: true }),
             strategyAdapter: fixtureAdapter(signal),
           },

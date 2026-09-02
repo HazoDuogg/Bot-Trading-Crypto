@@ -22,10 +22,10 @@ import {
   type ExecutionCostResult,
 } from './costModel.js';
 import {
+  M15_CANDLE_DURATION_MS,
   simulateIntrabarExecution,
   type IntrabarExecutionResult,
 } from './intrabarExecution.js';
-import { findCausalM1Fill } from './causalFill.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const IN_SAMPLE_WARNING =
@@ -269,17 +269,14 @@ function runCoin(input: CoinBacktestInput): { logs: TradeLogEntry[]; minimumStop
         continue;
       }
       if (event.state !== 'TRADE_PLAN_READY') continue;
-      if (event.tradePlan === undefined || event.setupSignal === undefined) {
-        throw new Error('TRADE_PLAN_READY must include tradePlan and setupSignal');
+      if (event.tradePlan === undefined || event.setupSignal === undefined || event.entry === undefined) {
+        throw new Error('TRADE_PLAN_READY must include tradePlan, setupSignal, and entry');
       }
-      const causalFill = findCausalM1Fill({
-        m15Candles: input.m15Candles,
-        m1Candles: input.m1Candles,
-        triggerIndex: event.setupSignal.triggerIndex,
-        fillIndex: event.index,
-        limitPrice: event.tradePlan.entryPrice,
-      });
-      const entryFillTimestamp = causalFill.firstTouchFillTimestamp - 1;
+      // TICKET-039: single-pass M1 engine already resolved the fill; windowStartTimestamp
+      // doubles as both signalTime and orderActiveTime now (previously two separate lookups).
+      const windowStartTimestamp =
+        input.m15Candles[event.setupSignal.triggerIndex].openTime + M15_CANDLE_DURATION_MS;
+      const entryFillTimestamp = event.entry.fillTimestamp - 1;
       const m1Start = firstM1After(input.m1Candles, entryFillTimestamp);
       const postFillM1 = input.m1Candles.slice(m1Start);
       const execution = simulateIntrabarExecution({
@@ -300,9 +297,11 @@ function runCoin(input: CoinBacktestInput): { logs: TradeLogEntry[]; minimumStop
       logs.push({
         coin: input.coin,
         setupFamily: event.setupSignal.setupFamily,
-        ...causalFill,
-        minutesSignalToFill:
-          (causalFill.firstTouchFillTimestamp - causalFill.signalTime) / (60 * 1000),
+        signalTime: windowStartTimestamp,
+        orderActiveTime: windowStartTimestamp,
+        firstTouchFillTimestamp: event.entry.fillTimestamp,
+        firstTouchFillPrice: event.entry.fillPrice,
+        minutesSignalToFill: (event.entry.fillTimestamp - windowStartTimestamp) / (60 * 1000),
         entryFillTimestamp,
         tradePlan: event.tradePlan,
         reasonTrace: event.setupSignal.reasonTrace,
@@ -516,6 +515,7 @@ export async function runFullNukidaBacktest(
           riskBudgetUsd: 100,
           takeProfitRMultiple: options.takeProfitRMultiple,
           dataGate: defaultDataGate,
+          m1Candles,
         },
       });
       coinRuns[coin] = { status: 'COMPLETED' };

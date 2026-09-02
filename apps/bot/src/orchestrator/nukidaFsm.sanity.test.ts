@@ -4,15 +4,24 @@ import { describe, expect, it } from 'vitest';
 import type { Candle } from '../noTradeZone/types.js';
 import { createNukidaFsm } from './nukidaFsm.js';
 
-async function loadRecentBtcCandles(): Promise<Candle[]> {
-  const csvPath = fileURLToPath(new URL('../../data/BTCUSDT_15m_3y.csv', import.meta.url));
-  const rows = (await readFile(csvPath, 'utf8')).trim().split(/\r?\n/u).slice(1);
-  const all = rows.map((row) => {
+async function loadCsvCandles(path: string): Promise<Candle[]> {
+  const rows = (await readFile(path, 'utf8')).trim().split(/\r?\n/u).slice(1);
+  return rows.map((row) => {
     const [openTime, open, high, low, close, volume] = row.split(',').map(Number);
     return { openTime, open, high, low, close, volume } satisfies Candle;
   });
-  const cutoff = all.at(-1)!.openTime - 180 * 24 * 60 * 60 * 1000;
-  return all.filter((item) => item.openTime >= cutoff);
+}
+
+async function loadRecentBtcCandles(): Promise<{ m15: Candle[]; m1: Candle[] }> {
+  const m15Path = fileURLToPath(new URL('../../data/BTCUSDT_15m_3y.csv', import.meta.url));
+  const m1Path = fileURLToPath(new URL('../../data/BTCUSDT_rt094_1m.csv', import.meta.url));
+  const allM15 = await loadCsvCandles(m15Path);
+  const allM1 = await loadCsvCandles(m1Path);
+  const cutoff = allM15.at(-1)!.openTime - 180 * 24 * 60 * 60 * 1000;
+  return {
+    m15: allM15.filter((item) => item.openTime >= cutoff),
+    m1: allM1.filter((item) => item.openTime >= cutoff),
+  };
 }
 
 function countSetupsA(fsm: ReturnType<typeof createNukidaFsm>, candles: readonly Candle[]): number {
@@ -38,12 +47,13 @@ describe('BTCUSDT six-month FSM sanity diagnostic', () => {
   it(
     'logs real end-to-end setup and trade-plan totals without a hard-coded target',
     async () => {
-      const recent = await loadRecentBtcCandles();
+      const { m15: recent, m1 } = await loadRecentBtcCandles();
       const fsm = createNukidaFsm({
         tickSize: 0.1,
         lotSize: 0.001,
         riskBudgetUsd: 100,
         leverage: 20,
+        m1Candles: m1,
         dataGate,
       });
       const counts = {
@@ -78,9 +88,16 @@ describe('BTCUSDT six-month FSM sanity diagnostic', () => {
   it(
     'TICKET-038: gates BTC setups against BTC\'s own EMA200/H1 trend and never emits more than ungated',
     async () => {
-      const recent = await loadRecentBtcCandles();
+      const { m15: recent, m1 } = await loadRecentBtcCandles();
       const ungatedCount = countSetupsA(
-        createNukidaFsm({ tickSize: 0.1, lotSize: 0.001, riskBudgetUsd: 100, leverage: 20, dataGate }),
+        createNukidaFsm({
+          tickSize: 0.1,
+          lotSize: 0.001,
+          riskBudgetUsd: 100,
+          leverage: 20,
+          m1Candles: m1,
+          dataGate,
+        }),
         recent,
       );
       const gatedCount = countSetupsA(
@@ -89,6 +106,7 @@ describe('BTCUSDT six-month FSM sanity diagnostic', () => {
           lotSize: 0.001,
           riskBudgetUsd: 100,
           leverage: 20,
+          m1Candles: m1,
           btcM15Candles: recent,
           dataGate,
         }),

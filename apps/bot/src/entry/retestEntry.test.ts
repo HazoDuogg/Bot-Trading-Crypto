@@ -17,30 +17,148 @@ import { evaluateBreakoutStrength } from '../structure/breakoutStrength.js';
 import { detectCompression } from '../structure/compression.js';
 import { evaluateQuality } from '../structure/quality.js';
 import { detectSwingPoints } from '../structure/swingPoints.js';
-import { RETEST_ENTRY_EXPIRY_CANDLES, evaluateRetestEntry } from './retestEntry.js';
+import { evaluateM1RetestWindow } from './retestEntry.js';
 
-function candle(index: number, low: number, high: number, close: number): Candle {
-  return { openTime: index * 900_000, open: close, high, low, close, volume: 100 };
+const M15_WINDOW_MS = 15 * 60 * 1000;
+
+function m1(openTime: number, low: number, high: number, close: number): Candle {
+  return { openTime, open: close, high, low, close, volume: 100 };
 }
 
-function signal(direction: 'BULL' | 'BEAR', triggerIndex = 0, level = 100): SetupSignal {
+function signal(direction: 'BULL' | 'BEAR', level = 100): SetupSignal {
   return {
     setupFamily: 'A_COMPRESSION_BREAKOUT',
     direction,
-    triggerIndex,
+    triggerIndex: 0,
     reasonTrace: {
       quality: { label: 'CLEAN', efficiency: 0.2, sweepCount: 1 },
-      dominance: {
-        side: direction,
-        brokeLevel: level,
-        counterTestFailed: true,
-        counterTestIndex: triggerIndex - 3,
-      },
-      d2: { brokeAt: Math.max(0, triggerIndex - 6), level },
+      dominance: { side: direction, brokeLevel: level, counterTestFailed: true, counterTestIndex: -3 },
+      d2: { brokeAt: 0, level },
       d7: { bodyRatio: 0.7, rangeAtrRatio: 1.2, isStrong: true },
     },
   };
 }
+
+// A window fully covered by flat, non-touching, non-extended M1 candles (15 of them).
+function fullWindow(windowStart: number, low: number, high: number, close: number): Candle[] {
+  return Array.from({ length: 15 }, (_, offset) => m1(windowStart + offset * 60_000, low, high, close));
+}
+
+describe('evaluateM1RetestWindow', () => {
+  it('fills a BULL limit one tick below the break level on the M1 candle that touches it', () => {
+    const windowStart = 0;
+    const m1Candles = [
+      m1(0, 100, 104, 103),
+      m1(60_000, 100, 105, 103),
+      m1(120_000, 98, 101, 100),
+      ...fullWindow(180_000, 100, 105, 103).slice(0, 12),
+    ];
+
+    expect(
+      evaluateM1RetestWindow({
+        signal: signal('BULL'),
+        m1Candles,
+        windowStartTimestamp: windowStart,
+        frozenAtrAtTrigger: 10,
+        tickSize: 1,
+      }),
+    ).toEqual({ status: 'FILLED', fillTimestamp: 120_000, fillPrice: 99 });
+  });
+
+  it('applies the symmetric one-tick-above limit for BEAR', () => {
+    const m1Candles = [m1(0, 96, 100, 97), m1(60_000, 95, 100, 97), m1(120_000, 99, 102, 100)];
+
+    expect(
+      evaluateM1RetestWindow({
+        signal: signal('BEAR'),
+        m1Candles,
+        windowStartTimestamp: 0,
+        frozenAtrAtTrigger: 10,
+        tickSize: 1,
+      }),
+    ).toEqual({ status: 'FILLED', fillTimestamp: 120_000, fillPrice: 101 });
+  });
+
+  it('expires 15M when no M1 candle fills or cancels within the window', () => {
+    const m1Candles = fullWindow(0, 101, 105, 103);
+
+    expect(
+      evaluateM1RetestWindow({
+        signal: signal('BULL'),
+        m1Candles,
+        windowStartTimestamp: 0,
+        frozenAtrAtTrigger: 10,
+        tickSize: 1,
+      }),
+    ).toEqual({ status: 'EXPIRED_15M', expiryTimestamp: M15_WINDOW_MS });
+  });
+
+  it('cancels before fill when an earlier M1 candle in the window is already over-extended', () => {
+    // low=105 stays above limitPrice=99 (no fill match) while close=121 is far enough from
+    // the break level (100) to trip the over-extension check first.
+    const m1Candles = [
+      m1(0, 100, 104, 103),
+      m1(60_000, 101, 110, 105),
+      m1(120_000, 105, 125, 121),
+      ...fullWindow(180_000, 98, 101, 100).slice(0, 12),
+    ];
+    const guarded = new Proxy(m1Candles, {
+      get(target, property, receiver) {
+        if (property === '3') throw new Error('read after cancellation');
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    expect(
+      evaluateM1RetestWindow({
+        signal: signal('BULL'),
+        m1Candles: guarded,
+        windowStartTimestamp: 0,
+        frozenAtrAtTrigger: 10,
+        tickSize: 1,
+      }),
+    ).toEqual({ status: 'CANCELLED_OVER_EXTENDED', cancelTimestamp: 120_000 });
+  });
+
+  it('never reads an M1 candle outside the 15-minute window once filled', () => {
+    const m1Candles = [
+      m1(0, 100, 104, 103),
+      m1(60_000, 100, 105, 103),
+      m1(120_000, 98, 101, 100),
+      m1(M15_WINDOW_MS, 1, 1_000, 500),
+    ];
+    const guarded = new Proxy(m1Candles, {
+      get(target, property, receiver) {
+        if (property === '3') throw new Error('read past the window end');
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    expect(
+      evaluateM1RetestWindow({
+        signal: signal('BULL'),
+        m1Candles: guarded,
+        windowStartTimestamp: 0,
+        frozenAtrAtTrigger: 10,
+        tickSize: 1,
+      }),
+    ).toEqual({ status: 'FILLED', fillTimestamp: 120_000, fillPrice: 99 });
+  });
+
+  it('throws when the M1 feed has not yet closed the full 15-minute window', () => {
+    const m1Candles = [m1(0, 101, 105, 103), m1(60_000, 101, 105, 103)];
+
+    expect(() =>
+      evaluateM1RetestWindow({
+        signal: signal('BULL'),
+        m1Candles,
+        windowStartTimestamp: 0,
+        frozenAtrAtTrigger: 10,
+        tickSize: 1,
+      }),
+    ).toThrow('m1Candles must cover the full 15-minute retest window before it can be evaluated');
+  });
+});
 
 interface TimedDominance {
   confirmedAt: number;
@@ -145,137 +263,37 @@ function collectSetupSignals(candles: readonly Candle[]): SetupSignal[] {
   return signals;
 }
 
-describe('evaluateRetestEntry', () => {
-  it('fills a BULL limit one tick below the break level on candle two after trigger', () => {
-    const candles = [
-      candle(0, 100, 104, 103),
-      candle(1, 100, 105, 103),
-      candle(2, 98, 101, 100),
-    ];
-
-    expect(
-      evaluateRetestEntry({
-        signal: signal('BULL'),
-        closedCandles: candles,
-        frozenAtrAtTrigger: 10,
-        tickSize: 1,
-      }),
-    ).toEqual({ status: 'FILLED', atIndex: 2, fillPrice: 99 });
+async function loadCsvCandles(path: string): Promise<Candle[]> {
+  const rows = (await readFile(path, 'utf8')).trim().split(/\r?\n/u).slice(1);
+  return rows.map((row) => {
+    const [openTime, open, high, low, close, volume] = row.split(',').map(Number);
+    return { openTime, open, high, low, close, volume } satisfies Candle;
   });
-
-  it('expires exactly eight candles after trigger when no candle fills or cancels', () => {
-    const candles = Array.from({ length: 10 }, (_, index) => candle(index, 101, 105, 103));
-    const guarded = new Proxy(candles, {
-      get(target, property, receiver) {
-        if (property === '9') throw new Error('read after expiry');
-        return Reflect.get(target, property, receiver);
-      },
-    });
-
-    expect(
-      evaluateRetestEntry({
-        signal: signal('BULL'),
-        closedCandles: guarded,
-        frozenAtrAtTrigger: 10,
-        tickSize: 1,
-      }),
-    ).toEqual({ status: 'EXPIRED', atIndex: 8 });
-    expect(RETEST_ENTRY_EXPIRY_CANDLES).toBe(8);
-  });
-
-  it('cancels before fill when the same candle is already over-extended', () => {
-    const candles = [
-      candle(0, 100, 104, 103),
-      candle(1, 101, 110, 105),
-      candle(2, 98, 125, 121),
-      candle(3, 98, 101, 100),
-    ];
-    const guarded = new Proxy(candles, {
-      get(target, property, receiver) {
-        if (property === '3') throw new Error('read after cancellation');
-        return Reflect.get(target, property, receiver);
-      },
-    });
-
-    expect(
-      evaluateRetestEntry({
-        signal: signal('BULL'),
-        closedCandles: guarded,
-        frozenAtrAtTrigger: 10,
-        tickSize: 1,
-      }),
-    ).toEqual({ status: 'CANCELLED_OVER_EXTENDED', atIndex: 2 });
-  });
-
-  it('applies the symmetric one-tick-above limit for BEAR', () => {
-    const candles = [
-      candle(0, 96, 100, 97),
-      candle(1, 95, 100, 97),
-      candle(2, 99, 102, 100),
-    ];
-
-    expect(
-      evaluateRetestEntry({
-        signal: signal('BEAR'),
-        closedCandles: candles,
-        frozenAtrAtTrigger: 10,
-        tickSize: 1,
-      }),
-    ).toEqual({ status: 'FILLED', atIndex: 2, fillPrice: 101 });
-  });
-
-  it('does not read the trigger candle or any candle after an early fill', () => {
-    const candles = [
-      candle(0, 1, 1_000, 500),
-      candle(1, 1, 1_000, 500),
-      candle(2, 1, 1_000, 500),
-      candle(3, 100, 105, 103),
-      candle(4, 98, 101, 100),
-      candle(5, 1, 1_000, 500),
-    ];
-    const guarded = new Proxy(candles, {
-      get(target, property, receiver) {
-        if (property === '0' || property === '1' || property === '2') {
-          throw new Error('read at or before trigger');
-        }
-        if (property === '5') throw new Error('read after fill');
-        return Reflect.get(target, property, receiver);
-      },
-    });
-
-    expect(
-      evaluateRetestEntry({
-        signal: signal('BULL', 2),
-        closedCandles: guarded,
-        frozenAtrAtTrigger: 10,
-        tickSize: 1,
-      }),
-    ).toEqual({ status: 'FILLED', atIndex: 4, fillPrice: 99 });
-  });
-});
+}
 
 describe('BTCUSDT six-month setup-to-entry sanity diagnostic', () => {
-  it('logs terminal retest-entry outcomes for real D4-filtered SetupSignals', async () => {
-    const csvPath = fileURLToPath(new URL('../../data/BTCUSDT_15m_3y.csv', import.meta.url));
-    const rows = (await readFile(csvPath, 'utf8')).trim().split(/\r?\n/u).slice(1);
-    const all = rows.map((row) => {
-      const [openTime, open, high, low, close, volume] = row.split(',').map(Number);
-      return { openTime, open, high, low, close, volume } satisfies Candle;
-    });
-    const cutoff = all.at(-1)!.openTime - 180 * 24 * 60 * 60 * 1000;
-    const recent = all.filter((item) => item.openTime >= cutoff);
+  it('logs terminal M1 retest-window outcomes for real D4-filtered SetupSignals', async () => {
+    const m15Path = fileURLToPath(new URL('../../data/BTCUSDT_15m_3y.csv', import.meta.url));
+    const m1Path = fileURLToPath(new URL('../../data/BTCUSDT_rt094_1m.csv', import.meta.url));
+    const allM15 = await loadCsvCandles(m15Path);
+    const allM1 = await loadCsvCandles(m1Path);
+    const cutoff = allM15.at(-1)!.openTime - 180 * 24 * 60 * 60 * 1000;
+    const recent = allM15.filter((item) => item.openTime >= cutoff);
+    const recentM1 = allM1.filter((item) => item.openTime >= cutoff);
     const signals = collectSetupSignals(recent);
     const tracker = createAtrTracker(D2_BREAK_V1_ATR_PERIOD);
     const atrAtIndex = recent.map((item) => tracker.next(item));
-    const outcomes = { FILLED: 0, EXPIRED: 0, CANCELLED_OVER_EXTENDED: 0 };
+    const outcomes = { FILLED: 0, EXPIRED_15M: 0, CANCELLED_OVER_EXTENDED: 0 };
     let evaluatedSignals = 0;
     for (const setup of signals) {
-      if (setup.triggerIndex + RETEST_ENTRY_EXPIRY_CANDLES >= recent.length) continue;
+      const windowStartTimestamp = recent[setup.triggerIndex].openTime + M15_WINDOW_MS;
+      if (recentM1.at(-1)!.openTime < windowStartTimestamp + M15_WINDOW_MS - 60_000) continue;
       const frozenAtrAtTrigger = atrAtIndex[setup.triggerIndex];
       if (frozenAtrAtTrigger === null || frozenAtrAtTrigger === undefined) continue;
-      const result = evaluateRetestEntry({
+      const result = evaluateM1RetestWindow({
         signal: setup,
-        closedCandles: recent,
+        m1Candles: recentM1,
+        windowStartTimestamp,
         frozenAtrAtTrigger,
         tickSize: 0.1,
       });
@@ -285,15 +303,15 @@ describe('BTCUSDT six-month setup-to-entry sanity diagnostic', () => {
     const percentage = (count: number): string => ((100 * count) / evaluatedSignals).toFixed(2);
 
     console.info(
-      `BTCUSDT recent-6m retest entry: FILLED=${outcomes.FILLED}/${evaluatedSignals} ` +
-        `(${percentage(outcomes.FILLED)}%), EXPIRED=${outcomes.EXPIRED} ` +
-        `(${percentage(outcomes.EXPIRED)}%), CANCELLED_OVER_EXTENDED=` +
+      `BTCUSDT recent-6m M1 retest window: FILLED=${outcomes.FILLED}/${evaluatedSignals} ` +
+        `(${percentage(outcomes.FILLED)}%), EXPIRED_15M=${outcomes.EXPIRED_15M} ` +
+        `(${percentage(outcomes.EXPIRED_15M)}%), CANCELLED_OVER_EXTENDED=` +
         `${outcomes.CANCELLED_OVER_EXTENDED} ` +
         `(${percentage(outcomes.CANCELLED_OVER_EXTENDED)}%); signals=${signals.length}`,
     );
     expect(signals.length).toBeGreaterThan(0);
     expect(evaluatedSignals).toBeGreaterThan(0);
-    expect(outcomes.FILLED + outcomes.EXPIRED + outcomes.CANCELLED_OVER_EXTENDED).toBe(
+    expect(outcomes.FILLED + outcomes.EXPIRED_15M + outcomes.CANCELLED_OVER_EXTENDED).toBe(
       evaluatedSignals,
     );
   }, 30_000);
