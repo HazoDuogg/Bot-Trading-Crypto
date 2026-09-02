@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Candle } from '../noTradeZone/types.js';
 import type { TradePlan } from '../risk/tradePlan.js';
 import {
-  BINANCE_USDM_REGULAR_USER_MAKER_FEE_RATE,
+  BINANCE_USDM_VIP0_BNB_DISCOUNT_MAKER_FEE_RATE,
   calculateExecutionCosts,
   SPREAD_PROXY_M1_RANGE_FRACTION,
 } from './costModel.js';
@@ -22,7 +22,7 @@ const plan: TradePlan = {
 };
 
 describe('calculateExecutionCosts', () => {
-  it('charges maker on both legs of a take-profit exit, reducing the old all-taker fee by 60%', () => {
+  it('charges maker on both legs of a take-profit exit, reducing the old all-taker fee by 64%', () => {
     const result = calculateExecutionCosts({
       tradePlan: plan,
       exitPrice: 120,
@@ -32,12 +32,12 @@ describe('calculateExecutionCosts', () => {
       adverseSlippageRate: 0,
     });
 
-    expect(BINANCE_USDM_REGULAR_USER_MAKER_FEE_RATE).toBe(0.0002);
-    expect(result.feeR).toBeCloseTo(0.0044);
-    expect(result.feeR / 0.011).toBeCloseTo(0.4);
+    expect(BINANCE_USDM_VIP0_BNB_DISCOUNT_MAKER_FEE_RATE).toBe(0.00018);
+    expect(result.feeR).toBeCloseTo(0.00396);
+    expect(result.feeR / 0.011).toBeCloseTo(0.36);
   });
 
-  it('charges maker entry plus taker stop exit, reducing the old all-taker fee by about 30%', () => {
+  it('charges maker entry plus taker stop exit, reducing the old all-taker fee by about 38%', () => {
     const result = calculateExecutionCosts({
       tradePlan: plan,
       exitPrice: 90,
@@ -47,8 +47,8 @@ describe('calculateExecutionCosts', () => {
       adverseSlippageRate: 0,
     });
 
-    expect(result.feeR).toBeCloseTo(0.0065);
-    expect(result.feeR / 0.0095).toBeCloseTo(0.68421, 4);
+    expect(result.feeR).toBeCloseTo(0.00585);
+    expect(result.feeR / 0.0095).toBeCloseTo(0.61579, 4);
   });
 
   it('uses 10% of each M1 range, exactly one fifth of the former half-range proxy', () => {

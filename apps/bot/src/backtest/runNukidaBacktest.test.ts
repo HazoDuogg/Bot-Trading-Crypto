@@ -182,8 +182,8 @@ describe('runNukidaBacktest', () => {
 
     expect(result.tradeLogs[0].execution.outcome).toBe('AMBIGUOUS');
     expect(result.tradeLogs[0].costs).toMatchObject({
-      bestCase: { feeR: 0.00436 },
-      worstCase: { feeR: 0.00643 },
+      bestCase: { feeR: 0.003924 },
+      worstCase: { feeR: expect.closeTo(0.005787, 9) },
     });
   });
 

@@ -1,10 +1,10 @@
 import type { Candle } from '../noTradeZone/types.js';
 import type { TradePlan } from '../risk/tradePlan.js';
 
-// Binance USDⓈ-M Regular User USDT maker/taker rates, no BNB discount, checked 2026-09-01.
-// Source: https://www.binance.com/en/fee/futureFee
-export const BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE = 0.0005;
-export const BINANCE_USDM_REGULAR_USER_MAKER_FEE_RATE = 0.0002;
+// Binance USDⓈ-M VIP0 USDT maker/taker rates after the 10% BNB fee discount (TICKET-033).
+// Per technical spec V2; base VIP0 rates 0.0005/0.0002 x 0.9 discount, checked 2026-09-01.
+export const BINANCE_USDM_VIP0_BNB_DISCOUNT_TAKER_FEE_RATE = 0.00045;
+export const BINANCE_USDM_VIP0_BNB_DISCOUNT_MAKER_FEE_RATE = 0.00018;
 
 // Conservative all-taker adverse slippage scenario: 2 bps on both entry and exit notionals.
 export const DEFAULT_ADVERSE_SLIPPAGE_RATE = 0.0002;
@@ -45,12 +45,12 @@ function candleRange(candle: Candle, name: string): number {
 }
 
 export function calculateExecutionCosts(input: ExecutionCostInput): ExecutionCostResult {
-  const entryFeeRate = input.entryFeeRate ?? BINANCE_USDM_REGULAR_USER_MAKER_FEE_RATE;
+  const entryFeeRate = input.entryFeeRate ?? BINANCE_USDM_VIP0_BNB_DISCOUNT_MAKER_FEE_RATE;
   const exitFeeRate =
     input.exitFeeRate ??
     (input.exitReason === 'TAKE_PROFIT'
-      ? BINANCE_USDM_REGULAR_USER_MAKER_FEE_RATE
-      : BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE);
+      ? BINANCE_USDM_VIP0_BNB_DISCOUNT_MAKER_FEE_RATE
+      : BINANCE_USDM_VIP0_BNB_DISCOUNT_TAKER_FEE_RATE);
   const slippageRate = input.adverseSlippageRate ?? DEFAULT_ADVERSE_SLIPPAGE_RATE;
   requireNonNegativeFinite(entryFeeRate, 'entryFeeRate');
   requireNonNegativeFinite(exitFeeRate, 'exitFeeRate');

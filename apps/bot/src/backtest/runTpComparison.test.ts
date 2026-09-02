@@ -105,12 +105,12 @@ describe('TP and position-management comparison report', () => {
       combined: {
         closedTrades: 1,
         grossR: -1,
-        netR: -1.2283,
-        expectancyPerTrade: -1.2283,
+        netR: -1.22765,
+        expectancyPerTrade: -1.22765,
         ambiguousTrades: 0,
       },
       fixedTpBaseline: { inSampleNetR: 1, outOfSampleNetR: 2, combinedNetR: 3 },
-      netRDeltaVsFixedTp: { inSample: -1, outOfSample: -3.2283, combined: -4.2283 },
+      netRDeltaVsFixedTp: { inSample: -1, outOfSample: -3.22765, combined: -4.22765 },
     });
   });
 
@@ -125,6 +125,6 @@ describe('TP and position-management comparison report', () => {
       },
     ]);
 
-    expect(rows[0].combined).toMatchObject({ closedTrades: 1, grossR: 0.75, feeR: 0.00565 });
+    expect(rows[0].combined).toMatchObject({ closedTrades: 1, grossR: 0.75, feeR: 0.005085 });
   });
 });

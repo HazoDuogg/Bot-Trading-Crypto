@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { Candle } from '../noTradeZone/types.js';
 import type { TradePlan } from '../risk/tradePlan.js';
 import {
-  BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE,
+  BINANCE_USDM_VIP0_BNB_DISCOUNT_TAKER_FEE_RATE,
   calculateExecutionCosts,
   type ExecutionCostResult,
 } from './costModel.js';
@@ -168,8 +168,8 @@ export function runBuyAndHoldControl(candles: readonly Candle[]): BuyAndHoldCont
     tradePlan: plan,
     exitPrice: last.close,
     exitReason: 'STOP_LOSS',
-    entryFeeRate: BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE,
-    exitFeeRate: BINANCE_USDM_REGULAR_USER_TAKER_FEE_RATE,
+    entryFeeRate: BINANCE_USDM_VIP0_BNB_DISCOUNT_TAKER_FEE_RATE,
+    exitFeeRate: BINANCE_USDM_VIP0_BNB_DISCOUNT_TAKER_FEE_RATE,
     entryM1Candle: first,
     exitM1Candle: last,
   });
