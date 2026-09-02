@@ -67,8 +67,59 @@ describe('calculateExecutionCosts', () => {
     expect(result.feeR).toBeCloseTo(0.022);
     expect(SPREAD_PROXY_M1_RANGE_FRACTION).toBe(0.1);
     expect(result.spreadR).toBeCloseTo(0.5 / 5);
-    expect(result.slippageR).toBeCloseTo(0.044);
-    expect(result.netR).toBeCloseTo(1.834);
+    expect(result.slippageR).toBe(0);
+    expect(result.netR).toBeCloseTo(1.878);
+  });
+
+  it('charges zero slippage on a TAKE_PROFIT exit because both legs are resting limit fills', () => {
+    const result = calculateExecutionCosts({
+      tradePlan: plan,
+      exitPrice: 120,
+      exitReason: 'TAKE_PROFIT',
+      entryM1Candle: candle(100, 100),
+      exitM1Candle: candle(120, 120),
+      adverseSlippageRate: 0.0002,
+    });
+
+    expect(result.slippageR).toBe(0);
+  });
+
+  it('charges slippage only on the STOP_LOSS exit leg notional, not the entry leg', () => {
+    const result = calculateExecutionCosts({
+      tradePlan: plan,
+      exitPrice: 90,
+      exitReason: 'STOP_LOSS',
+      entryM1Candle: candle(100, 100),
+      exitM1Candle: candle(90, 90),
+      adverseSlippageRate: 0.0002,
+    });
+
+    // exitNotionalUsd = 90 * 2 = 180; slippageUsd = 180 * 0.0002 = 0.036; riskUsd = 10 * 2 = 20
+    expect(result.slippageR).toBeCloseTo(0.036 / 20, 6);
+    // Old (wrong) formula would have added entryNotionalUsd (100 * 2 = 200) too:
+    // (180 + 200) * 0.0002 / 20 = 0.0038, nearly double the corrected 0.0018.
+    expect(result.slippageR).not.toBeCloseTo(0.0038, 4);
+  });
+
+  it('reduces total costR by exactly the removed entry-leg slippage on a STOP_LOSS exit', () => {
+    const slippageRate = 0.0002;
+    const result = calculateExecutionCosts({
+      tradePlan: plan,
+      exitPrice: 90,
+      exitReason: 'STOP_LOSS',
+      entryM1Candle: candle(100, 100),
+      exitM1Candle: candle(90, 90),
+      adverseSlippageRate: slippageRate,
+    });
+    const riskUsd = plan.riskPerUnit * plan.positionSize;
+    const entryNotionalUsd = plan.entryPrice * plan.positionSize;
+    const exitNotionalUsd = 90 * plan.positionSize;
+    const removedEntryLegSlippageR = (entryNotionalUsd * slippageRate) / riskUsd;
+    const oldRoundTripSlippageR = ((entryNotionalUsd + exitNotionalUsd) * slippageRate) / riskUsd;
+    const oldNetR = result.netR - result.slippageR + oldRoundTripSlippageR;
+
+    expect(result.slippageR).toBeCloseTo((exitNotionalUsd * slippageRate) / riskUsd);
+    expect(oldNetR - result.netR).toBeCloseTo(removedEntryLegSlippageR);
   });
 
   it('keeps a bearish loss negative before subtracting costs', () => {

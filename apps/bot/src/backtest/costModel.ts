@@ -75,7 +75,6 @@ export function calculateExecutionCosts(input: ExecutionCostInput): ExecutionCos
     direction * (input.exitPrice - input.tradePlan.entryPrice) * input.tradePlan.positionSize;
   const entryNotionalUsd = input.tradePlan.entryPrice * input.tradePlan.positionSize;
   const exitNotionalUsd = input.exitPrice * input.tradePlan.positionSize;
-  const roundTripNotionalUsd = entryNotionalUsd + exitNotionalUsd;
   const feeUsd = entryNotionalUsd * entryFeeRate + exitNotionalUsd * exitFeeRate;
 
   const spreadUsd =
@@ -83,7 +82,11 @@ export function calculateExecutionCosts(input: ExecutionCostInput): ExecutionCos
       candleRange(input.exitM1Candle, 'exitM1Candle')) *
     SPREAD_PROXY_M1_RANGE_FRACTION *
     input.tradePlan.positionSize;
-  const slippageUsd = roundTripNotionalUsd * slippageRate;
+  // Entry is always a resting limit order (fills at the quoted price, no slippage) and a
+  // TAKE_PROFIT exit is also a resting limit order — neither leg can slip. Only a STOP_LOSS
+  // exit is a market/taker order sent to flatten the position, so adverse slippage applies
+  // solely to that leg's notional, per the confirmed execution mechanics (TICKET-027).
+  const slippageUsd = input.exitReason === 'STOP_LOSS' ? exitNotionalUsd * slippageRate : 0;
 
   const grossR = grossPnlUsd / riskUsd;
   const feeR = feeUsd / riskUsd;
