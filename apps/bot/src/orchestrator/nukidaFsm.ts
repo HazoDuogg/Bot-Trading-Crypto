@@ -440,9 +440,9 @@ export function createNukidaFsm(config: FsmConfig): {
         events.push({ index, state: 'REJECTED', reasonCode: 'DOMINANCE_NEUTRAL' });
         return events;
       }
+      // TICKET-032: A-only is now the default; B stays available via enabledSetupFamilies.
       const enabledSetupFamilies =
-        config.enabledSetupFamilies ??
-        (['A_COMPRESSION_BREAKOUT', 'B_BREAK_PULLBACK_FAILURE'] as const);
+        config.enabledSetupFamilies ?? (['A_COMPRESSION_BREAKOUT'] as const);
       const setups = stage.setups.filter((signal) => enabledSetupFamilies.includes(signal.setupFamily));
       if (setups.length === 0) {
         events.push({ index, state: 'REJECTED', reasonCode: 'NO_SETUP' });

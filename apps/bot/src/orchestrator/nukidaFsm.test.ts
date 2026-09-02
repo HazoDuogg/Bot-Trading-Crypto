@@ -220,9 +220,11 @@ describe('createNukidaFsm', () => {
       ...Array.from({ length: 15 }, (_, index) => candle(index)),
       candle(15, 98, 115, 105),
     ];
-    const fsm = createNukidaFsm(
-      config(adapterAt({ 14: { ...cleanBull, setups: [setupA(), setupB()] } })),
-    );
+    const fsm = createNukidaFsm({
+      ...config(adapterAt({ 14: { ...cleanBull, setups: [setupA(), setupB()] } })),
+      // TICKET-032: default is now A-only; opt in to B explicitly for this test.
+      enabledSetupFamilies: ['A_COMPRESSION_BREAKOUT', 'B_BREAK_PULLBACK_FAILURE'],
+    });
     const ready = runThrough(candles, fsm).filter(
       (event) => event.state === 'TRADE_PLAN_READY' && event.index === 15,
     );
