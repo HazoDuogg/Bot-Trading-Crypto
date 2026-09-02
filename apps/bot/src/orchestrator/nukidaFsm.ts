@@ -80,6 +80,12 @@ export interface FsmConfig {
   // (structure/rejectionCandle.ts) and switches its SL to the confirmation candle's own
   // extreme. Default false preserves the exact current (source-backed) D1-D8 behavior.
   setupBConfirmationCandle?: boolean;
+  // TICKET-031: which setup families may produce a trade plan. Default (both) preserves the
+  // exact current behavior. A family left out here is simply dropped right after detection —
+  // no trade plan is ever built for it, and the other family's detection/entry/SL/TP is
+  // completely untouched. Does not affect the D1-D8/setupB fingerprint (that hashes the
+  // structural rule constants, not which families are switched on for a given run).
+  enabledSetupFamilies?: readonly SetupSignal['setupFamily'][];
   dataGate: (candles: readonly Candle[], index: number) => FsmDataGateResult;
   strategyAdapter?: NukidaStrategyAdapter;
 }
@@ -434,12 +440,16 @@ export function createNukidaFsm(config: FsmConfig): {
         events.push({ index, state: 'REJECTED', reasonCode: 'DOMINANCE_NEUTRAL' });
         return events;
       }
-      if (stage.setups.length === 0) {
+      const enabledSetupFamilies =
+        config.enabledSetupFamilies ??
+        (['A_COMPRESSION_BREAKOUT', 'B_BREAK_PULLBACK_FAILURE'] as const);
+      const setups = stage.setups.filter((signal) => enabledSetupFamilies.includes(signal.setupFamily));
+      if (setups.length === 0) {
         events.push({ index, state: 'REJECTED', reasonCode: 'NO_SETUP' });
         return events;
       }
       if (triggerAtr === null) throw new Error('Setup detected before ATR14 was available');
-      for (const signal of stage.setups) {
+      for (const signal of setups) {
         if (signal.triggerIndex !== index) {
           throw new Error('Strategy adapter must emit setups at their triggerIndex');
         }

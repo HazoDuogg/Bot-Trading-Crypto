@@ -233,6 +233,45 @@ describe('createNukidaFsm', () => {
     ]);
   });
 
+  it('TICKET-031: enabledSetupFamilies=[A] produces zero Setup B events or trade logs', () => {
+    const candles = [
+      ...Array.from({ length: 15 }, (_, index) => candle(index)),
+      candle(15, 98, 115, 105),
+    ];
+    const fsm = createNukidaFsm({
+      ...config(adapterAt({ 14: { ...cleanBull, setups: [setupA(), setupB()] } })),
+      enabledSetupFamilies: ['A_COMPRESSION_BREAKOUT'],
+    });
+    const events = runThrough(candles, fsm);
+
+    expect(events.some((event) => event.setupFamily === 'B_BREAK_PULLBACK_FAILURE')).toBe(false);
+    const ready = events.filter((event) => event.state === 'TRADE_PLAN_READY');
+    expect(ready.map((event) => event.setupFamily)).toEqual(['A_COMPRESSION_BREAKOUT']);
+  });
+
+  it('TICKET-031: turning off Setup B does not change Setup A\'s own trade plan at all', () => {
+    const candles = [
+      ...Array.from({ length: 15 }, (_, index) => candle(index)),
+      candle(15, 98, 115, 105),
+    ];
+    const withB = createNukidaFsm(
+      config(adapterAt({ 14: { ...cleanBull, setups: [setupA(), setupB()] } })),
+    );
+    const aOnly = createNukidaFsm({
+      ...config(adapterAt({ 14: { ...cleanBull, setups: [setupA(), setupB()] } })),
+      enabledSetupFamilies: ['A_COMPRESSION_BREAKOUT'],
+    });
+
+    const setupAPlanWithB = runThrough(candles, withB).find(
+      (event) => event.state === 'TRADE_PLAN_READY' && event.setupFamily === 'A_COMPRESSION_BREAKOUT',
+    );
+    const setupAPlanAlone = runThrough(candles, aOnly).find(
+      (event) => event.state === 'TRADE_PLAN_READY' && event.setupFamily === 'A_COMPRESSION_BREAKOUT',
+    );
+
+    expect(setupAPlanAlone).toEqual(setupAPlanWithB);
+  });
+
   it('emits a distinct minimum-stop rejection after entry fills', () => {
     const narrowSetup = setupA();
     narrowSetup.reasonTrace.d3!.low = 98;
