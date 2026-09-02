@@ -33,25 +33,6 @@ function setupA(triggerIndex = 14): SetupSignal {
   };
 }
 
-function setupB(triggerIndex = 14): SetupSignal {
-  return {
-    setupFamily: 'B_BREAK_PULLBACK_FAILURE',
-    direction: 'BEAR',
-    triggerIndex,
-    reasonTrace: {
-      quality: { label: 'CLEAN', efficiency: 0.2, sweepCount: 1 },
-      dominance: {
-        side: 'BEAR',
-        brokeLevel: 110,
-        counterTestFailed: true,
-        counterTestIndex: triggerIndex - 3,
-      },
-      d2: { brokeAt: triggerIndex - 6, level: 110 },
-      d7: { bodyRatio: 0.7, rangeAtrRatio: 1.2, isStrong: true },
-    },
-  };
-}
-
 const cleanBull = {
   quality: { label: 'CLEAN', efficiency: 0.2, sweepCount: 1 },
   dominance: {
@@ -213,65 +194,6 @@ describe('createNukidaFsm', () => {
       reasonCode: 'ENTRY_CANCELLED_OVER_EXTENDED',
       setupFamily: 'A_COMPRESSION_BREAKOUT',
     });
-  });
-
-  it('keeps simultaneous A and B pending setups independent', () => {
-    const candles = [
-      ...Array.from({ length: 15 }, (_, index) => candle(index)),
-      candle(15, 98, 115, 105),
-    ];
-    const fsm = createNukidaFsm({
-      ...config(adapterAt({ 14: { ...cleanBull, setups: [setupA(), setupB()] } })),
-      // TICKET-032: default is now A-only; opt in to B explicitly for this test.
-      enabledSetupFamilies: ['A_COMPRESSION_BREAKOUT', 'B_BREAK_PULLBACK_FAILURE'],
-    });
-    const ready = runThrough(candles, fsm).filter(
-      (event) => event.state === 'TRADE_PLAN_READY' && event.index === 15,
-    );
-
-    expect(ready.map((event) => event.setupFamily).sort()).toEqual([
-      'A_COMPRESSION_BREAKOUT',
-      'B_BREAK_PULLBACK_FAILURE',
-    ]);
-  });
-
-  it('TICKET-031: enabledSetupFamilies=[A] produces zero Setup B events or trade logs', () => {
-    const candles = [
-      ...Array.from({ length: 15 }, (_, index) => candle(index)),
-      candle(15, 98, 115, 105),
-    ];
-    const fsm = createNukidaFsm({
-      ...config(adapterAt({ 14: { ...cleanBull, setups: [setupA(), setupB()] } })),
-      enabledSetupFamilies: ['A_COMPRESSION_BREAKOUT'],
-    });
-    const events = runThrough(candles, fsm);
-
-    expect(events.some((event) => event.setupFamily === 'B_BREAK_PULLBACK_FAILURE')).toBe(false);
-    const ready = events.filter((event) => event.state === 'TRADE_PLAN_READY');
-    expect(ready.map((event) => event.setupFamily)).toEqual(['A_COMPRESSION_BREAKOUT']);
-  });
-
-  it('TICKET-031: turning off Setup B does not change Setup A\'s own trade plan at all', () => {
-    const candles = [
-      ...Array.from({ length: 15 }, (_, index) => candle(index)),
-      candle(15, 98, 115, 105),
-    ];
-    const withB = createNukidaFsm(
-      config(adapterAt({ 14: { ...cleanBull, setups: [setupA(), setupB()] } })),
-    );
-    const aOnly = createNukidaFsm({
-      ...config(adapterAt({ 14: { ...cleanBull, setups: [setupA(), setupB()] } })),
-      enabledSetupFamilies: ['A_COMPRESSION_BREAKOUT'],
-    });
-
-    const setupAPlanWithB = runThrough(candles, withB).find(
-      (event) => event.state === 'TRADE_PLAN_READY' && event.setupFamily === 'A_COMPRESSION_BREAKOUT',
-    );
-    const setupAPlanAlone = runThrough(candles, aOnly).find(
-      (event) => event.state === 'TRADE_PLAN_READY' && event.setupFamily === 'A_COMPRESSION_BREAKOUT',
-    );
-
-    expect(setupAPlanAlone).toEqual(setupAPlanWithB);
   });
 
   it('emits a distinct minimum-stop rejection after entry fills', () => {

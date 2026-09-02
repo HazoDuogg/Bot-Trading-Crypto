@@ -136,10 +136,7 @@ export function characterizePreSignal(input: {
   });
 }
 
-const SETUP_FAMILIES = [
-  'A_COMPRESSION_BREAKOUT',
-  'B_BREAK_PULLBACK_FAILURE',
-] as const satisfies readonly SetupSignal['setupFamily'][];
+const SETUP_FAMILIES = ['A_COMPRESSION_BREAKOUT'] as const satisfies readonly SetupSignal['setupFamily'][];
 const LOCAL_METRICS = [
   'directionalEfficiency',
   'signedAlignment',
@@ -247,7 +244,7 @@ async function readM15Coverage(csvPath: string): Promise<{ first: number; last: 
 }
 
 function detectSignals(candles: readonly Candle[]): SetupSignal[] {
-  const strategy = createDefaultStrategyAdapter({});
+  const strategy = createDefaultStrategyAdapter();
   const signals: SetupSignal[] = [];
   for (let index = 0; index < candles.length; index += 1) {
     if (!defaultDataGate(candles, index).accepted) continue;

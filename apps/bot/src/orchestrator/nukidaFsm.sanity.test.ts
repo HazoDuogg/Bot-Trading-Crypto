@@ -32,7 +32,6 @@ describe('BTCUSDT six-month FSM sanity diagnostic', () => {
       });
       const counts = {
         setupA: 0,
-        setupB: 0,
         ready: 0,
         expired: 0,
         cancelled: 0,
@@ -40,10 +39,8 @@ describe('BTCUSDT six-month FSM sanity diagnostic', () => {
       for (let index = 0; index < recent.length; index += 1) {
         const events = fsm.onClosedCandle(recent, index);
         for (const event of events) {
-          if (event.state === 'SETUP_DETECTED') {
-            if (event.setupFamily === 'A_COMPRESSION_BREAKOUT') counts.setupA += 1;
-            else counts.setupB += 1;
-          } else if (event.state === 'TRADE_PLAN_READY') counts.ready += 1;
+          if (event.state === 'SETUP_DETECTED') counts.setupA += 1;
+          else if (event.state === 'TRADE_PLAN_READY') counts.ready += 1;
           else if (event.state === 'ENTRY_EXPIRED') counts.expired += 1;
           else if (event.state === 'ENTRY_CANCELLED') counts.cancelled += 1;
         }
@@ -51,13 +48,13 @@ describe('BTCUSDT six-month FSM sanity diagnostic', () => {
       const terminal = counts.ready + counts.expired + counts.cancelled;
 
       console.info(
-        `BTCUSDT recent-6m FSM: setups A=${counts.setupA}, B=${counts.setupB}; ` +
+        `BTCUSDT recent-6m FSM: setups A=${counts.setupA}; ` +
           `TRADE_PLAN_READY=${counts.ready}, EXPIRED=${counts.expired}, ` +
           `CANCELLED=${counts.cancelled}, terminal=${terminal}; TICKET-007 FILLED reference=54`,
       );
-      expect(counts.setupA + counts.setupB).toBeGreaterThan(0);
+      expect(counts.setupA).toBeGreaterThan(0);
       expect(counts.ready).toBeGreaterThan(0);
-      expect(terminal).toBeLessThanOrEqual(counts.setupA + counts.setupB);
+      expect(terminal).toBeLessThanOrEqual(counts.setupA);
     },
     30_000,
   );

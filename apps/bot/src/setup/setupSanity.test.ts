@@ -17,7 +17,6 @@ import { detectCompression } from '../structure/compression.js';
 import { evaluateQuality } from '../structure/quality.js';
 import { detectSwingPoints } from '../structure/swingPoints.js';
 import { detectSetupA } from './setupDetectorA.js';
-import { detectSetupB } from './setupDetectorB.js';
 
 interface TimedDominance {
   confirmedAt: number;
@@ -62,7 +61,6 @@ function latestDominanceBefore(timeline: readonly TimedDominance[], index: numbe
 
 async function countSetups(symbol: string): Promise<{
   setupACount: number;
-  setupBCount: number;
   breakCount: number;
   baseCount: number;
   qualityCounts: { CLEAN: number; CHAOTIC: number; UNCLEAR: number };
@@ -105,21 +103,6 @@ async function countSetups(symbol: string): Promise<{
   }
   timeline.sort((left, right) => left.confirmedAt - right.confirmedAt);
 
-  let setupBCount = 0;
-  for (const breakout of breaks) {
-    const dominance = dominanceByBreak.get(breakout)!;
-    if (dominance.counterTestIndex === null) continue;
-    const triggerIndex = dominance.counterTestIndex + D6_RECLAIM_WINDOW;
-    const quality = qualityByEndIndex[triggerIndex];
-    const breakoutStrength = strengthForBreak(breakout);
-    if (
-      quality?.label === 'CLEAN' &&
-      breakoutStrength !== null &&
-      detectSetupB({ closedCandles: recent, quality, breakout, breakoutStrength }) !== null
-    ) {
-      setupBCount += 1;
-    }
-  }
   const bases = detectBaseZones(recent);
   let setupACount = 0;
   for (const baseZone of bases) {
@@ -162,7 +145,6 @@ async function countSetups(symbol: string): Promise<{
   expect(recent.length).toBeGreaterThan(0);
   return {
     setupACount,
-    setupBCount,
     breakCount: breaks.length,
     baseCount: bases.length,
     qualityCounts,
@@ -172,13 +154,13 @@ async function countSetups(symbol: string): Promise<{
 
 describe('five-coin setup sanity diagnostic', () => {
   it.each(['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'HYPEUSDT', 'DOGEUSDT'])(
-    'logs %s A/B counts after real D4 quality filtering',
+    'logs %s A counts after real D4 quality filtering',
     async (symbol) => {
       const counts = await countSetups(symbol);
       const cleanPercentage = (100 * counts.qualityCounts.CLEAN) / counts.qualityWindowCount;
       console.info(
         `${symbol} recent-6m setup candidates: ` +
-          `A=${counts.setupACount}, B=${counts.setupBCount}; ` +
+          `A=${counts.setupACount}; ` +
           `CLEAN windows=${counts.qualityCounts.CLEAN}/${counts.qualityWindowCount} ` +
           `(${cleanPercentage.toFixed(2)}%), CHAOTIC=${counts.qualityCounts.CHAOTIC}, ` +
           `UNCLEAR=${counts.qualityCounts.UNCLEAR}; ` +
@@ -191,7 +173,6 @@ describe('five-coin setup sanity diagnostic', () => {
           counts.qualityCounts.UNCLEAR,
       ).toBe(counts.qualityWindowCount);
       expect(counts.setupACount).toBeGreaterThanOrEqual(0);
-      expect(counts.setupBCount).toBeGreaterThanOrEqual(0);
     },
     30_000,
   );

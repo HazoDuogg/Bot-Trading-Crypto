@@ -48,7 +48,6 @@ function report(closedTrades: number, netR: number): BacktestReport {
     byCoin: {},
     bySetupFamily: {
       A_COMPRESSION_BREAKOUT: dual(closedTrades, netR),
-      B_BREAK_PULLBACK_FAILURE: dual(closedTrades, netR),
     },
     byDirection: {
       BULL: dual(closedTrades, netR),
@@ -73,7 +72,7 @@ describe('walk-forward window and comparison report', () => {
   it('compares all required slices and flags an OOS sample below 20 closed trades', () => {
     const comparison = buildComparisonReport(report(40, 8), report(12, -3));
 
-    expect(comparison.rows).toHaveLength(10);
+    expect(comparison.rows).toHaveLength(8);
     expect(
       comparison.rows.find(
         (row) => row.segment === 'OVERALL' && row.costMode === 'realisticCost',

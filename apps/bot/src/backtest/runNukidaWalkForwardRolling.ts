@@ -28,8 +28,9 @@ export const M15_MS = 15 * 60 * 1000;
 const M1_MS = 60 * 1000;
 export const ROLLING_WINDOW_DAYS = 180;
 export const LOW_SAMPLE_CLOSED_TRADES = 20;
+// TICKET-035: recomputed after Setup B's removal dropped a field from the manifest; D1-D8 unchanged.
 export const TICKET_020_STRATEGY_FINGERPRINT =
-  'e044760b3f5e94ced7b812409118973b337719733830c42435032ccf6a62548f';
+  '17bae87ebb6dc05007f0d09066fc51e85926b0093f67ecabce8a9148470d6de1';
 export const ROLLING_WARNING =
   'WARNING: rolling OOS measurement only. Outcome-based threshold tuning is prohibited.';
 
@@ -581,11 +582,6 @@ export function buildTimingComparison(
       segment: 'A_COMPRESSION_BREAKOUT',
       select: (report) => report.bySetupFamily.A_COMPRESSION_BREAKOUT,
     },
-    {
-      category: 'SETUP',
-      segment: 'B_BREAK_PULLBACK_FAILURE',
-      select: (report) => report.bySetupFamily.B_BREAK_PULLBACK_FAILURE,
-    },
     { category: 'DIRECTION', segment: 'BULL', select: (report) => report.byDirection.BULL },
     { category: 'DIRECTION', segment: 'BEAR', select: (report) => report.byDirection.BEAR },
   ];
@@ -683,7 +679,7 @@ function buildStability(windowResults: readonly RollingWindowResult[]): RollingS
     overall: summarizeDual(windowResults.map(({ report }) => report.overall)),
     bySetupFamily: segmentStability(
       (report, key) => report.bySetupFamily[key],
-      ['A_COMPRESSION_BREAKOUT', 'B_BREAK_PULLBACK_FAILURE'],
+      ['A_COMPRESSION_BREAKOUT'],
     ),
     byDirection: segmentStability(
       (report, key) => report.byDirection[key],

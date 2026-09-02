@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { SETUP_B_DEFAULT_SL_BUFFER_ATR_MULTIPLE } from '../risk/tradePlan.js';
 import {
   D3_BASE_V1_IMPULSE_RANGE_MULTIPLIER,
   D3_BASE_V1_MIN_CANDLES,
@@ -32,10 +31,6 @@ import {
   D4_QUALITY_V1_WINDOW,
 } from '../structure/quality.js';
 import { D1_SWING_V1_SIDE_CANDLES, D1_SWING_V1_WINDOW } from '../structure/swingPoints.js';
-import {
-  REJECTION_CANDLE_V1_MIN_CLOSE_BIAS,
-  REJECTION_CANDLE_V1_MIN_OPPOSITE_WICK_RATIO,
-} from '../structure/rejectionCandle.js';
 
 export interface StrategyConstantManifest {
   readonly D1: { readonly window: number; readonly sideCandles: number };
@@ -66,7 +61,6 @@ export interface StrategyConstantManifest {
   };
   readonly D7: { readonly minBodyRatio: number; readonly minRangeAtrRatio: number };
   readonly D8: { readonly maxDistanceAtrRatio: number };
-  readonly setupB: { readonly slBufferAtrMultiple: number };
 }
 
 export const STRATEGY_CONSTANTS: StrategyConstantManifest = Object.freeze({
@@ -104,9 +98,6 @@ export const STRATEGY_CONSTANTS: StrategyConstantManifest = Object.freeze({
     minRangeAtrRatio: D7_STRONG_BREAKOUT_V1_MIN_RANGE_ATR_RATIO,
   }),
   D8: Object.freeze({ maxDistanceAtrRatio: D8_NO_CHASE_V1_MAX_DISTANCE_ATR_RATIO }),
-  setupB: Object.freeze({
-    slBufferAtrMultiple: SETUP_B_DEFAULT_SL_BUFFER_ATR_MULTIPLE,
-  }),
 });
 
 function stableStringify(value: unknown): string {
@@ -127,36 +118,5 @@ export function computeStrategyFingerprint(constants = STRATEGY_CONSTANTS): {
   return {
     hash: createHash('sha256').update(stableStringify(constants)).digest('hex'),
     constants,
-  };
-}
-
-// Class D — EXPERIMENTAL (TICKET-028): deliberately NOT part of STRATEGY_CONSTANTS (D1-D8).
-// Turning on setupBConfirmationCandle must never be mistaken for a change to the source-backed
-// D1-D8 baseline, so it gets its own fingerprint, hashed separately from computeStrategyFingerprint().
-export interface ClassDConstantManifest {
-  readonly setupBConfirmationCandle: {
-    readonly minOppositeWickRatio: number;
-    readonly minCloseBias: number;
-  };
-}
-
-export const CLASS_D_CONSTANTS: ClassDConstantManifest = Object.freeze({
-  setupBConfirmationCandle: Object.freeze({
-    minOppositeWickRatio: REJECTION_CANDLE_V1_MIN_OPPOSITE_WICK_RATIO,
-    minCloseBias: REJECTION_CANDLE_V1_MIN_CLOSE_BIAS,
-  }),
-});
-
-export function computeSetupBConfirmationCandleFingerprint(classDConstants = CLASS_D_CONSTANTS): {
-  hash: string;
-  constants: StrategyConstantManifest;
-  classDConstants: ClassDConstantManifest;
-} {
-  return {
-    hash: createHash('sha256')
-      .update(stableStringify({ base: STRATEGY_CONSTANTS, classD: classDConstants }))
-      .digest('hex'),
-    constants: STRATEGY_CONSTANTS,
-    classDConstants,
   };
 }

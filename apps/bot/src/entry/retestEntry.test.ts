@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 import { createAtrTracker } from '../noTradeZone/atr.js';
 import type { Candle } from '../noTradeZone/types.js';
 import { detectSetupA, type SetupSignal } from '../setup/setupDetectorA.js';
-import { detectSetupB } from '../setup/setupDetectorB.js';
 import { detectBaseZones } from '../structure/baseZone.js';
 import {
   D2_BREAK_V1_ATR_PERIOD,
@@ -26,7 +25,7 @@ function candle(index: number, low: number, high: number, close: number): Candle
 
 function signal(direction: 'BULL' | 'BEAR', triggerIndex = 0, level = 100): SetupSignal {
   return {
-    setupFamily: 'B_BREAK_PULLBACK_FAILURE',
+    setupFamily: 'A_COMPRESSION_BREAKOUT',
     direction,
     triggerIndex,
     reasonTrace: {
@@ -110,17 +109,6 @@ function collectSetupSignals(candles: readonly Candle[]): SetupSignal[] {
   timeline.sort((left, right) => left.confirmedAt - right.confirmedAt);
 
   const signals: SetupSignal[] = [];
-  for (const breakout of breaks) {
-    const dominance = dominanceByBreak.get(breakout)!;
-    if (dominance.counterTestIndex === null) continue;
-    const quality = qualityByEndIndex[dominance.counterTestIndex + D6_RECLAIM_WINDOW];
-    if (quality?.label !== 'CLEAN') continue;
-    const breakoutStrength = strengthForBreak(breakout);
-    if (breakoutStrength === null) continue;
-    const setup = detectSetupB({ closedCandles: candles, quality, breakout, breakoutStrength });
-    if (setup !== null) signals.push(setup);
-  }
-
   for (const baseZone of detectBaseZones(candles)) {
     if (baseZone.end_index - baseZone.start_index + 1 < 8) continue;
     const compression = detectCompression(candles, baseZone.end_index);

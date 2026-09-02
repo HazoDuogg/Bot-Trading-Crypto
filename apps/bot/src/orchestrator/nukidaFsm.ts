@@ -6,14 +6,11 @@ import { createAtrTracker } from '../noTradeZone/atr.js';
 import type { Candle } from '../noTradeZone/types.js';
 import { createTradePlan, type TradePlan } from '../risk/tradePlan.js';
 import { detectSetupA, type SetupSignal } from '../setup/setupDetectorA.js';
-import { detectSetupB } from '../setup/setupDetectorB.js';
 import { detectBaseZones, type BaseZone } from '../structure/baseZone.js';
 import {
   D2_BREAK_V1_ATR_PERIOD,
   D6_COUNTER_TEST_WINDOW,
-  D6_DEFAULT_MINIMUM_TEST_OCCURRENCE,
   D6_RECLAIM_WINDOW,
-  D6_SECOND_TEST_COUNTER_WINDOW,
   evaluateDominance,
   isMeaningfulBreakAtClose,
   type BreakResult,
@@ -73,19 +70,7 @@ export interface FsmConfig {
   riskBudgetUsd: number;
   leverage: number;
   takeProfitRMultiple?: number;
-  setupBSlBufferAtrMultiple?: number;
-  minimumTestOccurrence?: number;
   availableCapitalUsd?: number;
-  // Class D — EXPERIMENTAL (TICKET-028): gates Setup B on the confirmation-candle filter
-  // (structure/rejectionCandle.ts) and switches its SL to the confirmation candle's own
-  // extreme. Default false preserves the exact current (source-backed) D1-D8 behavior.
-  setupBConfirmationCandle?: boolean;
-  // TICKET-031: which setup families may produce a trade plan. Default (both) preserves the
-  // exact current behavior. A family left out here is simply dropped right after detection —
-  // no trade plan is ever built for it, and the other family's detection/entry/SL/TP is
-  // completely untouched. Does not affect the D1-D8/setupB fingerprint (that hashes the
-  // structural rule constants, not which families are switched on for a given run).
-  enabledSetupFamilies?: readonly SetupSignal['setupFamily'][];
   dataGate: (candles: readonly Candle[], index: number) => FsmDataGateResult;
   strategyAdapter?: NukidaStrategyAdapter;
 }
@@ -125,16 +110,13 @@ function breakAtCurrent(
     : null;
 }
 
-export function createDefaultStrategyAdapter(
-  config: Pick<FsmConfig, 'minimumTestOccurrence' | 'setupBConfirmationCandle'>,
-): NukidaStrategyAdapter {
+export function createDefaultStrategyAdapter(): NukidaStrategyAdapter {
   const atrTracker = createAtrTracker(D2_BREAK_V1_ATR_PERIOD);
   let priorAtr: number | null = null;
   let activeHigh: ActiveSwing | null = null;
   let activeLow: ActiveSwing | null = null;
   let baseSearchFloor = 0;
   const pendingDominance: PendingDominance[] = [];
-  const pendingSetupBDominance: PendingDominance[] = [];
   const dominanceTimeline: TimedDominance[] = [];
   const trackedBases: TrackedBase[] = [];
 
@@ -151,15 +133,6 @@ export function createDefaultStrategyAdapter(
             breakout,
             breakoutStrength: evaluateBreakoutStrength(current, priorAtr),
           });
-          if (
-            (config.minimumTestOccurrence ?? D6_DEFAULT_MINIMUM_TEST_OCCURRENCE) >
-            D6_DEFAULT_MINIMUM_TEST_OCCURRENCE
-          ) {
-            pendingSetupBDominance.push({
-              breakout,
-              breakoutStrength: evaluateBreakoutStrength(current, priorAtr),
-            });
-          }
         }
       }
 
@@ -253,68 +226,25 @@ export function createDefaultStrategyAdapter(
         }
       }
 
-      const setupBConfirmed =
-        (config.minimumTestOccurrence ?? D6_DEFAULT_MINIMUM_TEST_OCCURRENCE) ===
-        D6_DEFAULT_MINIMUM_TEST_OCCURRENCE
-          ? newlyConfirmed
-          : [];
-      if (
-        (config.minimumTestOccurrence ?? D6_DEFAULT_MINIMUM_TEST_OCCURRENCE) >
-        D6_DEFAULT_MINIMUM_TEST_OCCURRENCE
-      ) {
-        for (let pendingIndex = pendingSetupBDominance.length - 1; pendingIndex >= 0; pendingIndex -= 1) {
-          const pending = pendingSetupBDominance[pendingIndex];
-          const evidence = evaluateDominance(candles, pending.breakout, {
-            minimumTestOccurrence: config.minimumTestOccurrence,
-          });
-          if (evidence.side !== 'NEUTRAL') {
-            setupBConfirmed.push({
-              breakout: pending.breakout,
-              breakoutStrength: pending.breakoutStrength,
-              evidence,
-            });
-            pendingSetupBDominance.splice(pendingIndex, 1);
-          } else if (
-            evidence.counterTestIndex === null &&
-            index >= pending.breakout.brokeAt + D6_SECOND_TEST_COUNTER_WINDOW
-          ) {
-            pendingSetupBDominance.splice(pendingIndex, 1);
-          }
-        }
-      }
-
       const quality = evaluateQuality(candles, index);
       const dominance = dominanceTimeline.at(-1)?.evidence ?? null;
       const setups: SetupSignal[] = [];
-      if (quality?.label === 'CLEAN') {
-        for (const confirmed of setupBConfirmed) {
-          const setup = detectSetupB({
-            closedCandles: candles,
+      if (quality?.label === 'CLEAN' && dominance !== null) {
+        for (const candidate of baseBreaks) {
+          const setup = detectSetupA({
+            baseZone: candidate.tracked.zone,
             quality,
-            breakout: confirmed.breakout,
-            breakoutStrength: confirmed.breakoutStrength,
-            minimumTestOccurrence: config.minimumTestOccurrence,
-            confirmationCandleEnabled: config.setupBConfirmationCandle,
+            compression: candidate.tracked.compression,
+            dominance,
+            breakout: candidate.breakout,
+            breakoutStrength: candidate.breakoutStrength,
           });
           if (setup !== null) setups.push(setup);
-        }
-        if (dominance !== null) {
-          for (const candidate of baseBreaks) {
-            const setup = detectSetupA({
-              baseZone: candidate.tracked.zone,
-              quality,
-              compression: candidate.tracked.compression,
-              dominance,
-              breakout: candidate.breakout,
-              breakoutStrength: candidate.breakoutStrength,
-            });
-            if (setup !== null) setups.push(setup);
-          }
         }
       }
 
       priorAtr = atrTracker.next(current);
-      const stageDominance = setupBConfirmed.at(-1)?.evidence ?? dominance;
+      const stageDominance = newlyConfirmed.at(-1)?.evidence ?? dominance;
       return { quality, dominance: stageDominance, setups };
     },
   };
@@ -331,7 +261,7 @@ function isIncompleteEntryWindow(error: unknown, index: number, signal: SetupSig
 export function createNukidaFsm(config: FsmConfig): {
   onClosedCandle(candles: readonly Candle[], index: number): FsmEvent[];
 } {
-  const strategy = config.strategyAdapter ?? createDefaultStrategyAdapter(config);
+  const strategy = config.strategyAdapter ?? createDefaultStrategyAdapter();
   const entryAtrTracker = createAtrTracker(D2_BREAK_V1_ATR_PERIOD);
   const state: FsmState = { pendingSetups: [] };
   const frozenAtrBySetup = new Map<SetupSignal, number>();
@@ -382,9 +312,7 @@ export function createNukidaFsm(config: FsmConfig): {
               leverage: config.leverage,
               frozenAtrAtTrigger,
               takeProfitRMultiple: config.takeProfitRMultiple,
-              setupBSlBufferAtrMultiple: config.setupBSlBufferAtrMultiple,
               availableCapitalUsd: config.availableCapitalUsd,
-              setupBConfirmationCandle: config.setupBConfirmationCandle,
             });
             events.push(
               tradePlan === null
@@ -440,16 +368,12 @@ export function createNukidaFsm(config: FsmConfig): {
         events.push({ index, state: 'REJECTED', reasonCode: 'DOMINANCE_NEUTRAL' });
         return events;
       }
-      // TICKET-032: A-only is now the default; B stays available via enabledSetupFamilies.
-      const enabledSetupFamilies =
-        config.enabledSetupFamilies ?? (['A_COMPRESSION_BREAKOUT'] as const);
-      const setups = stage.setups.filter((signal) => enabledSetupFamilies.includes(signal.setupFamily));
-      if (setups.length === 0) {
+      if (stage.setups.length === 0) {
         events.push({ index, state: 'REJECTED', reasonCode: 'NO_SETUP' });
         return events;
       }
       if (triggerAtr === null) throw new Error('Setup detected before ATR14 was available');
-      for (const signal of setups) {
+      for (const signal of stage.setups) {
         if (signal.triggerIndex !== index) {
           throw new Error('Strategy adapter must emit setups at their triggerIndex');
         }

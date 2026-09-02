@@ -403,11 +403,7 @@ export function buildBacktestReport(
       worstCaseNetR: ambiguous.reduce((sum, log) => sum + log.costs.worstCase.netR, 0),
     },
     byCoin: groupMetrics(logs, coins, (log) => log.coin),
-    bySetupFamily: groupMetrics(
-      logs,
-      ['A_COMPRESSION_BREAKOUT', 'B_BREAK_PULLBACK_FAILURE'],
-      (log) => log.setupFamily,
-    ),
+    bySetupFamily: groupMetrics(logs, ['A_COMPRESSION_BREAKOUT'], (log) => log.setupFamily),
     byDirection: groupMetrics(logs, ['BULL', 'BEAR'], (log) => log.tradePlan.direction),
     minimumStopDistanceBlocked: {
       total: Object.values(minimumStopBlockedByCoin).reduce((sum, count) => sum + count, 0),
@@ -449,8 +445,6 @@ export const DEFAULT_COIN_BACKTEST_CONFIG = Object.freeze({
 
 export interface BacktestStrategyVariantOptions {
   takeProfitRMultiple?: number;
-  setupBSlBufferAtrMultiple?: number;
-  minimumTestOccurrence?: number;
 }
 
 async function loadM15File(csvPath: string): Promise<Candle[]> {
@@ -521,8 +515,6 @@ export async function runFullNukidaBacktest(
           ...config,
           riskBudgetUsd: 100,
           takeProfitRMultiple: options.takeProfitRMultiple,
-          setupBSlBufferAtrMultiple: options.setupBSlBufferAtrMultiple,
-          minimumTestOccurrence: options.minimumTestOccurrence,
           dataGate: defaultDataGate,
         },
       });

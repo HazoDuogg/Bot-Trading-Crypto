@@ -84,7 +84,6 @@ describe('buildTimingComparison', () => {
       overall: dual(netR),
       bySetupFamily: {
         A_COMPRESSION_BREAKOUT: dual(netR + 1),
-        B_BREAK_PULLBACK_FAILURE: dual(netR - 1),
       },
       byDirection: { BULL: dual(netR + 2), BEAR: dual(netR - 2) },
     });
@@ -107,7 +106,7 @@ describe('buildTimingComparison', () => {
 
     const rows = buildTimingComparison(previous, current as never);
 
-    expect(rows).toHaveLength(10);
+    expect(rows).toHaveLength(9);
     expect(rows.find((row) => row.segment === 'A_COMPRESSION_BREAKOUT')).toMatchObject({
       before: { realisticCost: { netR: 1.9, profitFactor: 1.05 } },
       after: { realisticCost: { netR: 2.9, profitFactor: 1.05 } },

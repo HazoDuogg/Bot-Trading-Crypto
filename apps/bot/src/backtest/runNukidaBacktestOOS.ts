@@ -42,7 +42,7 @@ export interface ComparisonSnapshot {
 }
 
 export interface ComparisonRow {
-  segment: 'OVERALL' | 'A_COMPRESSION_BREAKOUT' | 'B_BREAK_PULLBACK_FAILURE' | 'BULL' | 'BEAR';
+  segment: 'OVERALL' | 'A_COMPRESSION_BREAKOUT' | 'BULL' | 'BEAR';
   costMode: 'zeroCost' | 'realisticCost';
   inSample: ComparisonSnapshot;
   outOfSample: ComparisonSnapshot;
@@ -101,11 +101,6 @@ export function buildComparisonReport(
       name: 'A_COMPRESSION_BREAKOUT',
       inSample: inSample.bySetupFamily.A_COMPRESSION_BREAKOUT,
       outOfSample: outOfSample.bySetupFamily.A_COMPRESSION_BREAKOUT,
-    },
-    {
-      name: 'B_BREAK_PULLBACK_FAILURE',
-      inSample: inSample.bySetupFamily.B_BREAK_PULLBACK_FAILURE,
-      outOfSample: outOfSample.bySetupFamily.B_BREAK_PULLBACK_FAILURE,
     },
     { name: 'BULL', inSample: inSample.byDirection.BULL, outOfSample: outOfSample.byDirection.BULL },
     { name: 'BEAR', inSample: inSample.byDirection.BEAR, outOfSample: outOfSample.byDirection.BEAR },
@@ -170,8 +165,6 @@ export async function runFullNukidaBacktestOOS(
           ...config,
           riskBudgetUsd: 100,
           takeProfitRMultiple: options.takeProfitRMultiple,
-          setupBSlBufferAtrMultiple: options.setupBSlBufferAtrMultiple,
-          minimumTestOccurrence: options.minimumTestOccurrence,
           dataGate: defaultDataGate,
         },
       });
