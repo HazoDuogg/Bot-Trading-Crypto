@@ -9,7 +9,7 @@ import {
   type TradeLogEntry,
 } from './runNukidaBacktest.js';
 
-function m15(index: number, low = 95, high = 105, close = 100): Candle {
+function m15(index: number, low = 97, high = 103, close = 100): Candle {
   return { openTime: index * 900_000, open: 100, high, low, close, volume: 100 };
 }
 

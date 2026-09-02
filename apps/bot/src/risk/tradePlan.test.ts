@@ -74,7 +74,7 @@ describe('createTradePlan', () => {
       lotSize: 0.1,
       riskBudgetUsd: 10.3,
       leverage: 20,
-      frozenAtrAtTrigger: 10,
+      frozenAtrAtTrigger: 4,
     });
 
     expect(result.stopLoss).toBe(95);
@@ -116,7 +116,7 @@ describe('createTradePlan', () => {
     ).toThrow('Trade plan requires a FILLED retest entry');
   });
 
-  it('returns null when the rounded stop distance is below 0.3 ATR', () => {
+  it('returns null when the rounded stop distance is below 1.2 ATR', () => {
     expect(
       createTradePlan({
         signal: setupA('BULL', 99.8, 105),
@@ -131,10 +131,10 @@ describe('createTradePlan', () => {
     ).toBeNull();
   });
 
-  it('creates a plan when the rounded stop distance is above 0.3 ATR', () => {
+  it('creates a plan when the rounded stop distance is above 1.2 ATR', () => {
     expect(
       createTradePlan({
-        signal: setupA('BULL', 98.9, 105),
+        signal: setupA('BULL', 97, 105),
         entry: filled(9, 100),
         closedCandles: [],
         tickSize: 0.1,
@@ -146,9 +146,9 @@ describe('createTradePlan', () => {
     ).not.toBeNull();
   });
 
-  it('accepts the exact 0.3 ATR boundary', () => {
+  it('accepts the exact 1.2 ATR boundary', () => {
     const result = createTradePlan({
-      signal: setupA('BULL', 99.5, 105),
+      signal: setupA('BULL', 97.7, 105),
       entry: filled(9, 100),
       closedCandles: [],
       tickSize: 0.1,
@@ -158,7 +158,7 @@ describe('createTradePlan', () => {
       frozenAtrAtTrigger: 2,
     });
 
-    expect(MIN_STOP_DISTANCE_ATR_MULTIPLE).toBe(0.3);
-    expect(result?.riskPerUnit).toBeCloseTo(0.6);
+    expect(MIN_STOP_DISTANCE_ATR_MULTIPLE).toBe(1.2);
+    expect(result?.riskPerUnit).toBeCloseTo(2.4);
   });
 });

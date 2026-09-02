@@ -8,7 +8,7 @@ import {
   type NukidaStrategyAdapter,
 } from './nukidaFsm.js';
 
-function candle(index: number, low = 95, high = 105, close = 100): Candle {
+function candle(index: number, low = 98, high = 102, close = 100): Candle {
   return { openTime: index * 900_000, open: 100, high, low, close, volume: 100 };
 }
 

@@ -1,3 +1,4 @@
+import { BINANCE_USDM_VIP0_BNB_DISCOUNT_MAKER_FEE_RATE } from '../backtest/costModel.js';
 import type { RetestEntryResult } from '../entry/retestEntry.js';
 import type { Candle } from '../noTradeZone/types.js';
 import type { SetupSignal } from '../setup/setupDetectorA.js';
@@ -15,8 +16,12 @@ export interface TradePlanInput {
   availableCapitalUsd?: number;
 }
 
-// Class C engineering safeguard; 0.3 ATR is a convention below typical one-candle range/ATR.
-export const MIN_STOP_DISTANCE_ATR_MULTIPLE = 0.3;
+// Class C engineering safeguard; spec V2 raises this from the prior 0.3 ATR convention.
+export const MIN_STOP_DISTANCE_ATR_MULTIPLE = 1.2;
+// Spec V2: SL distance must clear both a percent-of-price floor and the ATR floor above.
+export const MIN_STOP_DISTANCE_PRICE_PCT = 0.006;
+// Spec V2: TP distance must be at least this many multiples of the estimated round-trip cost.
+export const MIN_EXPECTANCY_TP_TO_COST_RATIO = 4;
 
 export interface TradePlan {
   direction: 'BULL' | 'BEAR';
@@ -105,12 +110,23 @@ export function createTradePlan(input: TradePlanInput): TradePlan | null {
   }
 
   const riskPerUnit = normalizeToStep(Math.abs(entryPrice - stopLoss), input.tickSize);
-  if (riskPerUnit < input.frozenAtrAtTrigger * MIN_STOP_DISTANCE_ATR_MULTIPLE) return null;
+  if (
+    riskPerUnit <
+    Math.max(entryPrice * MIN_STOP_DISTANCE_PRICE_PCT, input.frozenAtrAtTrigger * MIN_STOP_DISTANCE_ATR_MULTIPLE)
+  ) {
+    return null;
+  }
   const rawTakeProfit =
     input.signal.direction === 'BULL'
       ? entryPrice + takeProfitRMultiple * riskPerUnit
       : entryPrice - takeProfitRMultiple * riskPerUnit;
   const takeProfit = nearestToStep(rawTakeProfit, input.tickSize);
+
+  // Cost estimate assumes entry and TP-exit are both maker/limit fills (current architecture);
+  // spread/slippage are intentionally excluded here since no M1 data is available at this step.
+  const estimatedCostPerUnit = entryPrice * BINANCE_USDM_VIP0_BNB_DISCOUNT_MAKER_FEE_RATE * 2;
+  const tpDistance = takeProfitRMultiple * riskPerUnit;
+  if (tpDistance < estimatedCostPerUnit * MIN_EXPECTANCY_TP_TO_COST_RATIO) return null;
 
   const riskSizedPosition = floorToStep(input.riskBudgetUsd / riskPerUnit, input.lotSize);
   let positionSize = riskSizedPosition;
