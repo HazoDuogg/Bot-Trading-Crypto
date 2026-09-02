@@ -2,6 +2,7 @@ import type { Candle } from '../noTradeZone/types.js';
 
 // D7 — CONVENTION v1: distribution-selected strength thresholds, not outcome/PnL optimization.
 export const D7_STRONG_BREAKOUT_V1_MIN_BODY_RATIO = 0.55;
+export const D7_STRONG_BREAKOUT_V1_MAX_BODY_RATIO = 0.70;
 export const D7_STRONG_BREAKOUT_V1_MIN_RANGE_ATR_RATIO = 1.0;
 
 export interface BreakoutStrengthResult {
@@ -24,6 +25,7 @@ export function evaluateBreakoutStrength(
   return {
     isStrong:
       bodyRatio >= D7_STRONG_BREAKOUT_V1_MIN_BODY_RATIO &&
+      bodyRatio <= D7_STRONG_BREAKOUT_V1_MAX_BODY_RATIO &&
       rangeAtrRatio >= D7_STRONG_BREAKOUT_V1_MIN_RANGE_ATR_RATIO,
     bodyRatio,
     rangeAtrRatio,

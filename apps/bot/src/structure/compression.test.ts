@@ -70,7 +70,7 @@ describe('detectCompression', () => {
     );
 
     expect(detectCompression(tooShort.slice(0, -1))).toBeNull();
-    expect(D5_COMPRESSION_V1_MAX_BANDWIDTH_ATR_RATIO).toBe(1.95);
+    expect(D5_COMPRESSION_V1_MAX_BANDWIDTH_ATR_RATIO).toBe(1.5);
   });
 });
 
@@ -93,10 +93,10 @@ describe('BTCUSDT 3-year sanity diagnostic', () => {
 
     console.info(
       `BTCUSDT recent-6m D5 activation: ${(activationRate * 100).toFixed(2)}% ` +
-        `(${compressed}/${recentResults.length}); p25=${p25.toFixed(3)}; reference≈23-26%`,
+        `(${compressed}/${recentResults.length}); p25=${p25.toFixed(3)}; reference≈8-12% (TICKET-037: 1.95->1.5)`,
     );
     expect(recentResults.length).toBeGreaterThan(0);
-    expect(activationRate).toBeGreaterThanOrEqual(0.15);
-    expect(activationRate).toBeLessThanOrEqual(0.35);
+    expect(activationRate).toBeGreaterThanOrEqual(0.05);
+    expect(activationRate).toBeLessThanOrEqual(0.15);
   });
 });

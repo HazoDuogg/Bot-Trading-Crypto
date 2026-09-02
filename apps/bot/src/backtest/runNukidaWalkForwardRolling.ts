@@ -28,9 +28,9 @@ export const M15_MS = 15 * 60 * 1000;
 const M1_MS = 60 * 1000;
 export const ROLLING_WINDOW_DAYS = 180;
 export const LOW_SAMPLE_CLOSED_TRADES = 20;
-// TICKET-035: recomputed after Setup B's removal dropped a field from the manifest; D1-D8 unchanged.
+// TICKET-037: recomputed after D5/D7 threshold changes (compression, anti-FOMO body ratio).
 export const TICKET_020_STRATEGY_FINGERPRINT =
-  '17bae87ebb6dc05007f0d09066fc51e85926b0093f67ecabce8a9148470d6de1';
+  '12eacdcc766694ec6ebbdf3f5d52b8e8235c94cfba79feb66da8ff55558832c4';
 export const ROLLING_WARNING =
   'WARNING: rolling OOS measurement only. Outcome-based threshold tuning is prohibited.';
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Candle } from '../noTradeZone/types.js';
 import {
+  D7_STRONG_BREAKOUT_V1_MAX_BODY_RATIO,
   D7_STRONG_BREAKOUT_V1_MIN_BODY_RATIO,
   D7_STRONG_BREAKOUT_V1_MIN_RANGE_ATR_RATIO,
   evaluateBreakoutStrength,
@@ -12,8 +13,16 @@ function candle(open: number, high: number, low: number, close: number): Candle 
 
 describe('evaluateBreakoutStrength', () => {
   it('marks a breakout strong only when body and ATR range both clear their thresholds', () => {
-    expect(evaluateBreakoutStrength(candle(100, 110, 100, 108), 8)).toEqual({
+    expect(evaluateBreakoutStrength(candle(100, 110, 100, 106), 8)).toEqual({
       isStrong: true,
+      bodyRatio: 0.6,
+      rangeAtrRatio: 1.25,
+    });
+  });
+
+  it('rejects an over-extended candle whose body ratio exceeds the anti-FOMO ceiling', () => {
+    expect(evaluateBreakoutStrength(candle(100, 110, 100, 108), 8)).toEqual({
+      isStrong: false,
       bodyRatio: 0.8,
       rangeAtrRatio: 1.25,
     });
@@ -42,6 +51,7 @@ describe('evaluateBreakoutStrength', () => {
       rangeAtrRatio: 0,
     });
     expect(D7_STRONG_BREAKOUT_V1_MIN_BODY_RATIO).toBe(0.55);
+    expect(D7_STRONG_BREAKOUT_V1_MAX_BODY_RATIO).toBe(0.7);
     expect(D7_STRONG_BREAKOUT_V1_MIN_RANGE_ATR_RATIO).toBe(1);
   });
 });
