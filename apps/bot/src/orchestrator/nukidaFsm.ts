@@ -21,6 +21,7 @@ import {
   type BreakoutStrengthResult,
 } from '../structure/breakoutStrength.js';
 import { detectCompression, type CompressionResult } from '../structure/compression.js';
+import { evaluateEmaTrendH1 } from '../structure/emaTrendFilterH1.js';
 import { evaluateQuality, type QualityComposite } from '../structure/quality.js';
 import {
   D1_SWING_V1_SIDE_CANDLES,
@@ -71,6 +72,8 @@ export interface FsmConfig {
   leverage: number;
   takeProfitRMultiple?: number;
   availableCapitalUsd?: number;
+  // TICKET-038: BTC trend alignment gate. Omitted keeps current (ungated) behavior exactly.
+  btcM15Candles?: readonly Candle[];
   dataGate: (candles: readonly Candle[], index: number) => FsmDataGateResult;
   strategyAdapter?: NukidaStrategyAdapter;
 }
@@ -110,7 +113,36 @@ function breakAtCurrent(
     : null;
 }
 
-export function createDefaultStrategyAdapter(): NukidaStrategyAdapter {
+function findBtcIndexByOpenTime(btcCandles: readonly Candle[], openTime: number): number | null {
+  let left = 0;
+  let right = btcCandles.length - 1;
+  while (left <= right) {
+    const middle = Math.floor((left + right) / 2);
+    if (btcCandles[middle].openTime === openTime) return middle;
+    if (btcCandles[middle].openTime < openTime) left = middle + 1;
+    else right = middle - 1;
+  }
+  return null;
+}
+
+// TICKET-038: BTC trend alignment gate. Undefined btcM15Candles means no gate (fail-open to
+// current behavior); a missing timestamp match or unresolved EMA fails closed (no trade).
+function isBtcTrendAligned(
+  btcM15Candles: readonly Candle[] | undefined,
+  current: Candle,
+  setup: SetupSignal,
+): boolean {
+  if (btcM15Candles === undefined) return true;
+  const matchedIndex = findBtcIndexByOpenTime(btcM15Candles, current.openTime);
+  if (matchedIndex === null) return false;
+  const result = evaluateEmaTrendH1(btcM15Candles, matchedIndex);
+  if (result === null) return false;
+  return setup.direction === 'BULL' ? result.aboveEma : !result.aboveEma;
+}
+
+export function createDefaultStrategyAdapter(options?: {
+  btcM15Candles?: readonly Candle[];
+}): NukidaStrategyAdapter {
   const atrTracker = createAtrTracker(D2_BREAK_V1_ATR_PERIOD);
   let priorAtr: number | null = null;
   let activeHigh: ActiveSwing | null = null;
@@ -239,7 +271,9 @@ export function createDefaultStrategyAdapter(): NukidaStrategyAdapter {
             breakout: candidate.breakout,
             breakoutStrength: candidate.breakoutStrength,
           });
-          if (setup !== null) setups.push(setup);
+          if (setup !== null && isBtcTrendAligned(options?.btcM15Candles, current, setup)) {
+            setups.push(setup);
+          }
         }
       }
 
@@ -261,7 +295,8 @@ function isIncompleteEntryWindow(error: unknown, index: number, signal: SetupSig
 export function createNukidaFsm(config: FsmConfig): {
   onClosedCandle(candles: readonly Candle[], index: number): FsmEvent[];
 } {
-  const strategy = config.strategyAdapter ?? createDefaultStrategyAdapter();
+  const strategy =
+    config.strategyAdapter ?? createDefaultStrategyAdapter({ btcM15Candles: config.btcM15Candles });
   const entryAtrTracker = createAtrTracker(D2_BREAK_V1_ATR_PERIOD);
   const state: FsmState = { pendingSetups: [] };
   const frozenAtrBySetup = new Map<SetupSignal, number>();

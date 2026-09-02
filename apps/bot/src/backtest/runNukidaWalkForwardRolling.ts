@@ -748,6 +748,12 @@ export async function runNukidaWalkForwardRolling(
   for (const window of windows) {
     const fingerprint = computeStrategyFingerprint().hash;
     assertRollingFingerprint(TICKET_020_STRATEGY_FINGERPRINT, fingerprint, window.index);
+    // TICKET-038: same window slice as each coin below, loaded once and shared for the gate.
+    const btcM15CandlesForWindow = await loadM15CandlesBetween(
+      resolve(dataDirectory, 'BTCUSDT_15m_3y.csv'),
+      window.startInclusive,
+      window.endExclusive,
+    );
     const completedInputs: CoinBacktestInput[] = [];
     const coinResults: RollingCoinResult[] = [];
     for (const coin of selectedCoins) {
@@ -885,6 +891,7 @@ export async function runNukidaWalkForwardRolling(
             tickSize: tickSizeInference.tickSize,
             riskBudgetUsd: 100,
             dataGate: defaultDataGate,
+            btcM15Candles: btcM15CandlesForWindow,
             ...options.fsmConfigOverride,
           },
         });
