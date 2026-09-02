@@ -92,8 +92,13 @@ describe('runNukidaBacktest', () => {
       minutesSignalToFill: 16,
       MFE: 2.1,
       MAE: 0.4,
-      reached1_5ROrMore: false,
-      reached2ROrMore: false,
+      postStopHorizons: {
+        min15: { reached1_5R: false, reached2R: false, mfeR: 0 },
+        min30: { reached1_5R: false, reached2R: false, mfeR: 0 },
+        min60: { reached1_5R: false, reached2R: false, mfeR: 0 },
+        min120: { reached1_5R: false, reached2R: false, mfeR: 0 },
+        min240: { reached1_5R: false, reached2R: false, mfeR: 0 },
+      },
       reasonTrace: signal.reasonTrace,
       execution: { outcome: 'WIN', exitPrice: 114, m1CandlesConsumed: 1 },
     });
@@ -256,7 +261,7 @@ describe('runNukidaBacktest', () => {
     });
   });
 
-  it('reports whether price reaches 1.5R and 2R on later M1 candles after a stop loss', () => {
+  it('attributes a 1.5R recovery at minute 20 to min30 but not min15', () => {
     const signal = setupA();
     const candles = [
       ...Array.from({ length: 15 }, (_, index) => m15(index)),
@@ -272,8 +277,7 @@ describe('runNukidaBacktest', () => {
           m15Candles: candles,
           m1Candles: [
             m1(fillM1OpenTime, 88, 101),
-            m1(fillM1OpenTime + 60_000, 95, 113),
-            m1(fillM1OpenTime + 120_000, 98, 120),
+            m1(fillM1OpenTime + 20 * 60_000, 98, 114),
           ],
           fsmConfig: {
             tickSize: 1,
@@ -289,8 +293,52 @@ describe('runNukidaBacktest', () => {
 
     expect(result.tradeLogs[0]).toMatchObject({
       execution: { outcome: 'LOSS', exitTimestamp: fillM1OpenTime },
-      reached1_5ROrMore: true,
-      reached2ROrMore: true,
+      postStopHorizons: {
+        min15: { reached1_5R: false, reached2R: false, mfeR: 0 },
+        min30: { reached1_5R: true, reached2R: false, mfeR: 1.5 },
+        min60: { reached1_5R: true, reached2R: false, mfeR: 1.5 },
+        min120: { reached1_5R: true, reached2R: false, mfeR: 1.5 },
+        min240: { reached1_5R: true, reached2R: false, mfeR: 1.5 },
+      },
+    });
+  });
+
+  it('does not attribute a recovery after minute 300 to any bounded horizon', () => {
+    const signal = setupA();
+    const candles = [
+      ...Array.from({ length: 15 }, (_, index) => m15(index)),
+      m15(15, 100, 105, 103),
+      m15(16, 88, 101, 90),
+    ];
+    const fillM1OpenTime = candles[16].openTime + 60_000;
+
+    const result = runNukidaBacktest({
+      coins: [
+        {
+          coin: 'TESTUSDT',
+          m15Candles: candles,
+          m1Candles: [
+            m1(fillM1OpenTime, 88, 101),
+            m1(fillM1OpenTime + 300 * 60_000, 98, 120),
+          ],
+          fsmConfig: {
+            tickSize: 1,
+            lotSize: 1,
+            riskBudgetUsd: 20,
+            leverage: 10,
+            dataGate: () => ({ accepted: true }),
+            strategyAdapter: fixtureAdapter(signal),
+          },
+        },
+      ],
+    });
+
+    expect(result.tradeLogs[0].postStopHorizons).toEqual({
+      min15: { reached1_5R: false, reached2R: false, mfeR: 0 },
+      min30: { reached1_5R: false, reached2R: false, mfeR: 0 },
+      min60: { reached1_5R: false, reached2R: false, mfeR: 0 },
+      min120: { reached1_5R: false, reached2R: false, mfeR: 0 },
+      min240: { reached1_5R: false, reached2R: false, mfeR: 0 },
     });
   });
 
@@ -326,8 +374,13 @@ describe('runNukidaBacktest', () => {
       MFE: 0,
       MAE: 0,
       costR: 0,
-      reached1_5ROrMore: false,
-      reached2ROrMore: false,
+      postStopHorizons: {
+        min15: { reached1_5R: false, reached2R: false, mfeR: 0 },
+        min30: { reached1_5R: false, reached2R: false, mfeR: 0 },
+        min60: { reached1_5R: false, reached2R: false, mfeR: 0 },
+        min120: { reached1_5R: false, reached2R: false, mfeR: 0 },
+        min240: { reached1_5R: false, reached2R: false, mfeR: 0 },
+      },
     };
     const logs: TradeLogEntry[] = [
       {

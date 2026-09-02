@@ -5,8 +5,10 @@ import {
   M15_MS,
   assertRollingFingerprint,
   buildCoinWindowAssignments,
+  buildPostStopRecoveryReport,
   buildRollingWindows,
   buildTimingComparison,
+  attachTicket024TradeComparisons,
   runNukidaWalkForwardRolling,
 } from './runNukidaWalkForwardRolling.js';
 
@@ -121,6 +123,85 @@ describe('buildTimingComparison', () => {
       afterStatus: 'MISSING',
       before: null,
       after: null,
+    });
+  });
+});
+
+describe('TICKET-024 per-trade attribution baseline', () => {
+  it('matches the committed old trade and reports bounded recovery percentages', () => {
+    const snapshot = {
+      coin: 'BTCUSDT',
+      setupFamily: 'A_COMPRESSION_BREAKOUT',
+      firstTouchFillTimestamp: 1_000,
+      firstTouchFillPrice: 100,
+      minutesSignalToFill: 4,
+      costR: 0.2,
+      tradePlan: { direction: 'BULL', entryPrice: 100 },
+      execution: { outcome: 'LOSS', exitTimestamp: 2_000 },
+    };
+    const previous = {
+      windows: [
+        {
+          window: { index: 0 },
+          tradeLogs: [{ ...snapshot, reached1_5ROrMore: true, reached2ROrMore: true }],
+        },
+      ],
+    };
+    const current = [
+      {
+        window: { index: 0 },
+        tradeLogs: [
+          {
+            ...snapshot,
+            postStopHorizons: {
+              min15: { reached1_5R: false, reached2R: false, mfeR: 1 },
+              min30: { reached1_5R: true, reached2R: false, mfeR: 1.5 },
+              min60: { reached1_5R: true, reached2R: true, mfeR: 2 },
+              min120: { reached1_5R: true, reached2R: true, mfeR: 2.1 },
+              min240: { reached1_5R: true, reached2R: true, mfeR: 2.2 },
+            },
+          },
+        ],
+      },
+    ];
+
+    const annotated = attachTicket024TradeComparisons(previous, current as never);
+    const comparison = annotated[0].tradeLogs[0].ticket024Comparison;
+    const report = buildPostStopRecoveryReport(previous, annotated as never);
+
+    expect(comparison).toMatchObject({
+      outcomeChanged: false,
+      exitTimeDeltaMinutes: 0,
+      old: {
+        outcome: 'LOSS',
+        firstTouchFillTimestamp: 1_000,
+        costR: 0.2,
+        minutesSignalToFill: 4,
+      },
+      current: {
+        outcome: 'LOSS',
+        firstTouchFillTimestamp: 1_000,
+        costR: 0.2,
+        minutesSignalToFill: 4,
+      },
+    });
+    expect(report).toMatchObject({
+      lossTrades: 1,
+      baselineUnbounded: { reached1_5R: 1, reached2R: 1 },
+      horizons: {
+        min15: {
+          reached1_5R: { count: 0, percentOfBaselineReached: 0 },
+          reached2R: { count: 0, percentOfBaselineReached: 0 },
+        },
+        min30: {
+          reached1_5R: { count: 1, percentOfBaselineReached: 100 },
+          reached2R: { count: 0, percentOfBaselineReached: 0 },
+        },
+        min60: {
+          reached1_5R: { count: 1, percentOfBaselineReached: 100 },
+          reached2R: { count: 1, percentOfBaselineReached: 100 },
+        },
+      },
     });
   });
 });

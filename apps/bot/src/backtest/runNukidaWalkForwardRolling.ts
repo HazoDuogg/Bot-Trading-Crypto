@@ -19,6 +19,7 @@ import {
   type CoinBacktestInput,
   type DualCostMetrics,
   type PerformanceMetrics,
+  type PostStopHorizons,
   type TradeLogEntry,
 } from './runNukidaBacktest.js';
 
@@ -97,7 +98,7 @@ export interface RollingWindowResult {
   window: RollingWindow;
   fingerprint: string;
   coinResults: RollingCoinResult[];
-  tradeLogs: TradeLogEntry[];
+  tradeLogs: RollingTradeLogEntry[];
   report: BacktestReport;
   warnings: string[];
   engineErrorWarnings: string[];
@@ -143,6 +144,44 @@ export interface TimingComparisonRow {
   afterStatus?: string;
   before: Record<'zeroCost' | 'realisticCost', MetricSnapshot> | null;
   after: Record<'zeroCost' | 'realisticCost', MetricSnapshot> | null;
+  postStopRecovery: PostStopRecoveryReport | null;
+}
+
+type HorizonKey = keyof PostStopHorizons;
+
+export interface Ticket024TradeSnapshot {
+  outcome: TradeLogEntry['execution']['outcome'];
+  exitTimestamp: number | null;
+  firstTouchFillTimestamp: number;
+  costR: TradeLogEntry['costR'];
+  minutesSignalToFill: number;
+}
+
+export interface Ticket024TradeComparison {
+  outcomeChanged: boolean;
+  exitTimeDeltaMinutes: number;
+  old: Ticket024TradeSnapshot;
+  current: Ticket024TradeSnapshot;
+  oldUnbounded: { reached1_5R: boolean; reached2R: boolean };
+}
+
+export interface RollingTradeLogEntry extends TradeLogEntry {
+  ticket024Comparison?: Ticket024TradeComparison;
+}
+
+export interface RecoveryCount {
+  count: number;
+  percentOfBaselineReached: number | null;
+  percentOfLosses: number | null;
+}
+
+export interface PostStopRecoveryReport {
+  lossTrades: number;
+  baselineUnbounded: { reached1_5R: number; reached2R: number };
+  horizons: Record<
+    HorizonKey,
+    { reached1_5R: RecoveryCount; reached2R: RecoveryCount; averageMfeR: number }
+  >;
 }
 
 export function buildRollingWindows(
@@ -319,13 +358,212 @@ function buildTickInferenceComparison(
   });
 }
 
+const POST_STOP_HORIZON_KEYS = [
+  'min15',
+  'min30',
+  'min60',
+  'min120',
+  'min240',
+] as const satisfies readonly HorizonKey[];
+
+interface BaselineTradeLogEntry {
+  coin: string;
+  setupFamily: string;
+  firstTouchFillTimestamp: number;
+  costR: TradeLogEntry['costR'];
+  minutesSignalToFill: number;
+  tradePlan: { direction: string; entryPrice: number };
+  execution: {
+    outcome: TradeLogEntry['execution']['outcome'];
+    exitTimestamp?: number;
+  };
+  reached1_5ROrMore?: boolean;
+  reached2ROrMore?: boolean;
+  ticket024Comparison?: Ticket024TradeComparison;
+}
+
+interface BaselineWindow {
+  window: { index: number };
+  tradeLogs: BaselineTradeLogEntry[];
+}
+
+function baselineWindows(artifact: unknown): BaselineWindow[] {
+  return (
+    artifact as {
+      windows?: BaselineWindow[];
+    } | null
+  )?.windows ?? [];
+}
+
+function tradeMatchKey(trade: BaselineTradeLogEntry | RollingTradeLogEntry): string {
+  return [
+    trade.coin,
+    trade.setupFamily,
+    trade.tradePlan.direction,
+    trade.firstTouchFillTimestamp,
+    trade.tradePlan.entryPrice,
+  ].join('|');
+}
+
+function tradeSnapshot(
+  trade: BaselineTradeLogEntry | RollingTradeLogEntry,
+): Ticket024TradeSnapshot {
+  return {
+    outcome: trade.execution.outcome,
+    exitTimestamp: trade.execution.exitTimestamp ?? null,
+    firstTouchFillTimestamp: trade.firstTouchFillTimestamp,
+    costR: trade.costR,
+    minutesSignalToFill: trade.minutesSignalToFill,
+  };
+}
+
+function baselineUnbounded(trade: BaselineTradeLogEntry): Ticket024TradeComparison['oldUnbounded'] {
+  return (
+    trade.ticket024Comparison?.oldUnbounded ?? {
+      reached1_5R: trade.reached1_5ROrMore === true,
+      reached2R: trade.reached2ROrMore === true,
+    }
+  );
+}
+
+export function attachTicket024TradeComparisons(
+  previousArtifact: unknown,
+  currentWindows: readonly RollingWindowResult[],
+): RollingWindowResult[] {
+  const previousWindows = baselineWindows(previousArtifact);
+  return currentWindows.map((currentWindow) => {
+    const previousWindow = previousWindows.find(
+      (candidate) => candidate.window.index === currentWindow.window.index,
+    );
+    if (previousWindow === undefined) {
+      throw new Error(`TICKET-024 baseline is missing rolling window ${currentWindow.window.index}`);
+    }
+    const queues = new Map<string, BaselineTradeLogEntry[]>();
+    for (const trade of previousWindow.tradeLogs) {
+      const key = tradeMatchKey(trade);
+      queues.set(key, [...(queues.get(key) ?? []), trade]);
+    }
+    const tradeLogs = currentWindow.tradeLogs.map((trade) => {
+      const key = tradeMatchKey(trade);
+      const queue = queues.get(key);
+      const oldTrade = queue?.shift();
+      if (oldTrade === undefined) {
+        throw new Error(
+          `No TICKET-024 baseline trade match for window ${currentWindow.window.index}: ${key}`,
+        );
+      }
+      const oldSnapshot = oldTrade.ticket024Comparison?.old ?? tradeSnapshot(oldTrade);
+      const currentSnapshot = tradeSnapshot(trade);
+      let exitTimeDeltaMinutes = 0;
+      if (oldSnapshot.exitTimestamp !== null || currentSnapshot.exitTimestamp !== null) {
+        if (oldSnapshot.exitTimestamp === null || currentSnapshot.exitTimestamp === null) {
+          throw new Error(`Cannot calculate numeric exit delta for changed open/closed trade: ${key}`);
+        }
+        exitTimeDeltaMinutes =
+          (currentSnapshot.exitTimestamp - oldSnapshot.exitTimestamp) / (60 * 1000);
+      }
+      return {
+        ...trade,
+        ticket024Comparison: {
+          outcomeChanged: oldSnapshot.outcome !== currentSnapshot.outcome,
+          exitTimeDeltaMinutes,
+          old: oldSnapshot,
+          current: currentSnapshot,
+          oldUnbounded: baselineUnbounded(oldTrade),
+        },
+      } satisfies RollingTradeLogEntry;
+    });
+    const unmatched = [...queues.values()].reduce((sum, queue) => sum + queue.length, 0);
+    if (unmatched > 0) {
+      throw new Error(
+        `TICKET-024 baseline has ${unmatched} unmatched trade(s) in window ${currentWindow.window.index}`,
+      );
+    }
+    return { ...currentWindow, tradeLogs };
+  });
+}
+
+function recoveryAggregate(
+  oldTrades: readonly BaselineTradeLogEntry[],
+  currentTrades: readonly RollingTradeLogEntry[],
+): PostStopRecoveryReport {
+  const oldLosses = oldTrades.filter((trade) => {
+    const outcome = trade.ticket024Comparison?.old.outcome ?? trade.execution.outcome;
+    return outcome === 'LOSS';
+  });
+  const currentLosses = currentTrades.filter((trade) => trade.execution.outcome === 'LOSS');
+  const oldReached1_5R = oldLosses.filter((trade) => baselineUnbounded(trade).reached1_5R).length;
+  const oldReached2R = oldLosses.filter((trade) => baselineUnbounded(trade).reached2R).length;
+  const percentage = (count: number, denominator: number): number | null =>
+    denominator === 0 ? null : (count / denominator) * 100;
+  return {
+    lossTrades: currentLosses.length,
+    baselineUnbounded: { reached1_5R: oldReached1_5R, reached2R: oldReached2R },
+    horizons: Object.fromEntries(
+      POST_STOP_HORIZON_KEYS.map((key) => {
+        const reached1_5R = currentLosses.filter(
+          (trade) => trade.postStopHorizons[key].reached1_5R,
+        ).length;
+        const reached2R = currentLosses.filter(
+          (trade) => trade.postStopHorizons[key].reached2R,
+        ).length;
+        const averageMfeR =
+          currentLosses.length === 0
+            ? 0
+            : currentLosses.reduce(
+                (sum, trade) => sum + trade.postStopHorizons[key].mfeR,
+                0,
+              ) / currentLosses.length;
+        return [
+          key,
+          {
+            reached1_5R: {
+              count: reached1_5R,
+              percentOfBaselineReached: percentage(reached1_5R, oldReached1_5R),
+              percentOfLosses: percentage(reached1_5R, currentLosses.length),
+            },
+            reached2R: {
+              count: reached2R,
+              percentOfBaselineReached: percentage(reached2R, oldReached2R),
+              percentOfLosses: percentage(reached2R, currentLosses.length),
+            },
+            averageMfeR,
+          },
+        ];
+      }),
+    ) as PostStopRecoveryReport['horizons'],
+  };
+}
+
+export function buildPostStopRecoveryReport(
+  previousArtifact: unknown,
+  currentWindows: readonly RollingWindowResult[],
+): PostStopRecoveryReport {
+  return recoveryAggregate(
+    baselineWindows(previousArtifact).flatMap((window) => window.tradeLogs),
+    currentWindows.flatMap((window) => window.tradeLogs),
+  );
+}
+
+function selectTrades(
+  category: TimingComparisonRow['category'],
+  segment: string,
+  trades: readonly (BaselineTradeLogEntry | RollingTradeLogEntry)[],
+): Array<BaselineTradeLogEntry | RollingTradeLogEntry> {
+  if (category === 'OVERALL') return [...trades];
+  if (category === 'SETUP') return trades.filter((trade) => trade.setupFamily === segment);
+  if (category === 'DIRECTION') {
+    return trades.filter((trade) => trade.tradePlan.direction === segment);
+  }
+  return trades.filter((trade) => trade.coin === segment);
+}
+
 export function buildTimingComparison(
   previousArtifact: unknown,
   currentWindows: readonly RollingWindowResult[],
 ): TimingComparisonRow[] {
   const previous = previousArtifact as {
     windows?: RollingWindowResult[];
-    timingComparison?: TimingComparisonRow[];
   } | null;
   const configuredCoins = Object.keys(DEFAULT_COIN_BACKTEST_CONFIG);
   const reportSegments: Array<{
@@ -351,39 +589,40 @@ export function buildTimingComparison(
   return currentWindows.flatMap((current) => {
     const windowIndex = current.window.index;
     const previousWindow = previous?.windows?.find((item) => item.window.index === windowIndex);
-    const preserved = previous?.timingComparison?.filter((row) => row.windowIndex === windowIndex);
     const segmentRows = reportSegments.map(({ category, segment, select }) => {
-      const preservedRow = preserved?.find((row) => row.category === category && row.segment === segment);
       return {
         windowIndex,
         category,
         segment,
-        before:
-          preservedRow === undefined
-            ? previousWindow === undefined
-              ? null
-              : dualSnapshot(select(previousWindow.report))
-            : preservedRow.before,
+        before: previousWindow === undefined ? null : dualSnapshot(select(previousWindow.report)),
         after: dualSnapshot(select(current.report)),
+        postStopRecovery:
+          previousWindow === undefined
+            ? null
+            : recoveryAggregate(
+                selectTrades(category, segment, previousWindow.tradeLogs ?? []) as BaselineTradeLogEntry[],
+                selectTrades(category, segment, current.tradeLogs ?? []) as RollingTradeLogEntry[],
+              ),
       } satisfies TimingComparisonRow;
     });
     const coinRows = configuredCoins.map((coin) => {
       const oldCoin = previousWindow?.coinResults.find((item) => item.coin === coin);
       const newCoin = current.coinResults.find((item) => item.coin === coin);
-      const preservedRow = preserved?.find((row) => row.category === 'COIN' && row.segment === coin);
       return {
         windowIndex,
         category: 'COIN' as const,
         segment: coin,
-        beforeStatus: preservedRow?.beforeStatus ?? oldCoin?.status ?? 'MISSING',
+        beforeStatus: oldCoin?.status ?? 'MISSING',
         afterStatus: newCoin?.status ?? 'MISSING',
-        before:
-          preservedRow === undefined
-            ? oldCoin?.report === undefined
-              ? null
-              : dualSnapshot(oldCoin.report.overall)
-            : preservedRow.before,
+        before: oldCoin?.report === undefined ? null : dualSnapshot(oldCoin.report.overall),
         after: newCoin?.report === undefined ? null : dualSnapshot(newCoin.report.overall),
+        postStopRecovery:
+          previousWindow === undefined
+            ? null
+            : recoveryAggregate(
+                selectTrades('COIN', coin, previousWindow.tradeLogs ?? []) as BaselineTradeLogEntry[],
+                selectTrades('COIN', coin, current.tradeLogs ?? []) as RollingTradeLogEntry[],
+              ),
       } satisfies TimingComparisonRow;
     });
     return [...segmentRows, ...coinRows];
@@ -773,11 +1012,16 @@ async function main(): Promise<void> {
       `p95/max=${TICK_OUTLIER_EXCLUSION_MAX_COUNT}`,
   );
   const result = await runNukidaWalkForwardRolling(dataDirectory);
+  result.windows = attachTicket024TradeComparisons(previousArtifact, result.windows);
   const tickInferenceComparison = buildTickInferenceComparison(
     previousArtifact,
     result.windows,
   );
   const timingComparison = buildTimingComparison(previousArtifact, result.windows);
+  const postStopRecoveryReport = buildPostStopRecoveryReport(
+    previousArtifact,
+    result.windows,
+  );
   for (const windowResult of result.windows) {
     const { window } = windowResult;
     console.info(
@@ -855,6 +1099,7 @@ async function main(): Promise<void> {
         tickOutlierDiagnostic,
         tickInferenceComparison,
         timingComparison,
+        postStopRecoveryReport,
         windows: result.windows,
         stability: result.stability,
       },

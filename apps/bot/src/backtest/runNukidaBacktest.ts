@@ -53,13 +53,23 @@ export interface TradeLogEntry {
   MFE: number;
   MAE: number;
   costR: number | { bestCase: number; worstCase: number } | null;
-  reached1_5ROrMore: boolean;
-  reached2ROrMore: boolean;
+  postStopHorizons: PostStopHorizons;
   costs:
     | ExecutionCostResult
     | { bestCase: ExecutionCostResult; worstCase: ExecutionCostResult }
     | null;
 }
+
+export interface PostStopHorizonSnapshot {
+  reached1_5R: boolean;
+  reached2R: boolean;
+  mfeR: number;
+}
+
+export type PostStopHorizons = Record<
+  'min15' | 'min30' | 'min60' | 'min120' | 'min240',
+  PostStopHorizonSnapshot
+>;
 
 export interface PerformanceMetrics {
   closedTrades: number;
@@ -192,23 +202,56 @@ function costR(costs: TradeLogEntry['costs']): TradeLogEntry['costR'] {
   };
 }
 
-function reachedAfterStop(
+const POST_STOP_HORIZON_MINUTES = Object.freeze({
+  min15: 15,
+  min30: 30,
+  min60: 60,
+  min120: 120,
+  min240: 240,
+} as const);
+
+function postStopHorizons(
   tradePlan: TradePlan,
   execution: IntrabarExecutionResult,
   m1Candles: readonly Candle[],
-  rMultiple: number,
-): boolean {
-  if (execution.outcome !== 'LOSS' || execution.exitTimestamp === undefined) return false;
+): PostStopHorizons {
+  const result = Object.fromEntries(
+    Object.keys(POST_STOP_HORIZON_MINUTES).map((key) => [
+      key,
+      { reached1_5R: false, reached2R: false, mfeR: 0 },
+    ]),
+  ) as PostStopHorizons;
+  if (execution.outcome !== 'LOSS' || execution.exitTimestamp === undefined) return result;
   const exitTimestamp = execution.exitTimestamp;
-  const target =
-    tradePlan.direction === 'BULL'
-      ? tradePlan.entryPrice + rMultiple * tradePlan.riskPerUnit
-      : tradePlan.entryPrice - rMultiple * tradePlan.riskPerUnit;
-  return m1Candles.some(
-    (candle) =>
-      candle.openTime > exitTimestamp &&
-      (tradePlan.direction === 'BULL' ? candle.high >= target : candle.low <= target),
-  );
+  let candleIndex = firstM1After(m1Candles, exitTimestamp);
+  let highest = Number.NEGATIVE_INFINITY;
+  let lowest = Number.POSITIVE_INFINITY;
+  for (const [key, minutes] of Object.entries(POST_STOP_HORIZON_MINUTES) as Array<
+    [keyof PostStopHorizons, number]
+  >) {
+    const horizonEnd = exitTimestamp + minutes * 60 * 1000;
+    while (
+      candleIndex < m1Candles.length &&
+      m1Candles[candleIndex].openTime <= horizonEnd
+    ) {
+      const candle = m1Candles[candleIndex];
+      highest = Math.max(highest, candle.high);
+      lowest = Math.min(lowest, candle.low);
+      candleIndex += 1;
+    }
+    const mfeR =
+      highest === Number.NEGATIVE_INFINITY
+        ? 0
+        : tradePlan.direction === 'BULL'
+          ? Math.max(0, (highest - tradePlan.entryPrice) / tradePlan.riskPerUnit)
+          : Math.max(0, (tradePlan.entryPrice - lowest) / tradePlan.riskPerUnit);
+    result[key] = {
+      reached1_5R: mfeR >= 1.5,
+      reached2R: mfeR >= 2,
+      mfeR,
+    };
+  }
+  return result;
 }
 
 function runCoin(input: CoinBacktestInput): { logs: TradeLogEntry[]; minimumStopBlocked: number } {
@@ -266,8 +309,7 @@ function runCoin(input: CoinBacktestInput): { logs: TradeLogEntry[]; minimumStop
         execution,
         ...excursions,
         costR: costR(costs),
-        reached1_5ROrMore: reachedAfterStop(event.tradePlan, execution, postFillM1, 1.5),
-        reached2ROrMore: reachedAfterStop(event.tradePlan, execution, postFillM1, 2),
+        postStopHorizons: postStopHorizons(event.tradePlan, execution, postFillM1),
         costs,
       });
     }
