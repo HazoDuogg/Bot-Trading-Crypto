@@ -6,6 +6,7 @@ import {
   assertRollingFingerprint,
   buildCoinWindowAssignments,
   buildRollingWindows,
+  buildTimingComparison,
   runNukidaWalkForwardRolling,
 } from './runNukidaWalkForwardRolling.js';
 
@@ -54,6 +55,73 @@ describe('assertRollingFingerprint', () => {
       'Strategy fingerprint mismatch at window 3',
     );
     expect(() => assertRollingFingerprint('locked-hash', 'locked-hash', 3)).not.toThrow();
+  });
+});
+
+describe('buildTimingComparison', () => {
+  it('puts old and new netR/PF side by side for setup, direction, and every coin', () => {
+    const metric = (netR: number, profitFactor: number) => ({
+      closedTrades: 1,
+      grossR: netR,
+      feeR: 0,
+      spreadR: 0,
+      slippageR: 0,
+      netR,
+      profitFactor,
+      expectancyPerTrade: netR,
+      maxDrawdownR: 0,
+      winRate: 1,
+      ambiguousTrades: 0,
+      openTrades: 0,
+    });
+    const dual = (netR: number) => ({
+      zeroCost: metric(netR, 1.1),
+      realisticCost: metric(netR - 0.1, 1.05),
+    });
+    const report = (netR: number) => ({
+      overall: dual(netR),
+      bySetupFamily: {
+        A_COMPRESSION_BREAKOUT: dual(netR + 1),
+        B_BREAK_PULLBACK_FAILURE: dual(netR - 1),
+      },
+      byDirection: { BULL: dual(netR + 2), BEAR: dual(netR - 2) },
+    });
+    const previous = {
+      windows: [
+        {
+          window: { index: 0 },
+          report: report(1),
+          coinResults: [{ coin: 'BTCUSDT', status: 'COMPLETED', report: report(0.5) }],
+        },
+      ],
+    };
+    const current = [
+      {
+        window: { index: 0 },
+        report: report(2),
+        coinResults: [{ coin: 'BTCUSDT', status: 'COMPLETED', report: report(1.5) }],
+      },
+    ];
+
+    const rows = buildTimingComparison(previous, current as never);
+
+    expect(rows).toHaveLength(10);
+    expect(rows.find((row) => row.segment === 'A_COMPRESSION_BREAKOUT')).toMatchObject({
+      before: { realisticCost: { netR: 1.9, profitFactor: 1.05 } },
+      after: { realisticCost: { netR: 2.9, profitFactor: 1.05 } },
+    });
+    expect(rows.find((row) => row.segment === 'BTCUSDT')).toMatchObject({
+      beforeStatus: 'COMPLETED',
+      afterStatus: 'COMPLETED',
+      before: { realisticCost: { netR: 0.4 } },
+      after: { realisticCost: { netR: 1.4 } },
+    });
+    expect(rows.find((row) => row.segment === 'DOGEUSDT')).toMatchObject({
+      beforeStatus: 'MISSING',
+      afterStatus: 'MISSING',
+      before: null,
+      after: null,
+    });
   });
 });
 

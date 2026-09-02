@@ -59,13 +59,13 @@ describe('runNukidaBacktest', () => {
       m15(15, 100, 105, 103),
       m15(16, 98, 101, 100),
     ];
-    const firstPostFillM1 = candles[16].openTime + 900_000;
+    const firstTouchFillTimestamp = candles[16].openTime + 60_000;
     const result = runNukidaBacktest({
       coins: [
         {
           coin: 'TESTUSDT',
           m15Candles: candles,
-          m1Candles: [m1(firstPostFillM1, 95, 120)],
+          m1Candles: [m1(firstTouchFillTimestamp, 95, 120)],
           fsmConfig: {
             tickSize: 1,
             lotSize: 1,
@@ -84,9 +84,20 @@ describe('runNukidaBacktest', () => {
     expect(result.tradeLogs[0]).toMatchObject({
       coin: 'TESTUSDT',
       setupFamily: 'A_COMPRESSION_BREAKOUT',
+      signalTime: candles[15].openTime,
+      orderActiveTime: candles[15].openTime,
+      firstTouchFillTimestamp,
+      firstTouchFillPrice: 99,
+      entryFillTimestamp: firstTouchFillTimestamp - 1,
+      minutesSignalToFill: 16,
+      MFE: 2.1,
+      MAE: 0.4,
+      reached1_5ROrMore: false,
+      reached2ROrMore: false,
       reasonTrace: signal.reasonTrace,
       execution: { outcome: 'WIN', exitPrice: 114, m1CandlesConsumed: 1 },
     });
+    expect(result.tradeLogs[0].costR).toBeGreaterThan(0);
     expect(result.tradeLogs[0].costs).not.toBeNull();
     expect(result.report.overall.zeroCost).toMatchObject({
       closedTrades: 1,
@@ -145,13 +156,13 @@ describe('runNukidaBacktest', () => {
       m15(15, 100, 105, 103),
       m15(16, 98, 101, 100),
     ];
-    const firstPostFillM1 = candles[16].openTime + 900_000;
+    const firstTouchFillTimestamp = candles[16].openTime + 60_000;
     const result = runNukidaBacktest({
       coins: [
         {
           coin: 'TESTUSDT',
           m15Candles: candles,
-          m1Candles: [m1(firstPostFillM1, 88, 120)],
+          m1Candles: [m1(firstTouchFillTimestamp, 88, 120)],
           fsmConfig: {
             tickSize: 1,
             lotSize: 1,
@@ -168,6 +179,118 @@ describe('runNukidaBacktest', () => {
     expect(result.tradeLogs[0].costs).toMatchObject({
       bestCase: { feeR: 0.00436 },
       worstCase: { feeR: 0.00643 },
+    });
+  });
+
+  it('returns AMBIGUOUS when the first-touch M1 fill candle contains both SL and TP', () => {
+    const signal = setupA();
+    const candles = [
+      ...Array.from({ length: 15 }, (_, index) => m15(index)),
+      m15(15, 100, 105, 103),
+      m15(16, 88, 120, 100),
+    ];
+    const fillM1OpenTime = candles[16].openTime + 60_000;
+
+    const result = runNukidaBacktest({
+      coins: [
+        {
+          coin: 'TESTUSDT',
+          m15Candles: candles,
+          m1Candles: [m1(fillM1OpenTime, 88, 120)],
+          fsmConfig: {
+            tickSize: 1,
+            lotSize: 1,
+            riskBudgetUsd: 20,
+            leverage: 10,
+            dataGate: () => ({ accepted: true }),
+            strategyAdapter: fixtureAdapter(signal),
+          },
+        },
+      ],
+    });
+
+    expect(result.tradeLogs[0].execution).toMatchObject({
+      outcome: 'AMBIGUOUS',
+      exitTimestamp: fillM1OpenTime,
+      m1CandlesConsumed: 1,
+    });
+  });
+
+  it('observes an exit a few M1 candles after fill inside the same M15 candle', () => {
+    const signal = setupA();
+    const candles = [
+      ...Array.from({ length: 15 }, (_, index) => m15(index)),
+      m15(15, 100, 105, 103),
+      m15(16, 98, 120, 100),
+    ];
+    const fillM1OpenTime = candles[16].openTime + 60_000;
+
+    const result = runNukidaBacktest({
+      coins: [
+        {
+          coin: 'TESTUSDT',
+          m15Candles: candles,
+          m1Candles: [
+            m1(fillM1OpenTime, 98, 101),
+            m1(fillM1OpenTime + 60_000, 96, 105),
+            m1(fillM1OpenTime + 120_000, 95, 120),
+          ],
+          fsmConfig: {
+            tickSize: 1,
+            lotSize: 1,
+            riskBudgetUsd: 20,
+            leverage: 10,
+            takeProfitRMultiple: 1.5,
+            dataGate: () => ({ accepted: true }),
+            strategyAdapter: fixtureAdapter(signal),
+          },
+        },
+      ],
+    });
+
+    expect(result.tradeLogs[0].execution).toMatchObject({
+      outcome: 'WIN',
+      exitTimestamp: fillM1OpenTime + 120_000,
+      exitPrice: 114,
+      m1CandlesConsumed: 3,
+    });
+  });
+
+  it('reports whether price reaches 1.5R and 2R on later M1 candles after a stop loss', () => {
+    const signal = setupA();
+    const candles = [
+      ...Array.from({ length: 15 }, (_, index) => m15(index)),
+      m15(15, 100, 105, 103),
+      m15(16, 88, 101, 90),
+    ];
+    const fillM1OpenTime = candles[16].openTime + 60_000;
+
+    const result = runNukidaBacktest({
+      coins: [
+        {
+          coin: 'TESTUSDT',
+          m15Candles: candles,
+          m1Candles: [
+            m1(fillM1OpenTime, 88, 101),
+            m1(fillM1OpenTime + 60_000, 95, 113),
+            m1(fillM1OpenTime + 120_000, 98, 120),
+          ],
+          fsmConfig: {
+            tickSize: 1,
+            lotSize: 1,
+            riskBudgetUsd: 20,
+            leverage: 10,
+            dataGate: () => ({ accepted: true }),
+            strategyAdapter: fixtureAdapter(signal),
+          },
+        },
+      ],
+    });
+
+    expect(result.tradeLogs[0]).toMatchObject({
+      execution: { outcome: 'LOSS', exitTimestamp: fillM1OpenTime },
+      reached1_5ROrMore: true,
+      reached2ROrMore: true,
     });
   });
 
@@ -192,9 +315,19 @@ describe('runNukidaBacktest', () => {
     const base = {
       coin: 'TESTUSDT',
       setupFamily: signal.setupFamily,
+      signalTime: 0,
+      orderActiveTime: 0,
+      firstTouchFillTimestamp: 1,
+      firstTouchFillPrice: 100,
+      minutesSignalToFill: 1 / 60_000,
       entryFillTimestamp: 0,
       tradePlan: plan,
       reasonTrace: signal.reasonTrace,
+      MFE: 0,
+      MAE: 0,
+      costR: 0,
+      reached1_5ROrMore: false,
+      reached2ROrMore: false,
     };
     const logs: TradeLogEntry[] = [
       {

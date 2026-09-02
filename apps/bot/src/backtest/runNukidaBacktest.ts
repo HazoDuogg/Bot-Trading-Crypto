@@ -22,10 +22,10 @@ import {
   type ExecutionCostResult,
 } from './costModel.js';
 import {
-  mapM15ClosedCandleToExecutionStart,
   simulateIntrabarExecution,
   type IntrabarExecutionResult,
 } from './intrabarExecution.js';
+import { findCausalM1Fill } from './causalFill.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const IN_SAMPLE_WARNING =
@@ -41,10 +41,20 @@ export interface CoinBacktestInput {
 export interface TradeLogEntry {
   coin: string;
   setupFamily: SetupSignal['setupFamily'];
+  signalTime: number;
+  orderActiveTime: number;
+  firstTouchFillTimestamp: number;
+  firstTouchFillPrice: number;
+  minutesSignalToFill: number;
   entryFillTimestamp: number;
   tradePlan: TradePlan;
   reasonTrace: SetupSignal['reasonTrace'];
   execution: IntrabarExecutionResult;
+  MFE: number;
+  MAE: number;
+  costR: number | { bestCase: number; worstCase: number } | null;
+  reached1_5ROrMore: boolean;
+  reached2ROrMore: boolean;
   costs:
     | ExecutionCostResult
     | { bestCase: ExecutionCostResult; worstCase: ExecutionCostResult }
@@ -151,6 +161,56 @@ function executionCosts(
   });
 }
 
+function excursionR(
+  tradePlan: TradePlan,
+  candles: readonly Candle[],
+): { MFE: number; MAE: number } {
+  if (candles.length === 0) return { MFE: 0, MAE: 0 };
+  let highest = Number.NEGATIVE_INFINITY;
+  let lowest = Number.POSITIVE_INFINITY;
+  for (const candle of candles) {
+    highest = Math.max(highest, candle.high);
+    lowest = Math.min(lowest, candle.low);
+  }
+  return tradePlan.direction === 'BULL'
+    ? {
+        MFE: Math.max(0, (highest - tradePlan.entryPrice) / tradePlan.riskPerUnit),
+        MAE: Math.max(0, (tradePlan.entryPrice - lowest) / tradePlan.riskPerUnit),
+      }
+    : {
+        MFE: Math.max(0, (tradePlan.entryPrice - lowest) / tradePlan.riskPerUnit),
+        MAE: Math.max(0, (highest - tradePlan.entryPrice) / tradePlan.riskPerUnit),
+      };
+}
+
+function costR(costs: TradeLogEntry['costs']): TradeLogEntry['costR'] {
+  if (costs === null) return null;
+  if ('grossR' in costs) return costs.feeR + costs.spreadR + costs.slippageR;
+  return {
+    bestCase: costs.bestCase.feeR + costs.bestCase.spreadR + costs.bestCase.slippageR,
+    worstCase: costs.worstCase.feeR + costs.worstCase.spreadR + costs.worstCase.slippageR,
+  };
+}
+
+function reachedAfterStop(
+  tradePlan: TradePlan,
+  execution: IntrabarExecutionResult,
+  m1Candles: readonly Candle[],
+  rMultiple: number,
+): boolean {
+  if (execution.outcome !== 'LOSS' || execution.exitTimestamp === undefined) return false;
+  const exitTimestamp = execution.exitTimestamp;
+  const target =
+    tradePlan.direction === 'BULL'
+      ? tradePlan.entryPrice + rMultiple * tradePlan.riskPerUnit
+      : tradePlan.entryPrice - rMultiple * tradePlan.riskPerUnit;
+  return m1Candles.some(
+    (candle) =>
+      candle.openTime > exitTimestamp &&
+      (tradePlan.direction === 'BULL' ? candle.high >= target : candle.low <= target),
+  );
+}
+
 function runCoin(input: CoinBacktestInput): { logs: TradeLogEntry[]; minimumStopBlocked: number } {
   const fsm = createNukidaFsm(input.fsmConfig);
   const logs: TradeLogEntry[] = [];
@@ -169,9 +229,14 @@ function runCoin(input: CoinBacktestInput): { logs: TradeLogEntry[]; minimumStop
       if (event.tradePlan === undefined || event.setupSignal === undefined) {
         throw new Error('TRADE_PLAN_READY must include tradePlan and setupSignal');
       }
-      const entryFillTimestamp = mapM15ClosedCandleToExecutionStart(
-        input.m15Candles[event.index].openTime,
-      );
+      const causalFill = findCausalM1Fill({
+        m15Candles: input.m15Candles,
+        m1Candles: input.m1Candles,
+        triggerIndex: event.setupSignal.triggerIndex,
+        fillIndex: event.index,
+        limitPrice: event.tradePlan.entryPrice,
+      });
+      const entryFillTimestamp = causalFill.firstTouchFillTimestamp - 1;
       const m1Start = firstM1After(input.m1Candles, entryFillTimestamp);
       const postFillM1 = input.m1Candles.slice(m1Start);
       const execution = simulateIntrabarExecution({
@@ -183,14 +248,27 @@ function runCoin(input: CoinBacktestInput): { logs: TradeLogEntry[]; minimumStop
         execution.exitTimestamp === undefined
           ? undefined
           : input.m1Candles[firstM1After(input.m1Candles, execution.exitTimestamp - 1)];
+      const observedM1 = postFillM1.slice(
+        0,
+        execution.outcome === 'OPEN' ? undefined : execution.m1CandlesConsumed,
+      );
+      const excursions = excursionR(event.tradePlan, observedM1);
+      const costs = executionCosts(event.tradePlan, execution, postFillM1[0], exitM1);
       logs.push({
         coin: input.coin,
         setupFamily: event.setupSignal.setupFamily,
+        ...causalFill,
+        minutesSignalToFill:
+          (causalFill.firstTouchFillTimestamp - causalFill.signalTime) / (60 * 1000),
         entryFillTimestamp,
         tradePlan: event.tradePlan,
         reasonTrace: event.setupSignal.reasonTrace,
         execution,
-        costs: executionCosts(event.tradePlan, execution, postFillM1[0], exitM1),
+        ...excursions,
+        costR: costR(costs),
+        reached1_5ROrMore: reachedAfterStop(event.tradePlan, execution, postFillM1, 1.5),
+        reached2ROrMore: reachedAfterStop(event.tradePlan, execution, postFillM1, 2),
+        costs,
       });
     }
   }

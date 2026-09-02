@@ -97,6 +97,7 @@ export interface RollingWindowResult {
   window: RollingWindow;
   fingerprint: string;
   coinResults: RollingCoinResult[];
+  tradeLogs: TradeLogEntry[];
   report: BacktestReport;
   warnings: string[];
   engineErrorWarnings: string[];
@@ -132,6 +133,16 @@ export interface TickInferenceComparisonRow {
   windowIndex: number;
   before: TickInferenceComparisonSide;
   after: TickInferenceComparisonSide;
+}
+
+export interface TimingComparisonRow {
+  windowIndex: number;
+  category: 'OVERALL' | 'SETUP' | 'DIRECTION' | 'COIN';
+  segment: string;
+  beforeStatus?: string;
+  afterStatus?: string;
+  before: Record<'zeroCost' | 'realisticCost', MetricSnapshot> | null;
+  after: Record<'zeroCost' | 'realisticCost', MetricSnapshot> | null;
 }
 
 export function buildRollingWindows(
@@ -305,6 +316,77 @@ function buildTickInferenceComparison(
     return current === undefined || before === undefined
       ? []
       : [{ windowIndex, before, after: comparisonSide(current) }];
+  });
+}
+
+export function buildTimingComparison(
+  previousArtifact: unknown,
+  currentWindows: readonly RollingWindowResult[],
+): TimingComparisonRow[] {
+  const previous = previousArtifact as {
+    windows?: RollingWindowResult[];
+    timingComparison?: TimingComparisonRow[];
+  } | null;
+  const configuredCoins = Object.keys(DEFAULT_COIN_BACKTEST_CONFIG);
+  const reportSegments: Array<{
+    category: TimingComparisonRow['category'];
+    segment: string;
+    select: (report: BacktestReport) => DualCostMetrics;
+  }> = [
+    { category: 'OVERALL', segment: 'OVERALL', select: (report) => report.overall },
+    {
+      category: 'SETUP',
+      segment: 'A_COMPRESSION_BREAKOUT',
+      select: (report) => report.bySetupFamily.A_COMPRESSION_BREAKOUT,
+    },
+    {
+      category: 'SETUP',
+      segment: 'B_BREAK_PULLBACK_FAILURE',
+      select: (report) => report.bySetupFamily.B_BREAK_PULLBACK_FAILURE,
+    },
+    { category: 'DIRECTION', segment: 'BULL', select: (report) => report.byDirection.BULL },
+    { category: 'DIRECTION', segment: 'BEAR', select: (report) => report.byDirection.BEAR },
+  ];
+
+  return currentWindows.flatMap((current) => {
+    const windowIndex = current.window.index;
+    const previousWindow = previous?.windows?.find((item) => item.window.index === windowIndex);
+    const preserved = previous?.timingComparison?.filter((row) => row.windowIndex === windowIndex);
+    const segmentRows = reportSegments.map(({ category, segment, select }) => {
+      const preservedRow = preserved?.find((row) => row.category === category && row.segment === segment);
+      return {
+        windowIndex,
+        category,
+        segment,
+        before:
+          preservedRow === undefined
+            ? previousWindow === undefined
+              ? null
+              : dualSnapshot(select(previousWindow.report))
+            : preservedRow.before,
+        after: dualSnapshot(select(current.report)),
+      } satisfies TimingComparisonRow;
+    });
+    const coinRows = configuredCoins.map((coin) => {
+      const oldCoin = previousWindow?.coinResults.find((item) => item.coin === coin);
+      const newCoin = current.coinResults.find((item) => item.coin === coin);
+      const preservedRow = preserved?.find((row) => row.category === 'COIN' && row.segment === coin);
+      return {
+        windowIndex,
+        category: 'COIN' as const,
+        segment: coin,
+        beforeStatus: preservedRow?.beforeStatus ?? oldCoin?.status ?? 'MISSING',
+        afterStatus: newCoin?.status ?? 'MISSING',
+        before:
+          preservedRow === undefined
+            ? oldCoin?.report === undefined
+              ? null
+              : dualSnapshot(oldCoin.report.overall)
+            : preservedRow.before,
+        after: newCoin?.report === undefined ? null : dualSnapshot(newCoin.report.overall),
+      } satisfies TimingComparisonRow;
+    });
+    return [...segmentRows, ...coinRows];
   });
 }
 
@@ -657,6 +739,7 @@ export async function runNukidaWalkForwardRolling(
       window,
       fingerprint,
       coinResults,
+      tradeLogs,
       report,
       warnings,
       engineErrorWarnings,
@@ -694,6 +777,7 @@ async function main(): Promise<void> {
     previousArtifact,
     result.windows,
   );
+  const timingComparison = buildTimingComparison(previousArtifact, result.windows);
   for (const windowResult of result.windows) {
     const { window } = windowResult;
     console.info(
@@ -770,6 +854,7 @@ async function main(): Promise<void> {
         },
         tickOutlierDiagnostic,
         tickInferenceComparison,
+        timingComparison,
         windows: result.windows,
         stability: result.stability,
       },
