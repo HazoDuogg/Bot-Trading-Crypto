@@ -115,7 +115,9 @@ function breakAtCurrent(
     : null;
 }
 
-function createDefaultStrategyAdapter(config: Pick<FsmConfig, 'minimumTestOccurrence'>): NukidaStrategyAdapter {
+export function createDefaultStrategyAdapter(
+  config: Pick<FsmConfig, 'minimumTestOccurrence'>,
+): NukidaStrategyAdapter {
   const atrTracker = createAtrTracker(D2_BREAK_V1_ATR_PERIOD);
   let priorAtr: number | null = null;
   let activeHigh: ActiveSwing | null = null;
