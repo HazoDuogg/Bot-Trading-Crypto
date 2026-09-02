@@ -21,6 +21,17 @@ export interface SetupSignal {
     d5?: { bandwidthAtrRatio: number; isCompressed: boolean };
     d2: { brokeAt: number; level: number };
     d7: { bodyRatio: number; rangeAtrRatio: number; isStrong: true };
+    // Class D — EXPERIMENTAL (TICKET-028): present only when setupBConfirmationCandle is
+    // enabled and a Setup B signal passed the confirmation-candle filter. Its fingerprint is
+    // computed by computeSetupBConfirmationCandleFingerprint(), distinct from the D1-D8
+    // baseline fingerprint, so an experimental run can never be confused with the baseline.
+    classD?: {
+      provenance: 'CLASS_D_EXPERIMENTAL';
+      feature: 'setupBConfirmationCandle';
+      fingerprint: string;
+      oppositeWickRatio: number;
+      closeBias: number;
+    };
   };
 }
 

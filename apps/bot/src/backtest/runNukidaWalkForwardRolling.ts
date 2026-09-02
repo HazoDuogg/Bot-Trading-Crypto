@@ -108,6 +108,10 @@ export interface RollingWindowResult {
 export interface RollingRunOptions {
   coins?: readonly string[];
   windowIndexes?: readonly number[];
+  // Class D — EXPERIMENTAL (TICKET-028): merged into every coin's fsmConfig, letting a
+  // caller (e.g. a Setup B confirmation-candle comparison script) reuse this exact rolling
+  // infrastructure for an A/B run without touching the D1-D8 default coin configuration.
+  fsmConfigOverride?: Partial<CoinBacktestInput['fsmConfig']>;
 }
 
 export interface RollingStabilityReport {
@@ -885,6 +889,7 @@ export async function runNukidaWalkForwardRolling(
             tickSize: tickSizeInference.tickSize,
             riskBudgetUsd: 100,
             dataGate: defaultDataGate,
+            ...options.fsmConfigOverride,
           },
         });
         coinResults.push({

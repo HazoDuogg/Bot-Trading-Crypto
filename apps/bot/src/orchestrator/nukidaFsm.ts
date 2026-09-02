@@ -76,6 +76,10 @@ export interface FsmConfig {
   setupBSlBufferAtrMultiple?: number;
   minimumTestOccurrence?: number;
   availableCapitalUsd?: number;
+  // Class D — EXPERIMENTAL (TICKET-028): gates Setup B on the confirmation-candle filter
+  // (structure/rejectionCandle.ts) and switches its SL to the confirmation candle's own
+  // extreme. Default false preserves the exact current (source-backed) D1-D8 behavior.
+  setupBConfirmationCandle?: boolean;
   dataGate: (candles: readonly Candle[], index: number) => FsmDataGateResult;
   strategyAdapter?: NukidaStrategyAdapter;
 }
@@ -116,7 +120,7 @@ function breakAtCurrent(
 }
 
 export function createDefaultStrategyAdapter(
-  config: Pick<FsmConfig, 'minimumTestOccurrence'>,
+  config: Pick<FsmConfig, 'minimumTestOccurrence' | 'setupBConfirmationCandle'>,
 ): NukidaStrategyAdapter {
   const atrTracker = createAtrTracker(D2_BREAK_V1_ATR_PERIOD);
   let priorAtr: number | null = null;
@@ -284,6 +288,7 @@ export function createDefaultStrategyAdapter(
             breakout: confirmed.breakout,
             breakoutStrength: confirmed.breakoutStrength,
             minimumTestOccurrence: config.minimumTestOccurrence,
+            confirmationCandleEnabled: config.setupBConfirmationCandle,
           });
           if (setup !== null) setups.push(setup);
         }
@@ -373,6 +378,7 @@ export function createNukidaFsm(config: FsmConfig): {
               takeProfitRMultiple: config.takeProfitRMultiple,
               setupBSlBufferAtrMultiple: config.setupBSlBufferAtrMultiple,
               availableCapitalUsd: config.availableCapitalUsd,
+              setupBConfirmationCandle: config.setupBConfirmationCandle,
             });
             events.push(
               tradePlan === null

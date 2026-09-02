@@ -14,6 +14,10 @@ export interface TradePlanInput {
   takeProfitRMultiple?: number;
   setupBSlBufferAtrMultiple?: number;
   availableCapitalUsd?: number;
+  // Class D — EXPERIMENTAL (TICKET-028): when true, Setup B's structural SL is measured
+  // from the counter-test confirmation candle alone, not the whole counterTestIndex->entry
+  // segment. See setupBConfirmationCandleExtreme() below.
+  setupBConfirmationCandle?: boolean;
 }
 
 // Class C engineering safeguard; 0.3 ATR is a convention below typical one-candle range/ATR.
@@ -79,6 +83,22 @@ function setupBExtreme(input: TradePlanInput): number {
   return extreme;
 }
 
+// Class D — EXPERIMENTAL (TICKET-028): SL measured from the counter-test confirmation
+// candle's own high/low, rather than the extreme of the whole counterTestIndex->entry
+// segment (setupBExtreme above). Structurally consistent with the same candle
+// evaluateRejectionCandle() (structure/rejectionCandle.ts) gates the setup on.
+function setupBConfirmationCandleExtreme(input: TradePlanInput): number {
+  const counterTestIndex = input.signal.reasonTrace.dominance.counterTestIndex;
+  if (counterTestIndex === null || !Number.isSafeInteger(counterTestIndex) || counterTestIndex < 0) {
+    throw new Error('Setup B requires a valid counterTestIndex');
+  }
+  if (counterTestIndex >= input.closedCandles.length) {
+    throw new Error('Setup B confirmation candle must be within closedCandles');
+  }
+  const confirmationCandle = input.closedCandles[counterTestIndex];
+  return input.signal.direction === 'BULL' ? confirmationCandle.low : confirmationCandle.high;
+}
+
 // Structural-invalidation SL and baseline 2R TP are source-backed; alternate TP multiples are Class D experiments.
 export function createTradePlan(input: TradePlanInput): TradePlan | null {
   if (input.entry.status !== 'FILLED' || input.entry.fillPrice === undefined) {
@@ -115,7 +135,9 @@ export function createTradePlan(input: TradePlanInput): TradePlan | null {
     if (baseZone === undefined) throw new Error('Setup A requires D3 base-zone evidence');
     invalidationBoundary = input.signal.direction === 'BULL' ? baseZone.low : baseZone.high;
   } else {
-    invalidationBoundary = setupBExtreme(input);
+    invalidationBoundary = input.setupBConfirmationCandle === true
+      ? setupBConfirmationCandleExtreme(input)
+      : setupBExtreme(input);
   }
   if (!Number.isFinite(invalidationBoundary)) {
     throw new Error('Structural invalidation boundary must be finite');

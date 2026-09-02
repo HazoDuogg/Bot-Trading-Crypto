@@ -164,6 +164,39 @@ describe('createTradePlan', () => {
     );
   });
 
+  it.each([
+    ['BULL' as const, 101, 97, 109],
+    ['BEAR' as const, 99, 103, 91],
+  ])(
+    'Class D: setupBConfirmationCandle uses only the counter-test candle extreme, not the whole segment, for Setup B %s',
+    (direction, entryPrice, stopLoss, takeProfit) => {
+      const candles = [
+        candle(0, 1, 1_000),
+        candle(1, 1, 1_000),
+        candle(2, 98, 102), // counterTestIndex=2: BULL low=98, BEAR high=102
+        candle(3, 96, 104),
+        candle(4, 97, 103),
+        candle(5, 95, 105), // whole-segment extreme (95/105) must NOT be used when the flag is on
+        candle(6, 96, 104),
+      ];
+
+      const result = createTradePlan({
+        signal: setupB(direction),
+        entry: filled(6, entryPrice),
+        closedCandles: candles,
+        tickSize: 1,
+        lotSize: 1,
+        riskBudgetUsd: 40,
+        leverage: 10,
+        frozenAtrAtTrigger: 10,
+        setupBSlBufferAtrMultiple: 0,
+        setupBConfirmationCandle: true,
+      });
+
+      expect(result).toMatchObject({ direction, entryPrice, stopLoss, takeProfit, riskPerUnit: 4 });
+    },
+  );
+
   it('recalculates risk from the outward tick-rounded stop and rounds size down by lot', () => {
     const result = createTradePlan({
       signal: setupA('BULL', 95.13, 99),

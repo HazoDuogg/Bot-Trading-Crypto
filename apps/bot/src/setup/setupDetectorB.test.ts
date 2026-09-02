@@ -98,6 +98,31 @@ describe('detectSetupB', () => {
     expect(detectSetupB(input)).toBeNull();
   });
 
+  it('Class D: does not activate when confirmationCandleEnabled and the counter-test candle misses the threshold', () => {
+    const input = validInput();
+    input.confirmationCandleEnabled = true;
+    // Unmodified fixture candle 22 (100.6/100.7/99.9/100.2): oppositeWickRatio=0.375,
+    // closeBias=0.375 — both below the calibrated thresholds (~0.396 / ~0.593).
+    expect(detectSetupB(input)).toBeNull();
+  });
+
+  it('Class D: activates and stamps reasonTrace.classD when confirmationCandleEnabled and the counter-test candle clears the threshold', () => {
+    const input = validInput();
+    input.confirmationCandleEnabled = true;
+    // oppositeWickRatio = (100.5-99.5)/1.2 = 0.833, closeBias = (100.5-99.5)/1.2 = 0.833.
+    input.closedCandles[22] = candle(22, 100.6, 100.7, 99.5, 100.5);
+
+    const signal = detectSetupB(input);
+    expect(signal).not.toBeNull();
+    expect(signal!.reasonTrace.classD).toMatchObject({
+      provenance: 'CLASS_D_EXPERIMENTAL',
+      feature: 'setupBConfirmationCandle',
+    });
+    expect(signal!.reasonTrace.classD!.oppositeWickRatio).toBeCloseTo(1 / 1.2);
+    expect(signal!.reasonTrace.classD!.closeBias).toBeCloseTo(1 / 1.2);
+    expect(signal!.reasonTrace.classD!.fingerprint).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
   it('ignores every candle after the setup confirmation index', () => {
     const input = validInput();
     const confirmed = detectSetupB(input);

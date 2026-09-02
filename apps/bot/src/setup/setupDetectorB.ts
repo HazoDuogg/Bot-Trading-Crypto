@@ -1,4 +1,5 @@
 import type { Candle } from '../noTradeZone/types.js';
+import { computeSetupBConfirmationCandleFingerprint } from '../orchestrator/fingerprint.js';
 import {
   D6_RECLAIM_WINDOW,
   evaluateDominance,
@@ -6,6 +7,7 @@ import {
 } from '../structure/breakDetector.js';
 import type { BreakoutStrengthResult } from '../structure/breakoutStrength.js';
 import type { QualityComposite } from '../structure/quality.js';
+import { evaluateRejectionCandle } from '../structure/rejectionCandle.js';
 import type { SetupSignal } from './setupDetectorA.js';
 
 export interface SetupBInput {
@@ -14,6 +16,10 @@ export interface SetupBInput {
   breakout: BreakResult | null;
   breakoutStrength: BreakoutStrengthResult;
   minimumTestOccurrence?: number;
+  // Class D — EXPERIMENTAL (TICKET-028): additional single-test quality gate requiring the
+  // counter-test candle itself to show rejection (opposite wick + biased close) before
+  // Setup B may trigger. Default false preserves the exact current (source-backed) behavior.
+  confirmationCandleEnabled?: boolean;
 }
 
 // Setup family B — source-backed break/pullback/failure ordering; D1-D8 evidence values remain conventions.
@@ -30,6 +36,20 @@ export function detectSetupB(input: SetupBInput): SetupSignal | null {
     dominance.counterTestIndex === null
   ) {
     return null;
+  }
+
+  let classD: SetupSignal['reasonTrace']['classD'];
+  if (input.confirmationCandleEnabled === true) {
+    const confirmationCandle = input.closedCandles[dominance.counterTestIndex];
+    const rejection = evaluateRejectionCandle(confirmationCandle, expectedSide);
+    if (!rejection.passes) return null;
+    classD = {
+      provenance: 'CLASS_D_EXPERIMENTAL',
+      feature: 'setupBConfirmationCandle',
+      fingerprint: computeSetupBConfirmationCandleFingerprint().hash,
+      oppositeWickRatio: rejection.oppositeWickRatio,
+      closeBias: rejection.closeBias,
+    };
   }
 
   return {
@@ -50,6 +70,7 @@ export function detectSetupB(input: SetupBInput): SetupSignal | null {
         rangeAtrRatio: input.breakoutStrength.rangeAtrRatio,
         isStrong: true,
       },
+      ...(classD === undefined ? {} : { classD }),
     },
   };
 }

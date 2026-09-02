@@ -32,6 +32,10 @@ import {
   D4_QUALITY_V1_WINDOW,
 } from '../structure/quality.js';
 import { D1_SWING_V1_SIDE_CANDLES, D1_SWING_V1_WINDOW } from '../structure/swingPoints.js';
+import {
+  REJECTION_CANDLE_V1_MIN_CLOSE_BIAS,
+  REJECTION_CANDLE_V1_MIN_OPPOSITE_WICK_RATIO,
+} from '../structure/rejectionCandle.js';
 
 export interface StrategyConstantManifest {
   readonly D1: { readonly window: number; readonly sideCandles: number };
@@ -123,5 +127,36 @@ export function computeStrategyFingerprint(constants = STRATEGY_CONSTANTS): {
   return {
     hash: createHash('sha256').update(stableStringify(constants)).digest('hex'),
     constants,
+  };
+}
+
+// Class D — EXPERIMENTAL (TICKET-028): deliberately NOT part of STRATEGY_CONSTANTS (D1-D8).
+// Turning on setupBConfirmationCandle must never be mistaken for a change to the source-backed
+// D1-D8 baseline, so it gets its own fingerprint, hashed separately from computeStrategyFingerprint().
+export interface ClassDConstantManifest {
+  readonly setupBConfirmationCandle: {
+    readonly minOppositeWickRatio: number;
+    readonly minCloseBias: number;
+  };
+}
+
+export const CLASS_D_CONSTANTS: ClassDConstantManifest = Object.freeze({
+  setupBConfirmationCandle: Object.freeze({
+    minOppositeWickRatio: REJECTION_CANDLE_V1_MIN_OPPOSITE_WICK_RATIO,
+    minCloseBias: REJECTION_CANDLE_V1_MIN_CLOSE_BIAS,
+  }),
+});
+
+export function computeSetupBConfirmationCandleFingerprint(classDConstants = CLASS_D_CONSTANTS): {
+  hash: string;
+  constants: StrategyConstantManifest;
+  classDConstants: ClassDConstantManifest;
+} {
+  return {
+    hash: createHash('sha256')
+      .update(stableStringify({ base: STRATEGY_CONSTANTS, classD: classDConstants }))
+      .digest('hex'),
+    constants: STRATEGY_CONSTANTS,
+    classDConstants,
   };
 }
