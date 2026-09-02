@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createTickOutlierExclusionPlan,
   inferTickSize,
   validatePricesAlignToTickSize,
 } from './tickSizeInference.js';
@@ -26,5 +27,22 @@ describe('inferTickSize', () => {
     expect(() =>
       validatePricesAlignToTickSize([...normalPrices, abnormalPrice], inference.tickSize),
     ).toThrow('Price series contains 1 value(s) that do not align with inferred tickSize 0.01');
+  });
+
+  it('separates one observed-p95 outlier so the caller can exclude only that point', () => {
+    const prices = [20.12, 20.13, 20.14, 20.12345678];
+
+    expect(createTickOutlierExclusionPlan(prices, 0.01, 1)).toEqual({
+      outliers: [{ index: 3, price: 20.12345678 }],
+      outliersExcluded: 1,
+    });
+  });
+
+  it('throws a hard error when outliers exceed the diagnostic-derived threshold', () => {
+    const prices = [20.12, 20.13, 20.14, 20.12345678, 20.12987654];
+
+    expect(() => createTickOutlierExclusionPlan(prices, 0.01, 1)).toThrow(
+      'Tick-size outlier count 2 exceeds exclusion threshold 1',
+    );
   });
 });

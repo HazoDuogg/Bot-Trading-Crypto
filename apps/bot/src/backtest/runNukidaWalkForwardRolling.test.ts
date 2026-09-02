@@ -81,7 +81,7 @@ describe('SOLUSDT historical tick-size integration', () => {
   );
 
   it(
-    'classifies a genuine off-grid historical price as a hard engine error',
+    'excludes the single BTC window-1 outlier and keeps the coin completed',
     async () => {
       const dataDirectory = fileURLToPath(new URL('../../data/', import.meta.url));
       const result = await runNukidaWalkForwardRolling(dataDirectory, {
@@ -90,10 +90,30 @@ describe('SOLUSDT historical tick-size integration', () => {
       });
       const coin = result.windows[0].coinResults[0];
 
-      expect(coin.status).toBe('SKIPPED_ENGINE_ERROR');
+      expect(coin.status).toBe('COMPLETED');
       expect(coin.tickSizeInference?.tickSize).toBe(0.1);
-      expect(coin.engineErrorWarning).toContain('sample=55181.35');
-      expect(result.engineErrorWarnings).toEqual([coin.engineErrorWarning]);
+      expect(coin.outliersExcluded).toBe(1);
+      expect(coin.excludedTickOutliers).toMatchObject([{ close: 55181.35 }]);
+      expect(result.engineErrorWarnings).toEqual([]);
+    },
+    60_000,
+  );
+
+  it(
+    'excludes the single SOL window-4 outlier and keeps the coin completed',
+    async () => {
+      const dataDirectory = fileURLToPath(new URL('../../data/', import.meta.url));
+      const result = await runNukidaWalkForwardRolling(dataDirectory, {
+        coins: ['SOLUSDT'],
+        windowIndexes: [4],
+      });
+      const coin = result.windows[0].coinResults[0];
+
+      expect(coin.status).toBe('COMPLETED');
+      expect(coin.tickSizeInference?.tickSize).toBe(0.01);
+      expect(coin.outliersExcluded).toBe(1);
+      expect(coin.excludedTickOutliers).toMatchObject([{ close: 184.319 }]);
+      expect(result.engineErrorWarnings).toEqual([]);
     },
     60_000,
   );

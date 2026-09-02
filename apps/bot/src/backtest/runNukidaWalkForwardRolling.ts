@@ -4,8 +4,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { computeStrategyFingerprint } from '../orchestrator/fingerprint.js';
 import { loadM1CandlesBetween } from './controlTest.js';
 import {
+  TICK_OUTLIER_EXCLUSION_MAX_COUNT,
+  createTickOutlierExclusionPlan,
   inferTickSize,
-  validatePricesAlignToTickSize,
   type TickSizeInferenceResult,
 } from './tickSizeInference.js';
 import {
@@ -75,9 +76,18 @@ export interface RollingCoinResult {
   reason?: string;
   m15Candles: number;
   m1Candles: number;
+  m1CandlesUsed?: number;
   actual?: { startInclusive: number; endExclusive: number };
   configuredTickSize?: number;
   tickSizeInference?: TickSizeInferenceResult;
+  outliersExcluded?: number;
+  excludedTickOutliers?: Array<{
+    index: number;
+    timestamp: number;
+    timestampIso: string;
+    close: number;
+  }>;
+  tickOutlierWarning?: string;
   engineErrorWarning?: string;
   warnings: string[];
   report?: BacktestReport;
@@ -90,6 +100,7 @@ export interface RollingWindowResult {
   report: BacktestReport;
   warnings: string[];
   engineErrorWarnings: string[];
+  tickOutlierWarnings: string[];
 }
 
 export interface RollingRunOptions {
@@ -385,6 +396,7 @@ export async function runNukidaWalkForwardRolling(
   windows: RollingWindowResult[];
   stability: RollingStabilityReport;
   engineErrorWarnings: string[];
+  tickOutlierWarnings: string[];
 }> {
   const btcCoverage = await readM15Coverage(resolve(dataDirectory, 'BTCUSDT_15m_3y.csv'));
   const allWindows = buildRollingWindows(btcCoverage.firstOpenTime, btcCoverage.lastOpenTime);
@@ -520,16 +532,33 @@ export async function runNukidaWalkForwardRolling(
           });
           continue;
         }
-        const tickSizeInference = inferTickSize(m1Candles.map((candle) => candle.close));
+        const prices = m1Candles.map((candle) => candle.close);
+        const tickSizeInference = inferTickSize(prices);
         attemptedTickInference = tickSizeInference;
-        validatePricesAlignToTickSize(
-          m1Candles.map((candle) => candle.close),
+        const exclusionPlan = createTickOutlierExclusionPlan(
+          prices,
           tickSizeInference.tickSize,
         );
+        const excludedIndices = new Set(exclusionPlan.outliers.map((outlier) => outlier.index));
+        const usableM1Candles = m1Candles.filter((_, index) => !excludedIndices.has(index));
+        const excludedTickOutliers = exclusionPlan.outliers.map(({ index, price }) => ({
+          index,
+          timestamp: m1Candles[index].openTime,
+          timestampIso: new Date(m1Candles[index].openTime).toISOString(),
+          close: price,
+        }));
+        const tickOutlierWarning =
+          exclusionPlan.outliersExcluded === 0
+            ? undefined
+            : `DATA_OUTLIERS_EXCLUDED: window=${window.index} coin=${coin} ` +
+              `count=${exclusionPlan.outliersExcluded} threshold=${TICK_OUTLIER_EXCLUSION_MAX_COUNT} ` +
+              `points=${excludedTickOutliers
+                .map((outlier) => `${outlier.timestampIso}@${outlier.close}`)
+                .join(',')}`;
         completedInputs.push({
           coin,
           m15Candles,
-          m1Candles,
+          m1Candles: usableM1Candles,
           fsmConfig: {
             ...config,
             tickSize: tickSizeInference.tickSize,
@@ -545,12 +574,16 @@ export async function runNukidaWalkForwardRolling(
           status: 'COMPLETED',
           m15Candles: m15Candles.length,
           m1Candles: m1Candles.length,
+          m1CandlesUsed: usableM1Candles.length,
           actual: {
             startInclusive: m15Candles[0].openTime,
             endExclusive: m15Candles.at(-1)!.openTime + M15_MS,
           },
           configuredTickSize: config.tickSize,
           tickSizeInference,
+          outliersExcluded: exclusionPlan.outliersExcluded,
+          excludedTickOutliers,
+          tickOutlierWarning,
           warnings: [],
         });
       } catch (error) {
@@ -617,6 +650,9 @@ export async function runNukidaWalkForwardRolling(
     const engineErrorWarnings = coinResults.flatMap((coin) =>
       coin.engineErrorWarning === undefined ? [] : [coin.engineErrorWarning],
     );
+    const tickOutlierWarnings = coinResults.flatMap((coin) =>
+      coin.tickOutlierWarning === undefined ? [] : [coin.tickOutlierWarning],
+    );
     windowResults.push({
       window,
       fingerprint,
@@ -624,18 +660,23 @@ export async function runNukidaWalkForwardRolling(
       report,
       warnings,
       engineErrorWarnings,
+      tickOutlierWarnings,
     });
   }
   return {
     windows: windowResults,
     stability: buildStability(windowResults),
     engineErrorWarnings: windowResults.flatMap((window) => window.engineErrorWarnings),
+    tickOutlierWarnings: windowResults.flatMap((window) => window.tickOutlierWarnings),
   };
 }
 
 async function main(): Promise<void> {
   const dataDirectory = fileURLToPath(new URL('../../data/', import.meta.url));
   const outputPath = resolve(dataDirectory, 'nukida-backtest-walkforward-rolling.json');
+  const tickOutlierDiagnostic = JSON.parse(
+    await readFile(resolve(dataDirectory, 'nukida-tick-outlier-diagnostic.json'), 'utf8'),
+  ) as unknown;
   let previousArtifact: unknown = null;
   try {
     previousArtifact = JSON.parse(await readFile(outputPath, 'utf8')) as unknown;
@@ -644,6 +685,10 @@ async function main(): Promise<void> {
     if (code !== 'ENOENT') throw error;
   }
   console.info(ROLLING_WARNING);
+  console.info(
+    `TICK OUTLIER POLICY: diagnostic distribution=0:30,1:2; ` +
+      `p95/max=${TICK_OUTLIER_EXCLUSION_MAX_COUNT}`,
+  );
   const result = await runNukidaWalkForwardRolling(dataDirectory);
   const tickInferenceComparison = buildTickInferenceComparison(
     previousArtifact,
@@ -676,8 +721,10 @@ async function main(): Promise<void> {
       }
       console.info(
         `WINDOW ${window.index} ${coin.coin}: M15=${coin.m15Candles} M1=${coin.m1Candles} ` +
-          `tickSize=${coin.tickSizeInference?.tickSize} source=${coin.tickSizeInference?.source}`,
+          `M1_USED=${coin.m1CandlesUsed} tickSize=${coin.tickSizeInference?.tickSize} ` +
+          `source=${coin.tickSizeInference?.source} outliersExcluded=${coin.outliersExcluded}`,
       );
+      if (coin.tickOutlierWarning !== undefined) console.warn(coin.tickOutlierWarning);
       printDual(`WINDOW ${window.index} ${coin.coin}`, coin.report!.overall);
       for (const warning of coin.warnings) console.info(warning);
     }
@@ -714,6 +761,14 @@ async function main(): Promise<void> {
         windowDays: ROLLING_WINDOW_DAYS,
         lowSampleClosedTrades: LOW_SAMPLE_CLOSED_TRADES,
         engineErrorWarnings: result.engineErrorWarnings,
+        tickOutlierWarnings: result.tickOutlierWarnings,
+        tickOutlierPolicy: {
+          maximumExcludedPerCoinWindow: TICK_OUTLIER_EXCLUSION_MAX_COUNT,
+          selectionBasis: 'nearest-rank p95 and observed maximum across 32 scanned coin-windows',
+          originalDistribution: { 0: 30, 1: 2 },
+          diagnosticArtifact: 'nukida-tick-outlier-diagnostic.json',
+        },
+        tickOutlierDiagnostic,
         tickInferenceComparison,
         windows: result.windows,
         stability: result.stability,
