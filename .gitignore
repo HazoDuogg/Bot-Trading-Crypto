@@ -89,6 +89,8 @@ apps/bot/logs/
 
 .agents
 .claude
+.codegraph
+.codex
 skills-lock.json
 README.md
 

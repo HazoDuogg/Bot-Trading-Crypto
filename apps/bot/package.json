@@ -16,5 +16,8 @@
     "@types/node": "^26.1.1",
     "typescript": "^5.5.0",
     "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0"
   }
 }
