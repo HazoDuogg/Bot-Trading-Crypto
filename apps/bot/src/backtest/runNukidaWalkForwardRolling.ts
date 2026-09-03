@@ -155,7 +155,9 @@ export interface TimingComparisonRow {
 type HorizonKey = keyof PostStopHorizons;
 
 export interface Ticket024TradeSnapshot {
-  outcome: TradeLogEntry['execution']['outcome'];
+  // Frozen TICKET-024 baseline JSON predates TICKET-041's outcome vocabulary, so this can hold
+  // an old-format value ('WIN'/'LOSS'/'AMBIGUOUS'/'OPEN') as well as a current one.
+  outcome: string;
   exitTimestamp: number | null;
   firstTouchFillTimestamp: number;
   costR: TradeLogEntry['costR'];
@@ -379,7 +381,7 @@ interface BaselineTradeLogEntry {
   minutesSignalToFill: number;
   tradePlan: { direction: string; entryPrice: number };
   execution: {
-    outcome: TradeLogEntry['execution']['outcome'];
+    outcome: string;
     exitTimestamp?: number;
   };
   reached1_5ROrMore?: boolean;
@@ -410,12 +412,19 @@ function tradeMatchKey(trade: BaselineTradeLogEntry | RollingTradeLogEntry): str
   ].join('|');
 }
 
+// TICKET-041: current trades carry per-leg exitLegs; frozen TICKET-024 baseline JSON predates
+// that shape and still has a flat exitTimestamp.
+function tradeExitTimestamp(execution: BaselineTradeLogEntry['execution'] | TradeLogEntry['execution']): number | null {
+  if ('exitLegs' in execution) return execution.exitLegs.at(-1)?.exitTimestamp ?? null;
+  return execution.exitTimestamp ?? null;
+}
+
 function tradeSnapshot(
   trade: BaselineTradeLogEntry | RollingTradeLogEntry,
 ): Ticket024TradeSnapshot {
   return {
     outcome: trade.execution.outcome,
-    exitTimestamp: trade.execution.exitTimestamp ?? null,
+    exitTimestamp: tradeExitTimestamp(trade.execution),
     firstTouchFillTimestamp: trade.firstTouchFillTimestamp,
     costR: trade.costR,
     minutesSignalToFill: trade.minutesSignalToFill,
@@ -488,6 +497,10 @@ export function attachTicket024TradeComparisons(
   });
 }
 
+// TICKET-041: the live engine no longer has a single 'LOSS' outcome; a stop-type terminal
+// outcome is its equivalent (see the same set in runNukidaBacktest.ts's postStopHorizons).
+const STOP_OUTCOMES = new Set(['INITIAL_STOP', 'BREAKEVEN_STOP', 'TRAILING_STOP']);
+
 function recoveryAggregate(
   oldTrades: readonly BaselineTradeLogEntry[],
   currentTrades: readonly RollingTradeLogEntry[],
@@ -496,7 +509,7 @@ function recoveryAggregate(
     const outcome = trade.ticket024Comparison?.old.outcome ?? trade.execution.outcome;
     return outcome === 'LOSS';
   });
-  const currentLosses = currentTrades.filter((trade) => trade.execution.outcome === 'LOSS');
+  const currentLosses = currentTrades.filter((trade) => STOP_OUTCOMES.has(trade.execution.outcome));
   const oldReached1_5R = oldLosses.filter((trade) => baselineUnbounded(trade).reached1_5R).length;
   const oldReached2R = oldLosses.filter((trade) => baselineUnbounded(trade).reached2R).length;
   const percentage = (count: number, denominator: number): number | null =>

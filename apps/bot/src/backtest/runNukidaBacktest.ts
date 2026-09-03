@@ -21,11 +21,11 @@ import {
   SPREAD_PROXY_M1_RANGE_FRACTION,
   type ExecutionCostResult,
 } from './costModel.js';
+import { M15_CANDLE_DURATION_MS } from './intrabarExecution.js';
 import {
-  M15_CANDLE_DURATION_MS,
-  simulateIntrabarExecution,
-  type IntrabarExecutionResult,
-} from './intrabarExecution.js';
+  simulatePositionManagementV2,
+  type PositionManagementV2Result,
+} from '../risk/positionManagementV2.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const IN_SAMPLE_WARNING =
@@ -49,15 +49,14 @@ export interface TradeLogEntry {
   entryFillTimestamp: number;
   tradePlan: TradePlan;
   reasonTrace: SetupSignal['reasonTrace'];
-  execution: IntrabarExecutionResult;
+  execution: PositionManagementV2Result;
   MFE: number;
   MAE: number;
-  costR: number | { bestCase: number; worstCase: number } | null;
+  costR: number | null;
   postStopHorizons: PostStopHorizons;
-  costs:
-    | ExecutionCostResult
-    | { bestCase: ExecutionCostResult; worstCase: ExecutionCostResult }
-    | null;
+  costs: ExecutionCostResult | null;
+  // Set when any exit leg was forced to the loss side by a same-candle SL/TP collision.
+  reasonCode?: string;
 }
 
 export interface PostStopHorizonSnapshot {
@@ -95,13 +94,6 @@ export interface BacktestReport {
   note: string;
   baselineVariant: 'RETEST_LIMIT_ONLY';
   overall: DualCostMetrics;
-  ambiguousScenarios: {
-    count: number;
-    bestCaseGrossR: number;
-    bestCaseNetR: number;
-    worstCaseGrossR: number;
-    worstCaseNetR: number;
-  };
   byCoin: Record<string, DualCostMetrics>;
   bySetupFamily: Record<string, DualCostMetrics>;
   byDirection: Record<string, DualCostMetrics>;
@@ -134,41 +126,38 @@ function firstM1After(candles: readonly Candle[], timestamp: number): number {
   return left;
 }
 
+// Each leg is costed against calculateExecutionCosts's own (size-invariant) R-ratios, then
+// weighted by leg.fraction before summing — the ratios don't already carry that weighting.
 function executionCosts(
   tradePlan: TradePlan,
-  execution: IntrabarExecutionResult,
+  execution: PositionManagementV2Result,
+  m1Candles: readonly Candle[],
   entryCandle: Candle | undefined,
-  exitCandle: Candle | undefined,
 ): TradeLogEntry['costs'] {
-  if (execution.outcome === 'OPEN') return null;
-  if (entryCandle === undefined || exitCandle === undefined) {
-    throw new Error('Closed execution is missing its M1 entry/exit cost proxy candle');
+  if (execution.outcome === 'OPEN_DATA_END') return null;
+  if (entryCandle === undefined) {
+    throw new Error('Closed execution is missing its M1 entry cost proxy candle');
   }
-  if (execution.outcome === 'AMBIGUOUS') {
-    return {
-      bestCase: calculateExecutionCosts({
-        tradePlan,
-        exitPrice: execution.bestCase!.exitPrice,
-        exitReason: 'TAKE_PROFIT',
-        entryM1Candle: entryCandle,
-        exitM1Candle: exitCandle,
-      }),
-      worstCase: calculateExecutionCosts({
-        tradePlan,
-        exitPrice: execution.worstCase!.exitPrice,
-        exitReason: 'STOP_LOSS',
-        entryM1Candle: entryCandle,
-        exitM1Candle: exitCandle,
-      }),
-    };
+  const totals: ExecutionCostResult = { grossR: 0, feeR: 0, spreadR: 0, slippageR: 0, netR: 0 };
+  for (const leg of execution.exitLegs) {
+    const exitCandle = m1Candles[firstM1After(m1Candles, leg.exitTimestamp - 1)];
+    if (exitCandle === undefined) {
+      throw new Error('Closed execution leg is missing its M1 exit cost proxy candle');
+    }
+    const legCosts = calculateExecutionCosts({
+      tradePlan,
+      exitPrice: leg.exitPrice,
+      exitReason: leg.reason === 'PARTIAL_EXIT' || leg.reason === 'TAKE_PROFIT_2' ? 'TAKE_PROFIT' : 'STOP_LOSS',
+      entryM1Candle: entryCandle,
+      exitM1Candle: exitCandle,
+    });
+    totals.grossR += leg.fraction * legCosts.grossR;
+    totals.feeR += leg.fraction * legCosts.feeR;
+    totals.spreadR += leg.fraction * legCosts.spreadR;
+    totals.slippageR += leg.fraction * legCosts.slippageR;
+    totals.netR += leg.fraction * legCosts.netR;
   }
-  return calculateExecutionCosts({
-    tradePlan,
-    exitPrice: execution.exitPrice!,
-    exitReason: execution.outcome === 'WIN' ? 'TAKE_PROFIT' : 'STOP_LOSS',
-    entryM1Candle: entryCandle,
-    exitM1Candle: exitCandle,
-  });
+  return totals;
 }
 
 function excursionR(
@@ -194,12 +183,7 @@ function excursionR(
 }
 
 function costR(costs: TradeLogEntry['costs']): TradeLogEntry['costR'] {
-  if (costs === null) return null;
-  if ('grossR' in costs) return costs.feeR + costs.spreadR + costs.slippageR;
-  return {
-    bestCase: costs.bestCase.feeR + costs.bestCase.spreadR + costs.bestCase.slippageR,
-    worstCase: costs.worstCase.feeR + costs.worstCase.spreadR + costs.worstCase.slippageR,
-  };
+  return costs === null ? null : costs.feeR + costs.spreadR + costs.slippageR;
 }
 
 const POST_STOP_HORIZON_MINUTES = Object.freeze({
@@ -210,9 +194,13 @@ const POST_STOP_HORIZON_MINUTES = Object.freeze({
   min240: 240,
 } as const);
 
+// Only stop-type terminal outcomes are "loss-like" for this diagnostic; a TAKE_PROFIT_2 exit,
+// an open trade, or a timeout close aren't the kind of premature-stop question this measures.
+const STOP_OUTCOMES = new Set(['INITIAL_STOP', 'BREAKEVEN_STOP', 'TRAILING_STOP']);
+
 function postStopHorizons(
   tradePlan: TradePlan,
-  execution: IntrabarExecutionResult,
+  execution: PositionManagementV2Result,
   m1Candles: readonly Candle[],
 ): PostStopHorizons {
   const result = Object.fromEntries(
@@ -221,8 +209,8 @@ function postStopHorizons(
       { reached1_5R: false, reached2R: false, mfeR: 0 },
     ]),
   ) as PostStopHorizons;
-  if (execution.outcome !== 'LOSS' || execution.exitTimestamp === undefined) return result;
-  const exitTimestamp = execution.exitTimestamp;
+  if (!STOP_OUTCOMES.has(execution.outcome) || execution.exitLegs.length === 0) return result;
+  const exitTimestamp = execution.exitLegs.at(-1)!.exitTimestamp;
   let candleIndex = firstM1After(m1Candles, exitTimestamp);
   let highest = Number.NEGATIVE_INFINITY;
   let lowest = Number.POSITIVE_INFINITY;
@@ -279,21 +267,20 @@ function runCoin(input: CoinBacktestInput): { logs: TradeLogEntry[]; minimumStop
       const entryFillTimestamp = event.entry.fillTimestamp - 1;
       const m1Start = firstM1After(input.m1Candles, entryFillTimestamp);
       const postFillM1 = input.m1Candles.slice(m1Start);
-      const execution = simulateIntrabarExecution({
+      const execution = simulatePositionManagementV2({
         tradePlan: event.tradePlan,
         entryFillTimestamp,
         m1Candles: postFillM1,
       });
-      const exitM1 =
-        execution.exitTimestamp === undefined
-          ? undefined
-          : input.m1Candles[firstM1After(input.m1Candles, execution.exitTimestamp - 1)];
       const observedM1 = postFillM1.slice(
         0,
-        execution.outcome === 'OPEN' ? undefined : execution.m1CandlesConsumed,
+        execution.outcome === 'OPEN_DATA_END' ? undefined : execution.m1CandlesConsumed,
       );
       const excursions = excursionR(event.tradePlan, observedM1);
-      const costs = executionCosts(event.tradePlan, execution, postFillM1[0], exitM1);
+      const costs = executionCosts(event.tradePlan, execution, input.m1Candles, postFillM1[0]);
+      const forcedLossLeg = execution.exitLegs.find(
+        (leg) => leg.reasonCode === 'AMBIGUOUS_FORCED_LOSS',
+      );
       logs.push({
         coin: input.coin,
         setupFamily: event.setupSignal.setupFamily,
@@ -310,6 +297,7 @@ function runCoin(input: CoinBacktestInput): { logs: TradeLogEntry[]; minimumStop
         costR: costR(costs),
         postStopHorizons: postStopHorizons(event.tradePlan, execution, postFillM1),
         costs,
+        ...(forcedLossLeg === undefined ? {} : { reasonCode: forcedLossLeg.reasonCode }),
       });
     }
   }
@@ -317,14 +305,14 @@ function runCoin(input: CoinBacktestInput): { logs: TradeLogEntry[]; minimumStop
 }
 
 function isResolvedCosts(costs: TradeLogEntry['costs']): costs is ExecutionCostResult {
-  return costs !== null && 'grossR' in costs;
+  return costs !== null;
 }
 
 function metricSet(logs: readonly TradeLogEntry[], realistic: boolean): PerformanceMetrics {
   const resolved: ResolvedTrade[] = logs
     .filter((log) => isResolvedCosts(log.costs))
     .map((log) => ({
-      timestamp: log.execution.exitTimestamp!,
+      timestamp: log.execution.exitLegs.at(-1)!.exitTimestamp,
       grossR: (log.costs as ExecutionCostResult).grossR,
       realisticR: (log.costs as ExecutionCostResult).netR,
       feeR: (log.costs as ExecutionCostResult).feeR,
@@ -360,8 +348,8 @@ function metricSet(logs: readonly TradeLogEntry[], realistic: boolean): Performa
     maxDrawdownR,
     winRate:
       resolved.length === 0 ? null : values.filter((value) => value > 0).length / resolved.length,
-    ambiguousTrades: logs.filter((log) => log.execution.outcome === 'AMBIGUOUS').length,
-    openTrades: logs.filter((log) => log.execution.outcome === 'OPEN').length,
+    ambiguousTrades: logs.filter((log) => log.reasonCode === 'AMBIGUOUS_FORCED_LOSS').length,
+    openTrades: logs.filter((log) => log.execution.outcome === 'OPEN_DATA_END').length,
   };
 }
 
@@ -385,22 +373,10 @@ export function buildBacktestReport(
   minimumStopBlockedByCoin: Readonly<Record<string, number>> = {},
   note = IN_SAMPLE_WARNING,
 ): BacktestReport {
-  const ambiguous = logs.filter(
-    (log): log is TradeLogEntry & {
-      costs: { bestCase: ExecutionCostResult; worstCase: ExecutionCostResult };
-    } => log.execution.outcome === 'AMBIGUOUS' && log.costs !== null && 'bestCase' in log.costs,
-  );
   return {
     note,
     baselineVariant: 'RETEST_LIMIT_ONLY',
     overall: dualMetrics(logs),
-    ambiguousScenarios: {
-      count: ambiguous.length,
-      bestCaseGrossR: ambiguous.reduce((sum, log) => sum + log.costs.bestCase.grossR, 0),
-      bestCaseNetR: ambiguous.reduce((sum, log) => sum + log.costs.bestCase.netR, 0),
-      worstCaseGrossR: ambiguous.reduce((sum, log) => sum + log.costs.worstCase.grossR, 0),
-      worstCaseNetR: ambiguous.reduce((sum, log) => sum + log.costs.worstCase.netR, 0),
-    },
     byCoin: groupMetrics(logs, coins, (log) => log.coin),
     bySetupFamily: groupMetrics(logs, ['A_COMPRESSION_BREAKOUT'], (log) => log.setupFamily),
     byDirection: groupMetrics(logs, ['BULL', 'BEAR'], (log) => log.tradePlan.direction),
@@ -602,12 +578,12 @@ async function main(): Promise<void> {
         .map(([coin, count]) => `${coin}=${count}`)
         .join(', '),
   );
+  const forcedLossCount = result.tradeLogs.filter(
+    (log) => log.reasonCode === 'AMBIGUOUS_FORCED_LOSS',
+  ).length;
   console.info(
-    `AMBIGUOUS scenarios: count=${result.report.ambiguousScenarios.count}, ` +
-      `bestGrossR=${result.report.ambiguousScenarios.bestCaseGrossR.toFixed(2)}, ` +
-      `bestNetR=${result.report.ambiguousScenarios.bestCaseNetR.toFixed(2)}, ` +
-      `worstGrossR=${result.report.ambiguousScenarios.worstCaseGrossR.toFixed(2)}, ` +
-      `worstNetR=${result.report.ambiguousScenarios.worstCaseNetR.toFixed(2)}`,
+    `AMBIGUOUS_FORCED_LOSS legs: count=${forcedLossCount}/${result.tradeLogs.length} ` +
+      `(${result.tradeLogs.length === 0 ? 'N/A' : ((100 * forcedLossCount) / result.tradeLogs.length).toFixed(2)}%)`,
   );
   for (const [coin, metrics] of Object.entries(result.report.byCoin)) printMetrics(coin, metrics);
   for (const [family, metrics] of Object.entries(result.report.bySetupFamily)) {

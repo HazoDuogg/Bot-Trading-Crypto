@@ -136,13 +136,20 @@ describe('TICKET-024 per-trade attribution baseline', () => {
       minutesSignalToFill: 4,
       costR: 0.2,
       tradePlan: { direction: 'BULL', entryPrice: 100 },
-      execution: { outcome: 'LOSS', exitTimestamp: 2_000 },
     };
     const previous = {
       windows: [
         {
           window: { index: 0 },
-          tradeLogs: [{ ...snapshot, reached1_5ROrMore: true, reached2ROrMore: true }],
+          tradeLogs: [
+            {
+              ...snapshot,
+              // Frozen TICKET-024 baseline JSON predates TICKET-041: genuinely old vocabulary.
+              execution: { outcome: 'LOSS', exitTimestamp: 2_000 },
+              reached1_5ROrMore: true,
+              reached2ROrMore: true,
+            },
+          ],
         },
       ],
     };
@@ -152,6 +159,13 @@ describe('TICKET-024 per-trade attribution baseline', () => {
         tradeLogs: [
           {
             ...snapshot,
+            execution: {
+              outcome: 'INITIAL_STOP',
+              exitLegs: [{ reason: 'INITIAL_STOP', fraction: 1, exitPrice: 90, exitTimestamp: 2_000 }],
+              grossR: -1,
+              partialExitTriggered: false,
+              m1CandlesConsumed: 1,
+            },
             postStopHorizons: {
               min15: { reached1_5R: false, reached2R: false, mfeR: 1 },
               min30: { reached1_5R: true, reached2R: false, mfeR: 1.5 },
@@ -169,7 +183,9 @@ describe('TICKET-024 per-trade attribution baseline', () => {
     const report = buildPostStopRecoveryReport(previous, annotated as never);
 
     expect(comparison).toMatchObject({
-      outcomeChanged: false,
+      // TICKET-041 changed the outcome vocabulary itself, so a legacy 'LOSS' baseline legitimately
+      // reads as "changed" against a current 'INITIAL_STOP' — that's the correct, honest result.
+      outcomeChanged: true,
       exitTimeDeltaMinutes: 0,
       old: {
         outcome: 'LOSS',
@@ -178,7 +194,7 @@ describe('TICKET-024 per-trade attribution baseline', () => {
         minutesSignalToFill: 4,
       },
       current: {
-        outcome: 'LOSS',
+        outcome: 'INITIAL_STOP',
         firstTouchFillTimestamp: 1_000,
         costR: 0.2,
         minutesSignalToFill: 4,

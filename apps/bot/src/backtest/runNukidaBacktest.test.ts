@@ -60,7 +60,11 @@ describe('runNukidaBacktest', () => {
     const signal = setupA();
     const candles = Array.from({ length: 16 }, (_, index) => m15(index));
     const firstTouchFillTimestamp = windowStart + 60_000;
-    const m1Candles = [m1(firstTouchFillTimestamp, 95, 120)];
+    // entry=99, riskPerUnit=10: candle1 fills and jumps through TP1 (109); candle2 clears TP2 (119).
+    const m1Candles = [
+      m1(firstTouchFillTimestamp, 95, 120),
+      m1(firstTouchFillTimestamp + 60_000, 115, 121),
+    ];
     const result = runNukidaBacktest({
       coins: [
         {
@@ -92,7 +96,7 @@ describe('runNukidaBacktest', () => {
       firstTouchFillPrice: 99,
       entryFillTimestamp: firstTouchFillTimestamp - 1,
       minutesSignalToFill: 1,
-      MFE: 2.1,
+      MFE: 2.2,
       MAE: 0.4,
       postStopHorizons: {
         min15: { reached1_5R: false, reached2R: false, mfeR: 0 },
@@ -102,8 +106,9 @@ describe('runNukidaBacktest', () => {
         min240: { reached1_5R: false, reached2R: false, mfeR: 0 },
       },
       reasonTrace: signal.reasonTrace,
-      execution: { outcome: 'WIN', exitPrice: 114, m1CandlesConsumed: 1 },
+      execution: { outcome: 'TAKE_PROFIT_2', m1CandlesConsumed: 2 },
     });
+    expect(result.tradeLogs[0].reasonCode).toBeUndefined();
     expect(result.tradeLogs[0].costR).toBeGreaterThan(0);
     expect(result.tradeLogs[0].costs).not.toBeNull();
     expect(result.report.overall.zeroCost).toMatchObject({
@@ -154,10 +159,11 @@ describe('runNukidaBacktest', () => {
     });
   });
 
-  it('prices an ambiguous TP-first case as maker and SL-first case as taker', () => {
+  it('prices a same-candle SL/TP1 collision as a forced taker stop-loss', () => {
     const signal = setupA();
     const candles = Array.from({ length: 16 }, (_, index) => m15(index));
     const firstTouchFillTimestamp = windowStart + 60_000;
+    // entry=99, stopLoss=89, TP1=109: this candle's range covers both -> forced loss at 89.
     const m1Candles = [m1(firstTouchFillTimestamp, 88, 120)];
     const result = runNukidaBacktest({
       coins: [
@@ -178,14 +184,13 @@ describe('runNukidaBacktest', () => {
       ],
     });
 
-    expect(result.tradeLogs[0].execution.outcome).toBe('AMBIGUOUS');
-    expect(result.tradeLogs[0].costs).toMatchObject({
-      bestCase: { feeR: 0.003924 },
-      worstCase: { feeR: expect.closeTo(0.005787, 9) },
-    });
+    expect(result.tradeLogs[0].execution.outcome).toBe('INITIAL_STOP');
+    expect(result.tradeLogs[0].reasonCode).toBe('AMBIGUOUS_FORCED_LOSS');
+    // Forced loss always exits via STOP_LOSS (taker) pricing, never the maker TAKE_PROFIT rate.
+    expect(result.tradeLogs[0].costs).toMatchObject({ feeR: expect.closeTo(0.005787, 9) });
   });
 
-  it('returns AMBIGUOUS when the first-touch M1 fill candle contains both SL and TP', () => {
+  it('returns AMBIGUOUS_FORCED_LOSS when the first-touch M1 fill candle contains both SL and TP1', () => {
     const signal = setupA();
     const candles = Array.from({ length: 16 }, (_, index) => m15(index));
     const fillM1OpenTime = windowStart + 60_000;
@@ -211,20 +216,31 @@ describe('runNukidaBacktest', () => {
     });
 
     expect(result.tradeLogs[0].execution).toMatchObject({
-      outcome: 'AMBIGUOUS',
-      exitTimestamp: fillM1OpenTime,
+      outcome: 'INITIAL_STOP',
       m1CandlesConsumed: 1,
+      exitLegs: [
+        {
+          reason: 'INITIAL_STOP',
+          fraction: 1,
+          exitPrice: 89,
+          exitTimestamp: fillM1OpenTime,
+          reasonCode: 'AMBIGUOUS_FORCED_LOSS',
+        },
+      ],
     });
+    expect(result.tradeLogs[0].reasonCode).toBe('AMBIGUOUS_FORCED_LOSS');
   });
 
   it('observes an exit a few M1 candles after fill inside the same M15 candle', () => {
     const signal = setupA();
     const candles = Array.from({ length: 16 }, (_, index) => m15(index));
     const fillM1OpenTime = windowStart + 60_000;
+    // entry=99, stopLoss=89: first two candles touch neither the stop nor TP1 (109); the third
+    // finally touches the original stop alone (no TP1 collision) -> clean single-leg loss.
     const m1Candles = [
       m1(fillM1OpenTime, 98, 101),
       m1(fillM1OpenTime + 60_000, 96, 105),
-      m1(fillM1OpenTime + 120_000, 95, 120),
+      m1(fillM1OpenTime + 120_000, 85, 95),
     ];
 
     const result = runNukidaBacktest({
@@ -248,11 +264,11 @@ describe('runNukidaBacktest', () => {
     });
 
     expect(result.tradeLogs[0].execution).toMatchObject({
-      outcome: 'WIN',
-      exitTimestamp: fillM1OpenTime + 120_000,
-      exitPrice: 114,
+      outcome: 'INITIAL_STOP',
       m1CandlesConsumed: 3,
+      exitLegs: [{ fraction: 1, exitPrice: 89, exitTimestamp: fillM1OpenTime + 120_000 }],
     });
+    expect(result.tradeLogs[0].reasonCode).toBeUndefined();
   });
 
   it('attributes a 1.5R recovery at minute 20 to min30 but not min15', () => {
@@ -281,7 +297,7 @@ describe('runNukidaBacktest', () => {
     });
 
     expect(result.tradeLogs[0]).toMatchObject({
-      execution: { outcome: 'LOSS', exitTimestamp: fillM1OpenTime },
+      execution: { outcome: 'INITIAL_STOP', exitLegs: [{ exitTimestamp: fillM1OpenTime }] },
       postStopHorizons: {
         min15: { reached1_5R: false, reached2R: false, mfeR: 0 },
         min30: { reached1_5R: true, reached2R: false, mfeR: 1.5 },
@@ -326,7 +342,7 @@ describe('runNukidaBacktest', () => {
     });
   });
 
-  it('orders drawdown by exit time and keeps AMBIGUOUS/OPEN outside PF and expectancy', () => {
+  it('orders drawdown by exit time, counts a forced-loss trade normally, and keeps OPEN outside PF/expectancy', () => {
     const signal = setupA();
     const plan = {
       direction: 'BULL' as const,
@@ -369,51 +385,72 @@ describe('runNukidaBacktest', () => {
     const logs: TradeLogEntry[] = [
       {
         ...base,
-        execution: { outcome: 'WIN', exitTimestamp: 200, exitPrice: 120, m1CandlesConsumed: 2 },
+        execution: {
+          outcome: 'TAKE_PROFIT_2',
+          exitLegs: [{ reason: 'TAKE_PROFIT_2', fraction: 1, exitPrice: 120, exitTimestamp: 200 }],
+          grossR: 2,
+          partialExitTriggered: false,
+          m1CandlesConsumed: 2,
+        },
         costs: cost(2, 1.8),
       },
       {
         ...base,
-        execution: { outcome: 'LOSS', exitTimestamp: 100, exitPrice: 90, m1CandlesConsumed: 1 },
+        execution: {
+          outcome: 'INITIAL_STOP',
+          exitLegs: [{ reason: 'INITIAL_STOP', fraction: 1, exitPrice: 90, exitTimestamp: 100 }],
+          grossR: -1,
+          partialExitTriggered: false,
+          m1CandlesConsumed: 1,
+        },
         costs: cost(-1, -1.1),
       },
       {
         ...base,
+        // Same-candle SL/TP1 collision: forced to the loss side, but still a real, priced, closed trade.
         execution: {
-          outcome: 'AMBIGUOUS',
-          exitTimestamp: 300,
-          bestCase: { outcome: 'WIN', exitPrice: 120 },
-          worstCase: { outcome: 'LOSS', exitPrice: 90 },
+          outcome: 'INITIAL_STOP',
+          exitLegs: [
+            {
+              reason: 'INITIAL_STOP',
+              fraction: 1,
+              exitPrice: 90,
+              exitTimestamp: 300,
+              reasonCode: 'AMBIGUOUS_FORCED_LOSS',
+            },
+          ],
+          grossR: -1,
+          partialExitTriggered: false,
           m1CandlesConsumed: 3,
         },
-        costs: { bestCase: cost(2, 1.7), worstCase: cost(-1, -1.2) },
+        costs: cost(-1, -1.2),
+        reasonCode: 'AMBIGUOUS_FORCED_LOSS',
       },
       {
         ...base,
-        execution: { outcome: 'OPEN', m1CandlesConsumed: 4 },
+        execution: {
+          outcome: 'OPEN_DATA_END',
+          exitLegs: [],
+          grossR: 0,
+          partialExitTriggered: false,
+          m1CandlesConsumed: 4,
+        },
         costs: null,
       },
     ];
 
     const report = buildBacktestReport(logs, ['TESTUSDT']);
     expect(report.overall.zeroCost).toMatchObject({
-      closedTrades: 2,
-      grossR: 1,
-      netR: 1,
-      profitFactor: 2,
-      expectancyPerTrade: 0.5,
+      closedTrades: 3,
+      grossR: 0,
+      netR: 0,
+      profitFactor: 1,
+      expectancyPerTrade: 0,
       maxDrawdownR: 1,
-      winRate: 0.5,
+      winRate: expect.closeTo(1 / 3, 9),
       ambiguousTrades: 1,
       openTrades: 1,
     });
-    expect(report.overall.realisticCost.maxDrawdownR).toBeCloseTo(1.1);
-    expect(report.ambiguousScenarios).toEqual({
-      count: 1,
-      bestCaseGrossR: 2,
-      bestCaseNetR: 1.7,
-      worstCaseGrossR: -1,
-      worstCaseNetR: -1.2,
-    });
+    expect(report.overall.realisticCost.maxDrawdownR).toBeCloseTo(1.2);
   });
 });

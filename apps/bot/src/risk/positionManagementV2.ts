@@ -4,12 +4,20 @@ import type { TradePlan } from './tradePlan.js';
 
 // Class D experimental runner constants; they are not part of D1-D8 or the source-backed baseline.
 export const POSITION_MANAGEMENT_V2_ATR_PERIOD = 14;
-export const POSITION_MANAGEMENT_V2_TRAILING_ATR_MULTIPLE = 2;
 export const POSITION_MANAGEMENT_V2_MAX_M1_CANDLES = 4_320;
+
+// TICKET-041: fixed 3-phase policy constants (no longer caller-configurable inputs).
+export const BREAKEVEN_TRIGGER_R = 0.75;
+export const BREAKEVEN_BUFFER_R = 0.05;
+export const TP1_R = 1.0;
+export const TP1_FRACTION = 0.5;
+export const TP2_R = 2.0;
+export const TRAILING_ATR_MULTIPLE = 1.5;
 
 export interface PositionExitLeg {
   reason:
     | 'PARTIAL_EXIT'
+    | 'TAKE_PROFIT_2'
     | 'INITIAL_STOP'
     | 'BREAKEVEN_STOP'
     | 'TRAILING_STOP'
@@ -17,15 +25,14 @@ export interface PositionExitLeg {
   fraction: number;
   exitPrice: number;
   exitTimestamp: number;
+  // Same-candle SL+TP collision forced this leg to the loss side (see rule 1 in the ticket).
+  reasonCode?: 'AMBIGUOUS_FORCED_LOSS';
 }
 
 export interface PositionManagementV2Input {
   tradePlan: TradePlan;
   entryFillTimestamp: number;
   m1Candles: readonly Candle[];
-  partialExitRMultiple: number;
-  partialExitFraction: number;
-  breakevenBufferR: number;
 }
 
 export interface PositionManagementScenario {
@@ -38,23 +45,16 @@ export interface ResolvedPositionManagementV2Result extends PositionManagementSc
     | 'INITIAL_STOP'
     | 'BREAKEVEN_STOP'
     | 'TRAILING_STOP'
+    | 'TAKE_PROFIT_2'
     | 'FORCED_CLOSE_TIMEOUT'
     | 'OPEN_DATA_END';
   partialExitTriggered: boolean;
   m1CandlesConsumed: number;
 }
 
-export interface AmbiguousPositionManagementV2Result {
-  outcome: 'AMBIGUOUS';
-  bestCase: PositionManagementScenario;
-  worstCase: PositionManagementScenario;
-  partialExitTriggered: false;
-  m1CandlesConsumed: number;
-}
+export type PositionManagementV2Result = ResolvedPositionManagementV2Result;
 
-export type PositionManagementV2Result =
-  | ResolvedPositionManagementV2Result
-  | AmbiguousPositionManagementV2Result;
+type Phase = 'A' | 'B' | 'C';
 
 function directionSign(plan: TradePlan): 1 | -1 {
   return plan.direction === 'BULL' ? 1 : -1;
@@ -69,17 +69,6 @@ function requirePositiveFinite(value: number, name: string): void {
 }
 
 function validateInput(input: PositionManagementV2Input): void {
-  requirePositiveFinite(input.partialExitRMultiple, 'partialExitRMultiple');
-  if (
-    !Number.isFinite(input.partialExitFraction) ||
-    input.partialExitFraction <= 0 ||
-    input.partialExitFraction >= 1
-  ) {
-    throw new Error('partialExitFraction must be finite and strictly between zero and one');
-  }
-  if (!Number.isFinite(input.breakevenBufferR) || input.breakevenBufferR < 0) {
-    throw new Error('breakevenBufferR must be finite and non-negative');
-  }
   if (!Number.isSafeInteger(input.entryFillTimestamp) || input.entryFillTimestamp < 0) {
     throw new Error('entryFillTimestamp must be a non-negative UTC epoch millisecond timestamp');
   }
@@ -90,24 +79,28 @@ function validateInput(input: PositionManagementV2Input): void {
 function grossR(plan: TradePlan, legs: readonly PositionExitLeg[]): number {
   const sign = directionSign(plan);
   return legs.reduce(
-    (sum, leg) =>
-      sum + leg.fraction * sign * (leg.exitPrice - plan.entryPrice) / plan.riskPerUnit,
+    (sum, leg) => sum + (leg.fraction * sign * (leg.exitPrice - plan.entryPrice)) / plan.riskPerUnit,
     0,
   );
 }
 
-// Class D experiment: partial activation and stop changes are effective from the next M1 candle.
+// TICKET-041: 3-phase state machine. A (MFE < 0.75R, original SL) -> B (MFE >= 0.75R, stop moves
+// to entry + 0.05R, still 100%) -> C (TP1 @1.0R closes 50%, remainder rides TP2 @2.0R vs a 1.5x
+// ATR14 trail seeded at the breakeven price). Stop/phase changes are effective from the next candle.
 export function simulatePositionManagementV2(
   input: PositionManagementV2Input,
 ): PositionManagementV2Result {
   validateInput(input);
   const { tradePlan: plan } = input;
   const sign = directionSign(plan);
-  const partialPrice = plan.entryPrice + sign * input.partialExitRMultiple * plan.riskPerUnit;
-  const breakevenPrice = plan.entryPrice + sign * input.breakevenBufferR * plan.riskPerUnit;
+  const breakevenTriggerPrice = plan.entryPrice + sign * BREAKEVEN_TRIGGER_R * plan.riskPerUnit;
+  const breakevenStopPrice = plan.entryPrice + sign * BREAKEVEN_BUFFER_R * plan.riskPerUnit;
+  const tp1Price = plan.entryPrice + sign * TP1_R * plan.riskPerUnit;
+  const tp2Price = plan.entryPrice + sign * TP2_R * plan.riskPerUnit;
+
   const legs: PositionExitLeg[] = [];
-  let partialExitTriggered = false;
-  let runnerStop = breakevenPrice;
+  let phase: Phase = 'A';
+  let runnerStop = breakevenStopPrice;
   let trailingActive = false;
   let consumed = 0;
   const atrTracker = createAtrTracker(POSITION_MANAGEMENT_V2_ATR_PERIOD);
@@ -115,84 +108,92 @@ export function simulatePositionManagementV2(
   for (const current of input.m1Candles) {
     if (current.openTime <= input.entryFillTimestamp) continue;
     consumed += 1;
-    const activeStop = partialExitTriggered ? runnerStop : plan.stopLoss;
+
+    const activeStop = phase === 'A' ? plan.stopLoss : phase === 'B' ? breakevenStopPrice : runnerStop;
+    const activeTP = phase === 'C' ? tp2Price : tp1Price;
     const hitStop = touches(current, activeStop);
-    const hitPartial = !partialExitTriggered && touches(current, partialPrice);
-    if (!partialExitTriggered && hitStop && hitPartial) {
-      const bestLegs: PositionExitLeg[] = [
-        {
-          reason: 'PARTIAL_EXIT',
-          fraction: input.partialExitFraction,
-          exitPrice: partialPrice,
-          exitTimestamp: current.openTime,
-        },
-        {
-          reason: 'BREAKEVEN_STOP',
-          fraction: 1 - input.partialExitFraction,
-          exitPrice: breakevenPrice,
-          exitTimestamp: current.openTime,
-        },
-      ];
-      const worstLegs: PositionExitLeg[] = [
-        {
-          reason: 'INITIAL_STOP',
-          fraction: 1,
-          exitPrice: plan.stopLoss,
-          exitTimestamp: current.openTime,
-        },
-      ];
-      return {
-        outcome: 'AMBIGUOUS',
-        bestCase: { exitLegs: bestLegs, grossR: grossR(plan, bestLegs) },
-        worstCase: { exitLegs: worstLegs, grossR: grossR(plan, worstLegs) },
-        partialExitTriggered: false,
-        m1CandlesConsumed: consumed,
-      };
-    }
-    if (hitStop) {
-      const reason = partialExitTriggered
-        ? trailingActive
-          ? 'TRAILING_STOP'
-          : 'BREAKEVEN_STOP'
-        : 'INITIAL_STOP';
+    const hitTP = touches(current, activeTP);
+
+    if (hitStop && hitTP) {
+      // Rule 1: same-candle SL+TP collision forces a loss at the active stop for the active leg.
+      const reason = phase === 'A' ? 'INITIAL_STOP' : trailingActive ? 'TRAILING_STOP' : 'BREAKEVEN_STOP';
+      const fraction = phase === 'C' ? 1 - TP1_FRACTION : 1;
       legs.push({
         reason,
-        fraction: partialExitTriggered ? 1 - input.partialExitFraction : 1,
+        fraction,
         exitPrice: activeStop,
         exitTimestamp: current.openTime,
+        reasonCode: 'AMBIGUOUS_FORCED_LOSS',
       });
       return {
         outcome: reason,
         exitLegs: legs,
         grossR: grossR(plan, legs),
-        partialExitTriggered,
+        partialExitTriggered: phase === 'C',
         m1CandlesConsumed: consumed,
       };
     }
-    if (hitPartial) {
-      partialExitTriggered = true;
-      legs.push({
-        reason: 'PARTIAL_EXIT',
-        fraction: input.partialExitFraction,
-        exitPrice: partialPrice,
-        exitTimestamp: current.openTime,
-      });
+
+    if (hitStop) {
+      const reason = phase === 'A' ? 'INITIAL_STOP' : trailingActive ? 'TRAILING_STOP' : 'BREAKEVEN_STOP';
+      const fraction = phase === 'C' ? 1 - TP1_FRACTION : 1;
+      legs.push({ reason, fraction, exitPrice: activeStop, exitTimestamp: current.openTime });
+      return {
+        outcome: reason,
+        exitLegs: legs,
+        grossR: grossR(plan, legs),
+        partialExitTriggered: phase === 'C',
+        m1CandlesConsumed: consumed,
+      };
+    }
+
+    if (hitTP) {
+      if (phase !== 'C') {
+        legs.push({
+          reason: 'PARTIAL_EXIT',
+          fraction: TP1_FRACTION,
+          exitPrice: tp1Price,
+          exitTimestamp: current.openTime,
+        });
+        phase = 'C';
+        runnerStop = breakevenStopPrice;
+        trailingActive = false;
+      } else {
+        legs.push({
+          reason: 'TAKE_PROFIT_2',
+          fraction: 1 - TP1_FRACTION,
+          exitPrice: tp2Price,
+          exitTimestamp: current.openTime,
+        });
+        return {
+          outcome: 'TAKE_PROFIT_2',
+          exitLegs: legs,
+          grossR: grossR(plan, legs),
+          partialExitTriggered: true,
+          m1CandlesConsumed: consumed,
+        };
+      }
+    }
+
+    if (phase === 'A' && touches(current, breakevenTriggerPrice)) {
+      phase = 'B';
     }
 
     const atr = atrTracker.next(current);
-    if (partialExitTriggered && atr !== null) {
-      const candidate =
-        current.close - sign * POSITION_MANAGEMENT_V2_TRAILING_ATR_MULTIPLE * atr;
+    if (phase === 'C' && atr !== null) {
+      const candidate = current.close - sign * TRAILING_ATR_MULTIPLE * atr;
       const improves = sign === 1 ? candidate > runnerStop : candidate < runnerStop;
       if (improves) {
         runnerStop = candidate;
         trailingActive = true;
       }
     }
+
     if (consumed === POSITION_MANAGEMENT_V2_MAX_M1_CANDLES) {
+      const fraction = phase === 'C' ? 1 - TP1_FRACTION : 1;
       legs.push({
         reason: 'FORCED_CLOSE_TIMEOUT',
-        fraction: partialExitTriggered ? 1 - input.partialExitFraction : 1,
+        fraction,
         exitPrice: current.close,
         exitTimestamp: current.openTime,
       });
@@ -200,7 +201,7 @@ export function simulatePositionManagementV2(
         outcome: 'FORCED_CLOSE_TIMEOUT',
         exitLegs: legs,
         grossR: grossR(plan, legs),
-        partialExitTriggered,
+        partialExitTriggered: phase === 'C',
         m1CandlesConsumed: consumed,
       };
     }
@@ -210,7 +211,7 @@ export function simulatePositionManagementV2(
     outcome: 'OPEN_DATA_END',
     exitLegs: legs,
     grossR: grossR(plan, legs),
-    partialExitTriggered,
+    partialExitTriggered: phase === 'C',
     m1CandlesConsumed: consumed,
   };
 }
