@@ -24,6 +24,8 @@ export type M1RetestWindowResult =
 
 // MA20 of the 20 M1 candles immediately before the trigger candle; any M1 candle from the
 // trigger candle up to the retest window start with volume > MA20 * 2.5 is a liquidity sweep.
+// Insufficient history to form the baseline is not "still waiting" (it never arrives), so it
+// resolves to no-sweep rather than throwing — unlike the causal-safety throws below.
 function detectLiquiditySweep(
   m1Candles: readonly Candle[],
   triggerCandleOpenTime: number,
@@ -37,9 +39,7 @@ function detectLiquiditySweep(
     if (recentVolumes.length > LIQUIDITY_SWEEP_VOLUME_MA_PERIOD) recentVolumes.shift();
   }
   if (recentVolumes.length < LIQUIDITY_SWEEP_VOLUME_MA_PERIOD) {
-    throw new Error(
-      'm1Candles must include at least 20 M1 candles before the trigger candle to compute the liquidity-sweep volume MA',
-    );
+    return false;
   }
   const volumeMa =
     recentVolumes.reduce((sum, volume) => sum + volume, 0) / LIQUIDITY_SWEEP_VOLUME_MA_PERIOD;
