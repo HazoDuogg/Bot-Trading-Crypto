@@ -21,8 +21,16 @@ import { evaluateM1RetestWindow } from './retestEntry.js';
 
 const M15_WINDOW_MS = 15 * 60 * 1000;
 
-function m1(openTime: number, low: number, high: number, close: number): Candle {
-  return { openTime, open: close, high, low, close, volume: 100 };
+function m1(openTime: number, low: number, high: number, close: number, volume = 100): Candle {
+  return { openTime, open: close, high, low, close, volume };
+}
+
+// The trigger M15 candle's own 15 M1 sub-candles, with a volume spike on the last one — a
+// liquidity sweep against MA20=100 (spike must exceed 100 * 2.5 = 250).
+function sweepingTriggerWindow(triggerCandleOpenTime: number): Candle[] {
+  return Array.from({ length: 15 }, (_, offset) =>
+    m1(triggerCandleOpenTime + offset * 60_000, 100, 101, 100, offset === 14 ? 300 : 100),
+  );
 }
 
 function signal(direction: 'BULL' | 'BEAR', level = 100): SetupSignal {
@@ -44,10 +52,19 @@ function fullWindow(windowStart: number, low: number, high: number, close: numbe
   return Array.from({ length: 15 }, (_, offset) => m1(windowStart + offset * 60_000, low, high, close));
 }
 
+// 20 low-volume M1 candles ending right before `beforeOpenTime`, so the liquidity-sweep MA20
+// has enough history and stays well under any test-window candle's volume (no false sweep).
+function precedingLowVolume(beforeOpenTime: number): Candle[] {
+  return Array.from({ length: 20 }, (_, offset) =>
+    m1(beforeOpenTime - (20 - offset) * 60_000, 100, 101, 100),
+  );
+}
+
 describe('evaluateM1RetestWindow', () => {
   it('fills a BULL limit one tick below the break level on the M1 candle that touches it', () => {
     const windowStart = 0;
     const m1Candles = [
+      ...precedingLowVolume(windowStart - M15_WINDOW_MS),
       m1(0, 100, 104, 103),
       m1(60_000, 100, 105, 103),
       m1(120_000, 98, 101, 100),
@@ -66,7 +83,12 @@ describe('evaluateM1RetestWindow', () => {
   });
 
   it('applies the symmetric one-tick-above limit for BEAR', () => {
-    const m1Candles = [m1(0, 96, 100, 97), m1(60_000, 95, 100, 97), m1(120_000, 99, 102, 100)];
+    const m1Candles = [
+      ...precedingLowVolume(-M15_WINDOW_MS),
+      m1(0, 96, 100, 97),
+      m1(60_000, 95, 100, 97),
+      m1(120_000, 99, 102, 100),
+    ];
 
     expect(
       evaluateM1RetestWindow({
@@ -80,7 +102,7 @@ describe('evaluateM1RetestWindow', () => {
   });
 
   it('expires 15M when no M1 candle fills or cancels within the window', () => {
-    const m1Candles = fullWindow(0, 101, 105, 103);
+    const m1Candles = [...precedingLowVolume(-M15_WINDOW_MS), ...fullWindow(0, 101, 105, 103)];
 
     expect(
       evaluateM1RetestWindow({
@@ -96,15 +118,18 @@ describe('evaluateM1RetestWindow', () => {
   it('cancels before fill when an earlier M1 candle in the window is already over-extended', () => {
     // low=105 stays above limitPrice=99 (no fill match) while close=121 is far enough from
     // the break level (100) to trip the over-extension check first.
+    const preceding = precedingLowVolume(-M15_WINDOW_MS);
     const m1Candles = [
+      ...preceding,
       m1(0, 100, 104, 103),
       m1(60_000, 101, 110, 105),
       m1(120_000, 105, 125, 121),
       ...fullWindow(180_000, 98, 101, 100).slice(0, 12),
     ];
+    const guardedIndex = String(preceding.length + 3);
     const guarded = new Proxy(m1Candles, {
       get(target, property, receiver) {
-        if (property === '3') throw new Error('read after cancellation');
+        if (property === guardedIndex) throw new Error('read after cancellation');
         return Reflect.get(target, property, receiver);
       },
     });
@@ -121,15 +146,18 @@ describe('evaluateM1RetestWindow', () => {
   });
 
   it('never reads an M1 candle outside the 15-minute window once filled', () => {
+    const preceding = precedingLowVolume(-M15_WINDOW_MS);
     const m1Candles = [
+      ...preceding,
       m1(0, 100, 104, 103),
       m1(60_000, 100, 105, 103),
       m1(120_000, 98, 101, 100),
       m1(M15_WINDOW_MS, 1, 1_000, 500),
     ];
+    const guardedIndex = String(preceding.length + 3);
     const guarded = new Proxy(m1Candles, {
       get(target, property, receiver) {
-        if (property === '3') throw new Error('read past the window end');
+        if (property === guardedIndex) throw new Error('read past the window end');
         return Reflect.get(target, property, receiver);
       },
     });
@@ -146,7 +174,11 @@ describe('evaluateM1RetestWindow', () => {
   });
 
   it('throws when the M1 feed has not yet closed the full 15-minute window', () => {
-    const m1Candles = [m1(0, 101, 105, 103), m1(60_000, 101, 105, 103)];
+    const m1Candles = [
+      ...precedingLowVolume(-M15_WINDOW_MS),
+      m1(0, 101, 105, 103),
+      m1(60_000, 101, 105, 103),
+    ];
 
     expect(() =>
       evaluateM1RetestWindow({
@@ -157,6 +189,71 @@ describe('evaluateM1RetestWindow', () => {
         tickSize: 1,
       }),
     ).toThrow('m1Candles must cover the full 15-minute retest window before it can be evaluated');
+  });
+
+  it('re-anchors the retest window to the reclaim candle after a liquidity sweep', () => {
+    const triggerCandleOpenTime = -M15_WINDOW_MS;
+    const m1Candles = [
+      ...precedingLowVolume(triggerCandleOpenTime),
+      ...sweepingTriggerWindow(triggerCandleOpenTime),
+      m1(0, 95, 98, 97), // no reclaim: high (98) does not exceed the break level (100)
+      m1(60_000, 100, 105, 95), // reclaim: high (105) > 100 and close (95) < 100
+      m1(120_000, 95, 105, 100), // first candle of the re-anchored window: fills at 99
+      ...fullWindow(180_000, 100, 105, 103).slice(0, 12),
+    ];
+
+    expect(
+      evaluateM1RetestWindow({
+        signal: signal('BULL'),
+        m1Candles,
+        windowStartTimestamp: 0,
+        frozenAtrAtTrigger: 10,
+        tickSize: 1,
+      }),
+    ).toEqual({ status: 'FILLED', fillTimestamp: 120_000, fillPrice: 99 });
+  });
+
+  it('expires with SWEEP_TIMEOUT when a liquidity sweep never reclaims within 15 M1 candles', () => {
+    const triggerCandleOpenTime = -M15_WINDOW_MS;
+    const m1Candles = [
+      ...precedingLowVolume(triggerCandleOpenTime),
+      ...sweepingTriggerWindow(triggerCandleOpenTime),
+      // 15 M1 candles from windowStart, none of which reclaim the break level.
+      ...fullWindow(0, 95, 98, 97),
+    ];
+
+    expect(
+      evaluateM1RetestWindow({
+        signal: signal('BULL'),
+        m1Candles,
+        windowStartTimestamp: 0,
+        frozenAtrAtTrigger: 10,
+        tickSize: 1,
+      }),
+    ).toEqual({ status: 'EXPIRED_15M', expiryTimestamp: M15_WINDOW_MS, reason: 'SWEEP_TIMEOUT' });
+  });
+
+  it('behaves exactly like TICKET-039 when no liquidity sweep precedes the window', () => {
+    const triggerCandleOpenTime = -M15_WINDOW_MS;
+    const m1Candles = [
+      ...precedingLowVolume(triggerCandleOpenTime),
+      // Flat volume trigger window: no candle exceeds MA20 * 2.5, so no sweep is detected.
+      ...Array.from({ length: 15 }, (_, offset) => m1(triggerCandleOpenTime + offset * 60_000, 100, 101, 100)),
+      m1(0, 100, 104, 103),
+      m1(60_000, 100, 105, 103),
+      m1(120_000, 98, 101, 100),
+      ...fullWindow(180_000, 100, 105, 103).slice(0, 12),
+    ];
+
+    expect(
+      evaluateM1RetestWindow({
+        signal: signal('BULL'),
+        m1Candles,
+        windowStartTimestamp: 0,
+        frozenAtrAtTrigger: 10,
+        tickSize: 1,
+      }),
+    ).toEqual({ status: 'FILLED', fillTimestamp: 120_000, fillPrice: 99 });
   });
 });
 

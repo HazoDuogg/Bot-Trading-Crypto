@@ -286,13 +286,14 @@ export function createDefaultStrategyAdapter(options?: {
   };
 }
 
-// TICKET-039: window is now exactly 1 M15 candle wide (was RETEST_ENTRY_EXPIRY_CANDLES=8),
-// so only the very next step may legitimately still be missing M1 data for it.
+// TICKET-040: worst case is a liquidity sweep with no reclaim until the 15th M1 candle, plus a
+// full new M15-wide retest window after that reclaim — 2 extra M15 spans beyond the trigger
+// candle's close (was 1 span / triggerIndex+2 in TICKET-039), so tolerate up to triggerIndex+3.
 function isIncompleteEntryWindow(error: unknown, index: number, signal: SetupSignal): boolean {
   return (
     error instanceof Error &&
     error.message === 'm1Candles must cover the full 15-minute retest window before it can be evaluated' &&
-    index < signal.triggerIndex + 2
+    index < signal.triggerIndex + 3
   );
 }
 
