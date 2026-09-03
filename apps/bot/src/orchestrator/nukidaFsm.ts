@@ -74,6 +74,8 @@ export interface FsmConfig {
   availableCapitalUsd?: number;
   // TICKET-038: BTC trend alignment gate. Omitted keeps current (ungated) behavior exactly.
   btcM15Candles?: readonly Candle[];
+  // TICKET-042: audit-only D5 threshold override. Omitted keeps current (1.5) behavior exactly.
+  compressionMaxBandwidthAtrRatioOverride?: number;
   // TICKET-039: core retest-fill mechanism now runs on M1 candles, not optional like btcM15Candles.
   m1Candles: readonly Candle[];
   dataGate: (candles: readonly Candle[], index: number) => FsmDataGateResult;
@@ -144,6 +146,7 @@ function isBtcTrendAligned(
 
 export function createDefaultStrategyAdapter(options?: {
   btcM15Candles?: readonly Candle[];
+  compressionMaxBandwidthAtrRatioOverride?: number;
 }): NukidaStrategyAdapter {
   const atrTracker = createAtrTracker(D2_BREAK_V1_ATR_PERIOD);
   let priorAtr: number | null = null;
@@ -196,7 +199,11 @@ export function createDefaultStrategyAdapter(options?: {
         };
         baseSearchFloor = index;
         if (zone.end_index - zone.start_index + 1 >= 8) {
-          const compression = detectCompression(candles, zone.end_index);
+          const compression = detectCompression(
+            candles,
+            zone.end_index,
+            options?.compressionMaxBandwidthAtrRatioOverride,
+          );
           if (compression !== null && compression.isCompressed) {
             trackedBases.push({ zone, compression, upBroken: false, downBroken: false });
           }
@@ -301,7 +308,11 @@ export function createNukidaFsm(config: FsmConfig): {
   onClosedCandle(candles: readonly Candle[], index: number): FsmEvent[];
 } {
   const strategy =
-    config.strategyAdapter ?? createDefaultStrategyAdapter({ btcM15Candles: config.btcM15Candles });
+    config.strategyAdapter ??
+    createDefaultStrategyAdapter({
+      btcM15Candles: config.btcM15Candles,
+      compressionMaxBandwidthAtrRatioOverride: config.compressionMaxBandwidthAtrRatioOverride,
+    });
   const entryAtrTracker = createAtrTracker(D2_BREAK_V1_ATR_PERIOD);
   const state: FsmState = { pendingSetups: [] };
   const frozenAtrBySetup = new Map<SetupSignal, number>();

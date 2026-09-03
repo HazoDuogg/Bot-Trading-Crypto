@@ -18,6 +18,7 @@ function resultForWindow(
   windowStartIndex: number,
   windowEndIndex: number,
   frozenAtr: number,
+  maxBandwidthAtrRatioOverride?: number,
 ): CompressionResult | null {
   if (!(frozenAtr > 0)) return null;
   const window = candles.slice(windowStartIndex, windowEndIndex + 1);
@@ -25,16 +26,18 @@ function resultForWindow(
     Math.max(...window.map((item) => item.high)) - Math.min(...window.map((item) => item.low));
   const bandwidthAtrRatio = bandwidth / frozenAtr;
   return {
-    isCompressed: bandwidthAtrRatio <= D5_COMPRESSION_V1_MAX_BANDWIDTH_ATR_RATIO,
+    isCompressed: bandwidthAtrRatio <= (maxBandwidthAtrRatioOverride ?? D5_COMPRESSION_V1_MAX_BANDWIDTH_ATR_RATIO),
     bandwidthAtrRatio,
     windowStartIndex,
     windowEndIndex,
   };
 }
 
+// TICKET-042: audit-only override for the D5 threshold; omitted keeps current (1.5) behavior exactly.
 export function detectCompression(
   candles: readonly Candle[],
   windowEndIndex = candles.length - 1,
+  maxBandwidthAtrRatioOverride?: number,
 ): CompressionResult | null {
   if (!Number.isSafeInteger(windowEndIndex) || windowEndIndex < 0 || windowEndIndex >= candles.length) {
     throw new Error('windowEndIndex must reference an available candle');
@@ -49,7 +52,7 @@ export function detectCompression(
     frozenAtr = tracker.next(candles[index]);
   }
   if (frozenAtr === null) return null;
-  return resultForWindow(candles, windowStartIndex, windowEndIndex, frozenAtr);
+  return resultForWindow(candles, windowStartIndex, windowEndIndex, frozenAtr, maxBandwidthAtrRatioOverride);
 }
 
 export function detectCompressionSeries(candles: readonly Candle[]): CompressionResult[] {
