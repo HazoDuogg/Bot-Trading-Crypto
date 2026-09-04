@@ -95,3 +95,4 @@ skills-lock.json
 README.md
 
 apps/bot/reports/
+apps/bot/data/*.csv

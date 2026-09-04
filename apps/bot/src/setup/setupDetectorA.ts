@@ -43,9 +43,16 @@ function traceDominance(dominance: DominanceEvidence): SetupSignal['reasonTrace'
 }
 
 // Setup family A — source-backed state ordering; D1-D8 evidence values remain conventions.
-export function detectSetupA(input: SetupAInput): SetupSignal | null {
-  if (input.quality.label !== 'CLEAN' || input.breakout === null) return null;
-  if (!input.breakoutStrength.isStrong) return null;
+// TICKET-045: disabledConditions is ablation-only (always treats that D-check as satisfied);
+// omitted keeps current behavior exactly.
+export function detectSetupA(
+  input: SetupAInput,
+  disabledConditions?: ReadonlySet<string>,
+): SetupSignal | null {
+  if ((!disabledConditions?.has('D4') && input.quality.label !== 'CLEAN') || input.breakout === null) {
+    return null;
+  }
+  if (!disabledConditions?.has('D7') && !input.breakoutStrength.isStrong) return null;
   if (
     input.dominance.side === 'NEUTRAL' ||
     !input.dominance.counterTestFailed ||
@@ -53,12 +60,12 @@ export function detectSetupA(input: SetupAInput): SetupSignal | null {
   ) {
     return null;
   }
-  if (!input.compression.isCompressed) return null;
+  if (!disabledConditions?.has('D5') && !input.compression.isCompressed) return null;
 
   const baseLength = input.baseZone.end_index - input.baseZone.start_index + 1;
   const expectedWindowStart = input.baseZone.end_index - 7;
   if (
-    baseLength < 8 ||
+    (!disabledConditions?.has('D3') && baseLength < 8) ||
     input.compression.windowStartIndex !== expectedWindowStart ||
     input.compression.windowEndIndex !== input.baseZone.end_index ||
     input.compression.windowStartIndex < input.baseZone.start_index

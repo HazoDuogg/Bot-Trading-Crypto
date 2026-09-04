@@ -76,6 +76,8 @@ export interface FsmConfig {
   btcM15Candles?: readonly Candle[];
   // TICKET-042: audit-only D5 threshold override. Omitted keeps current (1.5) behavior exactly.
   compressionMaxBandwidthAtrRatioOverride?: number;
+  // TICKET-045: ablation-only D1-D8 bypass. Omitted keeps current behavior exactly.
+  disabledConditions?: ReadonlySet<string>;
   // TICKET-039: core retest-fill mechanism now runs on M1 candles, not optional like btcM15Candles.
   m1Candles: readonly Candle[];
   dataGate: (candles: readonly Candle[], index: number) => FsmDataGateResult;
@@ -110,8 +112,11 @@ function breakAtCurrent(
   level: number,
   direction: BreakResult['direction'],
   priorAtr: number | null,
+  bypassD2 = false,
 ): BreakResult | null {
   if (priorAtr === null) return null;
+  // TICKET-045: bypassing D2 means every level touch counts as a break, skipping the ATR buffer.
+  if (bypassD2) return { brokeAt: index, direction, level };
   return isMeaningfulBreakAtClose(candle.close, level, direction, priorAtr)
     ? { brokeAt: index, direction, level }
     : null;
@@ -147,8 +152,11 @@ function isBtcTrendAligned(
 export function createDefaultStrategyAdapter(options?: {
   btcM15Candles?: readonly Candle[];
   compressionMaxBandwidthAtrRatioOverride?: number;
+  disabledConditions?: ReadonlySet<string>;
 }): NukidaStrategyAdapter {
   const atrTracker = createAtrTracker(D2_BREAK_V1_ATR_PERIOD);
+  const disabled = options?.disabledConditions;
+  const bypassD2 = disabled?.has('D2') ?? false;
   let priorAtr: number | null = null;
   let activeHigh: ActiveSwing | null = null;
   let activeLow: ActiveSwing | null = null;
@@ -161,9 +169,11 @@ export function createDefaultStrategyAdapter(options?: {
     onClosedCandle(candles, index) {
       const current = candles[index];
       for (const active of [activeHigh, activeLow]) {
-        if (active === null || active.broken || index < active.eligibleFrom) continue;
+        if (active === null || active.broken) continue;
+        // TICKET-045: bypassing D1 means a swing is active immediately, skipping eligibleFrom.
+        if (!disabled?.has('D1') && index < active.eligibleFrom) continue;
         const direction = active.type === 'high' ? 'up' : 'down';
-        const breakout = breakAtCurrent(current, index, active.price, direction, priorAtr);
+        const breakout = breakAtCurrent(current, index, active.price, direction, priorAtr, bypassD2);
         if (breakout !== null && priorAtr !== null) {
           active.broken = true;
           pendingDominance.push({
@@ -198,13 +208,15 @@ export function createDefaultStrategyAdapter(options?: {
           low: newLocalZone.low,
         };
         baseSearchFloor = index;
-        if (zone.end_index - zone.start_index + 1 >= 8) {
+        // TICKET-045: D3 bypass skips only the >=8 accept/reject gate, not detectBaseZones' own
+        // internal minimum-candle constant used to shape the zone in the first place.
+        if (disabled?.has('D3') || zone.end_index - zone.start_index + 1 >= 8) {
           const compression = detectCompression(
             candles,
             zone.end_index,
             options?.compressionMaxBandwidthAtrRatioOverride,
           );
-          if (compression !== null && compression.isCompressed) {
+          if (compression !== null && (disabled?.has('D5') || compression.isCompressed)) {
             trackedBases.push({ zone, compression, upBroken: false, downBroken: false });
           }
         }
@@ -217,7 +229,7 @@ export function createDefaultStrategyAdapter(options?: {
       }> = [];
       for (const tracked of trackedBases) {
         if (!tracked.upBroken && index > tracked.zone.end_index) {
-          const breakout = breakAtCurrent(current, index, tracked.zone.high, 'up', priorAtr);
+          const breakout = breakAtCurrent(current, index, tracked.zone.high, 'up', priorAtr, bypassD2);
           if (breakout !== null && priorAtr !== null) {
             tracked.upBroken = true;
             baseBreaks.push({
@@ -228,7 +240,7 @@ export function createDefaultStrategyAdapter(options?: {
           }
         }
         if (!tracked.downBroken && index > tracked.zone.end_index) {
-          const breakout = breakAtCurrent(current, index, tracked.zone.low, 'down', priorAtr);
+          const breakout = breakAtCurrent(current, index, tracked.zone.low, 'down', priorAtr, bypassD2);
           if (breakout !== null && priorAtr !== null) {
             tracked.downBroken = true;
             baseBreaks.push({
@@ -270,16 +282,30 @@ export function createDefaultStrategyAdapter(options?: {
       const quality = evaluateQuality(candles, index);
       const dominance = dominanceTimeline.at(-1)?.evidence ?? null;
       const setups: SetupSignal[] = [];
-      if (quality?.label === 'CLEAN' && dominance !== null) {
+      const qualityOk = quality !== null && (disabled?.has('D4') || quality.label === 'CLEAN');
+      if (qualityOk && (dominance !== null || disabled?.has('D6'))) {
         for (const candidate of baseBreaks) {
-          const setup = detectSetupA({
-            baseZone: candidate.tracked.zone,
-            quality,
-            compression: candidate.tracked.compression,
-            dominance,
-            breakout: candidate.breakout,
-            breakoutStrength: candidate.breakoutStrength,
-          });
+          // TICKET-045: D6 bypass fabricates passing dominance evidence (ablation only, not real
+          // dominance) from the candidate's own break, since real dominance may be absent/stale.
+          const effectiveDominance: DominanceEvidence = disabled?.has('D6')
+            ? {
+                side: candidate.breakout.direction === 'up' ? 'BULL' : 'BEAR',
+                brokeLevel: candidate.breakout.level,
+                counterTestFailed: true,
+                counterTestIndex: candidate.breakout.brokeAt - D6_RECLAIM_WINDOW,
+              }
+            : dominance!;
+          const setup = detectSetupA(
+            {
+              baseZone: candidate.tracked.zone,
+              quality: quality!,
+              compression: candidate.tracked.compression,
+              dominance: effectiveDominance,
+              breakout: candidate.breakout,
+              breakoutStrength: candidate.breakoutStrength,
+            },
+            disabled,
+          );
           if (setup !== null && isBtcTrendAligned(options?.btcM15Candles, current, setup)) {
             setups.push(setup);
           }
@@ -312,6 +338,7 @@ export function createNukidaFsm(config: FsmConfig): {
     createDefaultStrategyAdapter({
       btcM15Candles: config.btcM15Candles,
       compressionMaxBandwidthAtrRatioOverride: config.compressionMaxBandwidthAtrRatioOverride,
+      disabledConditions: config.disabledConditions,
     });
   const entryAtrTracker = createAtrTracker(D2_BREAK_V1_ATR_PERIOD);
   const state: FsmState = { pendingSetups: [] };
@@ -354,6 +381,7 @@ export function createNukidaFsm(config: FsmConfig): {
             windowStartTimestamp,
             frozenAtrAtTrigger,
             tickSize: config.tickSize,
+            disabledConditions: config.disabledConditions,
           });
           if (entry.status === 'FILLED') {
             const tradePlan = createTradePlan({

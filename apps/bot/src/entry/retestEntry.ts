@@ -15,6 +15,8 @@ export interface M1RetestWindowInput {
   windowStartTimestamp: number;
   frozenAtrAtTrigger: number;
   tickSize: number;
+  // TICKET-045: ablation-only bypass for D8 no-chase. Omitted keeps current behavior exactly.
+  disabledConditions?: ReadonlySet<string>;
 }
 
 export type M1RetestWindowResult =
@@ -90,8 +92,10 @@ function scanRetestWindowFrom(
   limitPrice: number,
   breakLevel: number,
   frozenAtrAtTrigger: number,
+  disabledConditions?: ReadonlySet<string>,
 ): M1RetestWindowResult {
   const windowEndTimestamp = windowStartTimestamp + M15_WINDOW_MS;
+  const bypassD8 = disabledConditions?.has('D8') ?? false;
 
   // Manual index walk (not filter/slice) so a resolved fill/cancel stops before ever touching
   // a later M1 candle — required for causal safety, since array methods aren't lazy.
@@ -104,13 +108,15 @@ function scanRetestWindowFrom(
     if (current.low <= limitPrice && limitPrice <= current.high) {
       return { status: 'FILLED', fillTimestamp: current.openTime, fillPrice: limitPrice };
     }
-    const extension = detectNoChaseExtension({
-      currentClose: current.close,
-      breakLevel,
-      frozenAtr: frozenAtrAtTrigger,
-    });
-    if (extension.isOverExtended) {
-      return { status: 'CANCELLED_OVER_EXTENDED', cancelTimestamp: current.openTime };
+    if (!bypassD8) {
+      const extension = detectNoChaseExtension({
+        currentClose: current.close,
+        breakLevel,
+        frozenAtr: frozenAtrAtTrigger,
+      });
+      if (extension.isOverExtended) {
+        return { status: 'CANCELLED_OVER_EXTENDED', cancelTimestamp: current.openTime };
+      }
     }
   }
 
@@ -162,6 +168,7 @@ export function evaluateM1RetestWindow(input: M1RetestWindowInput): M1RetestWind
       limitPrice,
       breakLevel,
       input.frozenAtrAtTrigger,
+      input.disabledConditions,
     );
   }
   return scanRetestWindowFrom(
@@ -170,5 +177,6 @@ export function evaluateM1RetestWindow(input: M1RetestWindowInput): M1RetestWind
     limitPrice,
     breakLevel,
     input.frozenAtrAtTrigger,
+    input.disabledConditions,
   );
 }
