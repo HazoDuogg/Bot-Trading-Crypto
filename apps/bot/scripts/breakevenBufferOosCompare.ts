@@ -3,9 +3,25 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ExcelJS from 'exceljs';
 import type { Candle } from '../src/noTradeZone/types.js';
+import { createAtrTracker } from '../src/noTradeZone/atr.js';
 import { M15_CANDLE_DURATION_MS } from '../src/backtest/intrabarExecution.js';
 import { calculateExecutionCosts } from '../src/backtest/costModel.js';
-import { simulatePositionManagementV2 } from '../src/risk/positionManagementV2.js';
+import {
+  simulatePositionManagementV2,
+  predictedCostR,
+  BREAKEVEN_SAFETY_FACTOR,
+  BREAKEVEN_BUFFER_FLOOR_R,
+  BREAKEVEN_BUFFER_CAP_R,
+  BREAKEVEN_TRIGGER_R,
+  TP1_R,
+  TP1_FRACTION,
+  TP2_R,
+  TRAILING_ATR_MULTIPLE,
+  POSITION_MANAGEMENT_V2_ATR_PERIOD,
+  POSITION_MANAGEMENT_V2_MAX_M1_CANDLES,
+  type PositionExitLeg,
+  type PositionManagementV2Result,
+} from '../src/risk/positionManagementV2.js';
 import type { TradePlan } from '../src/risk/tradePlan.js';
 
 // TICKET-04X item 4/5: before/after comparison of the adaptive breakeven buffer, held out to the
@@ -14,8 +30,22 @@ import type { TradePlan } from '../src/risk/tradePlan.js';
 // files (fixed 0.05R buffer); "after" re-simulates the same (coin, entryTimestamp, direction)
 // population with the now-adaptive simulatePositionManagementV2 and reclassifies WIN_NET_PROFIT /
 // WIN_FEE_EATEN / LOSS exactly as reverseEntryMining.ts does.
+//
+// TICKET-04X-B: --safetyFactors=0.8,1.0,1.1,1.2,1.5 (CLI arg) sweeps safetyFactor instead of using
+// the module's fixed BREAKEVEN_SAFETY_FACTOR. positionManagementV2.ts is NOT touched (still hardcodes
+// 1.2), so a swept value other than the module's own BREAKEVEN_SAFETY_FACTOR runs through a local
+// line-for-line copy of the state machine (simulateWithSafetyFactor below) that takes safetyFactor
+// as a parameter; the fit's alpha/C (via the imported predictedCostR), the 0.05 floor, the 0.75
+// cap, the trigger, and the TP1/TP2/trailing logic are all imported unchanged from production, not
+// re-derived. When the swept value equals BREAKEVEN_SAFETY_FACTOR, production's own
+// simulatePositionManagementV2 is called directly instead, so the default single-value run (no CLI
+// arg) is byte-for-byte the same code path as TICKET-04X's original run.
 const RISK_BUDGET_USD = 6;
 const SPLIT_TIMESTAMP = 1_740_536_100_000;
+const safetyFactorsArg = process.argv.find((a) => a.startsWith('--safetyFactors='));
+const SAFETY_FACTORS: readonly number[] = safetyFactorsArg
+  ? safetyFactorsArg.slice('--safetyFactors='.length).split(',').map(Number)
+  : [BREAKEVEN_SAFETY_FACTOR];
 
 type Group = 'WIN_NET_PROFIT' | 'WIN_FEE_EATEN' | 'LOSS';
 const GROUPS: readonly Group[] = ['WIN_NET_PROFIT', 'WIN_FEE_EATEN', 'LOSS'];
@@ -94,6 +124,154 @@ function addTo(acc: Accumulator, grossR: number, netR: number): void {
   acc.sumNetR += netR;
 }
 
+function directionSign(plan: TradePlan): 1 | -1 {
+  return plan.direction === 'BULL' ? 1 : -1;
+}
+
+function touches(candle: Candle, price: number): boolean {
+  return candle.low <= price && candle.high >= price;
+}
+
+function grossR(plan: TradePlan, legs: readonly PositionExitLeg[]): number {
+  const sign = directionSign(plan);
+  return legs.reduce(
+    (sum, leg) => sum + (leg.fraction * sign * (leg.exitPrice - plan.entryPrice)) / plan.riskPerUnit,
+    0,
+  );
+}
+
+// Line-for-line copy of simulatePositionManagementV2's state machine, with the one deliberate
+// change: bufferR takes safetyFactor as a parameter instead of the module's fixed constant. See the
+// TICKET-04X-B header comment above for why this duplication exists instead of calling production.
+function simulateWithSafetyFactor(
+  plan: TradePlan,
+  entryFillTimestamp: number,
+  m1Candles: readonly Candle[],
+  safetyFactor: number,
+): PositionManagementV2Result {
+  const sign = directionSign(plan);
+  const breakevenTriggerPrice = plan.entryPrice + sign * BREAKEVEN_TRIGGER_R * plan.riskPerUnit;
+  const rawBuffer = safetyFactor * predictedCostR(plan.entryPrice, plan.riskPerUnit);
+  const bufferR = Math.min(BREAKEVEN_BUFFER_CAP_R, Math.max(BREAKEVEN_BUFFER_FLOOR_R, rawBuffer));
+  const breakevenStopPrice = plan.entryPrice + sign * bufferR * plan.riskPerUnit;
+  const tp1Price = plan.entryPrice + sign * TP1_R * plan.riskPerUnit;
+  const tp2Price = plan.entryPrice + sign * TP2_R * plan.riskPerUnit;
+
+  const legs: PositionExitLeg[] = [];
+  let phase: 'A' | 'B' | 'C' = 'A';
+  let runnerStop = breakevenStopPrice;
+  let trailingActive = false;
+  let consumed = 0;
+  const atrTracker = createAtrTracker(POSITION_MANAGEMENT_V2_ATR_PERIOD);
+
+  for (const current of m1Candles) {
+    if (current.openTime <= entryFillTimestamp) continue;
+    consumed += 1;
+
+    const activeStop = phase === 'A' ? plan.stopLoss : phase === 'B' ? breakevenStopPrice : runnerStop;
+    const activeTP = phase === 'C' ? tp2Price : tp1Price;
+    const hitStop = touches(current, activeStop);
+    const hitTP = touches(current, activeTP);
+
+    if (hitStop && hitTP) {
+      const reason = phase === 'A' ? 'INITIAL_STOP' : trailingActive ? 'TRAILING_STOP' : 'BREAKEVEN_STOP';
+      const fraction = phase === 'C' ? 1 - TP1_FRACTION : 1;
+      legs.push({
+        reason,
+        fraction,
+        exitPrice: activeStop,
+        exitTimestamp: current.openTime,
+        reasonCode: 'AMBIGUOUS_FORCED_LOSS',
+      });
+      return {
+        outcome: reason,
+        exitLegs: legs,
+        grossR: grossR(plan, legs),
+        partialExitTriggered: phase === 'C',
+        m1CandlesConsumed: consumed,
+      };
+    }
+
+    if (hitStop) {
+      const reason = phase === 'A' ? 'INITIAL_STOP' : trailingActive ? 'TRAILING_STOP' : 'BREAKEVEN_STOP';
+      const fraction = phase === 'C' ? 1 - TP1_FRACTION : 1;
+      legs.push({ reason, fraction, exitPrice: activeStop, exitTimestamp: current.openTime });
+      return {
+        outcome: reason,
+        exitLegs: legs,
+        grossR: grossR(plan, legs),
+        partialExitTriggered: phase === 'C',
+        m1CandlesConsumed: consumed,
+      };
+    }
+
+    if (hitTP) {
+      if (phase !== 'C') {
+        legs.push({
+          reason: 'PARTIAL_EXIT',
+          fraction: TP1_FRACTION,
+          exitPrice: tp1Price,
+          exitTimestamp: current.openTime,
+        });
+        phase = 'C';
+        runnerStop = breakevenStopPrice;
+        trailingActive = false;
+      } else {
+        legs.push({
+          reason: 'TAKE_PROFIT_2',
+          fraction: 1 - TP1_FRACTION,
+          exitPrice: tp2Price,
+          exitTimestamp: current.openTime,
+        });
+        return {
+          outcome: 'TAKE_PROFIT_2',
+          exitLegs: legs,
+          grossR: grossR(plan, legs),
+          partialExitTriggered: true,
+          m1CandlesConsumed: consumed,
+        };
+      }
+    }
+
+    if (phase === 'A' && touches(current, breakevenTriggerPrice)) phase = 'B';
+
+    const atr = atrTracker.next(current);
+    if (phase === 'C' && atr !== null) {
+      const candidate = current.close - sign * TRAILING_ATR_MULTIPLE * atr;
+      const improves = sign === 1 ? candidate > runnerStop : candidate < runnerStop;
+      if (improves) {
+        runnerStop = candidate;
+        trailingActive = true;
+      }
+    }
+
+    if (consumed === POSITION_MANAGEMENT_V2_MAX_M1_CANDLES) {
+      const fraction = phase === 'C' ? 1 - TP1_FRACTION : 1;
+      legs.push({
+        reason: 'FORCED_CLOSE_TIMEOUT',
+        fraction,
+        exitPrice: current.close,
+        exitTimestamp: current.openTime,
+      });
+      return {
+        outcome: 'FORCED_CLOSE_TIMEOUT',
+        exitLegs: legs,
+        grossR: grossR(plan, legs),
+        partialExitTriggered: phase === 'C',
+        m1CandlesConsumed: consumed,
+      };
+    }
+  }
+
+  return {
+    outcome: 'OPEN_DATA_END',
+    exitLegs: legs,
+    grossR: grossR(plan, legs),
+    partialExitTriggered: phase === 'C',
+    m1CandlesConsumed: consumed,
+  };
+}
+
 async function main(): Promise<void> {
   const dataDirectory = fileURLToPath(new URL('../data/', import.meta.url));
   const reportsDirectory = fileURLToPath(new URL('../reports/', import.meta.url));
@@ -112,17 +290,23 @@ async function main(): Promise<void> {
     WIN_FEE_EATEN: emptyAcc(),
     LOSS: emptyAcc(),
   };
-  const afterByGroup: Record<Group, Accumulator> = {
-    WIN_NET_PROFIT: emptyAcc(),
-    WIN_FEE_EATEN: emptyAcc(),
-    LOSS: emptyAcc(),
-  };
-  // transition[before][after] = count
-  const transition: Record<Group, Record<Group, number>> = {
-    WIN_NET_PROFIT: { WIN_NET_PROFIT: 0, WIN_FEE_EATEN: 0, LOSS: 0 },
-    WIN_FEE_EATEN: { WIN_NET_PROFIT: 0, WIN_FEE_EATEN: 0, LOSS: 0 },
-    LOSS: { WIN_NET_PROFIT: 0, WIN_FEE_EATEN: 0, LOSS: 0 },
-  };
+  const afterByFactorByGroup = new Map<number, Record<Group, Accumulator>>(
+    SAFETY_FACTORS.map((f) => [f, { WIN_NET_PROFIT: emptyAcc(), WIN_FEE_EATEN: emptyAcc(), LOSS: emptyAcc() }]),
+  );
+  // transition[factor][before][after] = count
+  const transitionByFactor = new Map<number, Record<Group, Record<Group, number>>>(
+    SAFETY_FACTORS.map((f) => [
+      f,
+      {
+        WIN_NET_PROFIT: { WIN_NET_PROFIT: 0, WIN_FEE_EATEN: 0, LOSS: 0 },
+        WIN_FEE_EATEN: { WIN_NET_PROFIT: 0, WIN_FEE_EATEN: 0, LOSS: 0 },
+        LOSS: { WIN_NET_PROFIT: 0, WIN_FEE_EATEN: 0, LOSS: 0 },
+      },
+    ]),
+  );
+
+  // Group by coin so each coin's CSVs load exactly once for the whole sweep, not once per factor.
+  allRows.sort((a, b) => (a.coin < b.coin ? -1 : a.coin > b.coin ? 1 : 0));
 
   let currentCoin: string | null = null;
   let m1Candles: Candle[] = [];
@@ -158,29 +342,36 @@ async function main(): Promise<void> {
     const entryFillTimestamp = row.entryTimestamp + M15_CANDLE_DURATION_MS - 1;
     const postFillM1 = m1Candles.slice(firstM1After(m1Candles, entryFillTimestamp));
     const entryM1Candle = postFillM1[0];
-    const execution = simulatePositionManagementV2({ tradePlan, entryFillTimestamp, m1Candles: postFillM1 });
-    if (execution.outcome === 'OPEN_DATA_END' || entryM1Candle === undefined) {
+    if (entryM1Candle === undefined) {
       unresolved += 1;
       continue;
     }
 
-    let totalGrossR = 0;
-    let totalNetR = 0;
-    for (const leg of execution.exitLegs) {
-      const exitM1Candle = m1Candles[firstM1After(m1Candles, leg.exitTimestamp - 1)];
-      const costs = calculateExecutionCosts({
-        tradePlan,
-        exitPrice: leg.exitPrice,
-        exitReason: leg.reason === 'PARTIAL_EXIT' || leg.reason === 'TAKE_PROFIT_2' ? 'TAKE_PROFIT' : 'STOP_LOSS',
-        entryM1Candle,
-        exitM1Candle,
-      });
-      totalGrossR += leg.fraction * costs.grossR;
-      totalNetR += leg.fraction * costs.netR;
+    for (const safetyFactor of SAFETY_FACTORS) {
+      const execution =
+        safetyFactor === BREAKEVEN_SAFETY_FACTOR
+          ? simulatePositionManagementV2({ tradePlan, entryFillTimestamp, m1Candles: postFillM1 })
+          : simulateWithSafetyFactor(tradePlan, entryFillTimestamp, postFillM1, safetyFactor);
+      if (execution.outcome === 'OPEN_DATA_END') continue;
+
+      let totalGrossR = 0;
+      let totalNetR = 0;
+      for (const leg of execution.exitLegs) {
+        const exitM1Candle = m1Candles[firstM1After(m1Candles, leg.exitTimestamp - 1)];
+        const costs = calculateExecutionCosts({
+          tradePlan,
+          exitPrice: leg.exitPrice,
+          exitReason: leg.reason === 'PARTIAL_EXIT' || leg.reason === 'TAKE_PROFIT_2' ? 'TAKE_PROFIT' : 'STOP_LOSS',
+          entryM1Candle,
+          exitM1Candle,
+        });
+        totalGrossR += leg.fraction * costs.grossR;
+        totalNetR += leg.fraction * costs.netR;
+      }
+      const afterGroup: Group = totalGrossR <= 0 ? 'LOSS' : totalNetR > 0 ? 'WIN_NET_PROFIT' : 'WIN_FEE_EATEN';
+      addTo(afterByFactorByGroup.get(safetyFactor)![afterGroup], totalGrossR, totalNetR);
+      transitionByFactor.get(safetyFactor)![row.originalGroup][afterGroup] += 1;
     }
-    const afterGroup: Group = totalGrossR <= 0 ? 'LOSS' : totalNetR > 0 ? 'WIN_NET_PROFIT' : 'WIN_FEE_EATEN';
-    addTo(afterByGroup[afterGroup], totalGrossR, totalNetR);
-    transition[row.originalGroup][afterGroup] += 1;
 
     if (idx % 40_000 === 0) {
       console.info(`${idx}/${allRows.length} elapsed=${((Date.now() - startedAt) / 60_000).toFixed(1)}min`);
@@ -198,19 +389,31 @@ async function main(): Promise<void> {
     };
   }
 
+  const overallSumNetRBefore = GROUPS.reduce((s, g) => s + beforeByGroup[g].sumNetR, 0);
   const report = {
     splitTimestamp: SPLIT_TIMESTAMP,
     totalOosRows: allRows.length,
     unresolved,
+    safetyFactorsSwept: SAFETY_FACTORS,
     before: Object.fromEntries(GROUPS.map((g) => [g, summarize(beforeByGroup[g])])),
-    after: Object.fromEntries(GROUPS.map((g) => [g, summarize(afterByGroup[g])])),
-    transitionCountsBeforeGroupToAfterGroup: transition,
-    overallSumNetRBefore: GROUPS.reduce((s, g) => s + beforeByGroup[g].sumNetR, 0),
-    overallSumNetRAfter: GROUPS.reduce((s, g) => s + afterByGroup[g].sumNetR, 0),
+    overallSumNetRBefore,
+    bySafetyFactor: Object.fromEntries(
+      SAFETY_FACTORS.map((f) => [
+        f,
+        {
+          after: Object.fromEntries(GROUPS.map((g) => [g, summarize(afterByFactorByGroup.get(f)![g])])),
+          transitionCountsBeforeGroupToAfterGroup: transitionByFactor.get(f),
+          overallSumNetRAfter: GROUPS.reduce((s, g) => s + afterByFactorByGroup.get(f)![g].sumNetR, 0),
+        },
+      ]),
+    ),
   };
 
   console.info(JSON.stringify(report, null, 2));
-  const outputPath = resolve(dataDirectory, 'nukida-ticket04x-oos-before-after.json');
+  const outputPath = resolve(
+    dataDirectory,
+    SAFETY_FACTORS.length > 1 ? 'nukida-ticket04x-b-safety-factor-sweep.json' : 'nukida-ticket04x-oos-before-after.json',
+  );
   await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   console.info(`Output: ${outputPath}`);
   console.info(`Elapsed: ${((Date.now() - startedAt) / 60_000).toFixed(1)} min`);
