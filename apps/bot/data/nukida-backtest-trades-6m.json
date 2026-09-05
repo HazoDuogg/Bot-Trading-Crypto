@@ -1,0 +1,518 @@
+[
+  {
+    "coin": "ETHUSDT",
+    "setupFamily": "A_COMPRESSION_BREAKOUT",
+    "signalTime": 1775991600000,
+    "orderActiveTime": 1775991600000,
+    "firstTouchFillTimestamp": 1775992380000,
+    "firstTouchFillPrice": 2205.53,
+    "minutesSignalToFill": 13,
+    "entryFillTimestamp": 1775992379999,
+    "tradePlan": {
+      "direction": "BEAR",
+      "entryPrice": 2205.53,
+      "stopLoss": 2282.47,
+      "takeProfit": 2051.65,
+      "riskPerUnit": 76.94,
+      "positionSize": 1.299,
+      "requiredMargin": 143.2491735
+    },
+    "reasonTrace": {
+      "quality": {
+        "label": "CLEAN",
+        "efficiency": 0.18466111771700514,
+        "sweepCount": 1
+      },
+      "dominance": {
+        "side": "BEAR",
+        "brokeLevel": 2287,
+        "counterTestFailed": true,
+        "counterTestIndex": 4069
+      },
+      "d3": {
+        "startIndex": 4078,
+        "endIndex": 4114,
+        "high": 2282.46,
+        "low": 2205.52
+      },
+      "d5": {
+        "bandwidthAtrRatio": 1.2070545412055251,
+        "isCompressed": true
+      },
+      "d2": {
+        "brokeAt": 4115,
+        "level": 2205.52
+      },
+      "d7": {
+        "bodyRatio": 0.5815856777493864,
+        "rangeAtrRatio": 4.2357199350669115,
+        "isStrong": true
+      }
+    },
+    "execution": {
+      "outcome": "INITIAL_STOP",
+      "exitLegs": [
+        {
+          "reason": "INITIAL_STOP",
+          "fraction": 1,
+          "exitPrice": 2282.47,
+          "exitTimestamp": 1776118380000
+        }
+      ],
+      "grossR": -0.9999999999999948,
+      "partialExitTriggered": false,
+      "m1CandlesConsumed": 2101
+    },
+    "MFE": 0.4227969846633767,
+    "MAE": 1.0106576553158275,
+    "costR": 0.04211854561996408,
+    "postStopHorizons": {
+      "min15": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0
+      },
+      "min30": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0
+      },
+      "min60": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0
+      },
+      "min120": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0
+      },
+      "min240": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0
+      }
+    },
+    "costs": {
+      "grossR": -0.9999999999999948,
+      "feeR": 0.018509317650116975,
+      "spreadR": 0.01767611125552426,
+      "slippageR": 0.005933116714322849,
+      "netR": -1.0421185456199586
+    }
+  },
+  {
+    "coin": "ETHUSDT",
+    "setupFamily": "A_COMPRESSION_BREAKOUT",
+    "signalTime": 1776418200000,
+    "orderActiveTime": 1776418200000,
+    "firstTouchFillTimestamp": 1776418200000,
+    "firstTouchFillPrice": 2363.66,
+    "minutesSignalToFill": 0,
+    "entryFillTimestamp": 1776418199999,
+    "tradePlan": {
+      "direction": "BULL",
+      "entryPrice": 2363.66,
+      "stopLoss": 2307.93,
+      "takeProfit": 2475.12,
+      "riskPerUnit": 55.73,
+      "positionSize": 1.794,
+      "requiredMargin": 212.020302
+    },
+    "reasonTrace": {
+      "quality": {
+        "label": "CLEAN",
+        "efficiency": 0.25209420905669694,
+        "sweepCount": 1
+      },
+      "dominance": {
+        "side": "BULL",
+        "brokeLevel": 2333.12,
+        "counterTestFailed": true,
+        "counterTestIndex": 4582
+      },
+      "d3": {
+        "startIndex": 4518,
+        "endIndex": 4556,
+        "high": 2363.67,
+        "low": 2307.94
+      },
+      "d5": {
+        "bandwidthAtrRatio": 1.4424989066728306,
+        "isCompressed": true
+      },
+      "d2": {
+        "brokeAt": 4589,
+        "level": 2363.67
+      },
+      "d7": {
+        "bodyRatio": 0.5735238811583271,
+        "rangeAtrRatio": 3.40278049491735,
+        "isStrong": true
+      }
+    },
+    "execution": {
+      "outcome": "TRAILING_STOP",
+      "exitLegs": [
+        {
+          "reason": "PARTIAL_EXIT",
+          "fraction": 0.5,
+          "exitPrice": 2419.39,
+          "exitTimestamp": 1776432000000
+        },
+        {
+          "reason": "TRAILING_STOP",
+          "fraction": 0.5,
+          "exitPrice": 2415.641140158978,
+          "exitTimestamp": 1776432360000
+        }
+      ],
+      "grossR": 0.9663658725908686,
+      "partialExitTriggered": true,
+      "m1CandlesConsumed": 237
+    },
+    "MFE": 1.1186075722232218,
+    "MAE": 0.5189305580477315,
+    "costR": 0.07092745864976957,
+    "postStopHorizons": {
+      "min15": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0.9117172079669827
+      },
+      "min30": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 1.3696393324959615
+      },
+      "min60": {
+        "reached1_5R": true,
+        "reached2R": false,
+        "mfeR": 1.5051139422214268
+      },
+      "min120": {
+        "reached1_5R": true,
+        "reached2R": false,
+        "mfeR": 1.6626592499551465
+      },
+      "min240": {
+        "reached1_5R": true,
+        "reached2R": false,
+        "mfeR": 1.797954423111435
+      }
+    },
+    "costs": {
+      "grossR": 0.9663658725908686,
+      "feeR": 0.02129415317666912,
+      "spreadR": 0.04529876188767252,
+      "slippageR": 0.004334543585427918,
+      "netR": 0.895438413941099
+    }
+  },
+  {
+    "coin": "ETHUSDT",
+    "setupFamily": "A_COMPRESSION_BREAKOUT",
+    "signalTime": 1776510900000,
+    "orderActiveTime": 1776510900000,
+    "firstTouchFillTimestamp": 1776511080000,
+    "firstTouchFillPrice": 2354.36,
+    "minutesSignalToFill": 3,
+    "entryFillTimestamp": 1776511079999,
+    "tradePlan": {
+      "direction": "BEAR",
+      "entryPrice": 2354.36,
+      "stopLoss": 2463.87,
+      "takeProfit": 2135.34,
+      "riskPerUnit": 109.51,
+      "positionSize": 0.913,
+      "requiredMargin": 107.47653400000002
+    },
+    "reasonTrace": {
+      "quality": {
+        "label": "CLEAN",
+        "efficiency": 0.3507384935956364,
+        "sweepCount": 1
+      },
+      "dominance": {
+        "side": "BEAR",
+        "brokeLevel": 2403.79,
+        "counterTestFailed": true,
+        "counterTestIndex": 4680
+      },
+      "d3": {
+        "startIndex": 4603,
+        "endIndex": 4662,
+        "high": 2463.86,
+        "low": 2354.35
+      },
+      "d5": {
+        "bandwidthAtrRatio": 1.1654086261607284,
+        "isCompressed": true
+      },
+      "d2": {
+        "brokeAt": 4692,
+        "level": 2354.35
+      },
+      "d7": {
+        "bodyRatio": 0.5612403100775183,
+        "rangeAtrRatio": 1.6224840052660559,
+        "isStrong": true
+      }
+    },
+    "execution": {
+      "outcome": "FORCED_CLOSE_TIMEOUT",
+      "exitLegs": [
+        {
+          "reason": "FORCED_CLOSE_TIMEOUT",
+          "fraction": 1,
+          "exitPrice": 2319.18,
+          "exitTimestamp": 1776770220000
+        }
+      ],
+      "grossR": 0.32124920098621396,
+      "partialExitTriggered": false,
+      "m1CandlesConsumed": 4320
+    },
+    "MFE": 0.9446625878915192,
+    "MAE": 0.18071409003743916,
+    "costR": 0.021507184731987747,
+    "postStopHorizons": {
+      "min15": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0
+      },
+      "min30": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0
+      },
+      "min60": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0
+      },
+      "min120": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0
+      },
+      "min240": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0
+      }
+    },
+    "costs": {
+      "grossR": 0.3212492009862139,
+      "feeR": 0.013399833805131952,
+      "spreadR": 0.003871792530362324,
+      "slippageR": 0.00423555839649347,
+      "netR": 0.29974201625422614
+    }
+  },
+  {
+    "coin": "ETHUSDT",
+    "setupFamily": "A_COMPRESSION_BREAKOUT",
+    "signalTime": 1783341900000,
+    "orderActiveTime": 1783341900000,
+    "firstTouchFillTimestamp": 1783342320000,
+    "firstTouchFillPrice": 1743.1,
+    "minutesSignalToFill": 7,
+    "entryFillTimestamp": 1783342319999,
+    "tradePlan": {
+      "direction": "BEAR",
+      "entryPrice": 1743.1,
+      "stopLoss": 1758.02,
+      "takeProfit": 1713.26,
+      "riskPerUnit": 14.92,
+      "positionSize": 6.702,
+      "requiredMargin": 584.11281
+    },
+    "reasonTrace": {
+      "quality": {
+        "label": "CLEAN",
+        "efficiency": 0.23752659391942937,
+        "sweepCount": 1
+      },
+      "dominance": {
+        "side": "BEAR",
+        "brokeLevel": 1761,
+        "counterTestFailed": true,
+        "counterTestIndex": 12174
+      },
+      "d3": {
+        "startIndex": 12044,
+        "endIndex": 12053,
+        "high": 1758.01,
+        "low": 1743.09
+      },
+      "d5": {
+        "bandwidthAtrRatio": 1.1783510029551392,
+        "isCompressed": true
+      },
+      "d2": {
+        "brokeAt": 12282,
+        "level": 1743.09
+      },
+      "d7": {
+        "bodyRatio": 0.6981412639405205,
+        "rangeAtrRatio": 1.7476053310468147,
+        "isStrong": true
+      }
+    },
+    "execution": {
+      "outcome": "BREAKEVEN_STOP",
+      "exitLegs": [
+        {
+          "reason": "BREAKEVEN_STOP",
+          "fraction": 1,
+          "exitPrice": 1742.3539999999998,
+          "exitTimestamp": 1783344660000
+        }
+      ],
+      "grossR": 0.05000000000000634,
+      "partialExitTriggered": false,
+      "m1CandlesConsumed": 40
+    },
+    "MFE": 0.8029490616621996,
+    "MAE": 0.15817694369974045,
+    "costR": 0.17461716487935752,
+    "postStopHorizons": {
+      "min15": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0.9919571045576377
+      },
+      "min30": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0.9919571045576377
+      },
+      "min60": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0.9919571045576377
+      },
+      "min120": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0.9919571045576377
+      },
+      "min240": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0.9919571045576377
+      }
+    },
+    "costs": {
+      "grossR": 0.05000000000000634,
+      "feeR": 0.07358024798927612,
+      "spreadR": 0.07768096514745407,
+      "slippageR": 0.023355951742627345,
+      "netR": -0.12461716487935119
+    }
+  },
+  {
+    "coin": "BTCUSDT",
+    "setupFamily": "A_COMPRESSION_BREAKOUT",
+    "signalTime": 1787820300000,
+    "orderActiveTime": 1787820300000,
+    "firstTouchFillTimestamp": 1787820600000,
+    "firstTouchFillPrice": 79753.09999999999,
+    "minutesSignalToFill": 5,
+    "entryFillTimestamp": 1787820599999,
+    "tradePlan": {
+      "direction": "BULL",
+      "entryPrice": 79753.1,
+      "stopLoss": 78827.2,
+      "takeProfit": 81604.9,
+      "riskPerUnit": 925.9,
+      "positionSize": 0.108,
+      "requiredMargin": 430.66674
+    },
+    "reasonTrace": {
+      "quality": {
+        "label": "CLEAN",
+        "efficiency": 0.25392965910207294,
+        "sweepCount": 1
+      },
+      "dominance": {
+        "side": "BULL",
+        "brokeLevel": 78551.4,
+        "counterTestFailed": true,
+        "counterTestIndex": 17219
+      },
+      "d3": {
+        "startIndex": 17071,
+        "endIndex": 17079,
+        "high": 79753.2,
+        "low": 78827.3
+      },
+      "d5": {
+        "bandwidthAtrRatio": 1.4074513967431688,
+        "isCompressed": true
+      },
+      "d2": {
+        "brokeAt": 17258,
+        "level": 79753.2
+      },
+      "d7": {
+        "bodyRatio": 0.5728987993138936,
+        "rangeAtrRatio": 1.318558083525735,
+        "isStrong": true
+      }
+    },
+    "execution": {
+      "outcome": "BREAKEVEN_STOP",
+      "exitLegs": [
+        {
+          "reason": "BREAKEVEN_STOP",
+          "fraction": 1,
+          "exitPrice": 79799.395,
+          "exitTimestamp": 1787825640000
+        }
+      ],
+      "grossR": 0.049999999999998115,
+      "partialExitTriggered": false,
+      "m1CandlesConsumed": 85
+    },
+    "MFE": 0.8065665838643357,
+    "MAE": 0.12139539907118342,
+    "costR": 0.09281257668214775,
+    "postStopHorizons": {
+      "min15": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0.25575116103249634
+      },
+      "min30": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0.25575116103249634
+      },
+      "min60": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0.25575116103249634
+      },
+      "min120": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0.25575116103249634
+      },
+      "min240": {
+        "reached1_5R": false,
+        "reached2R": false,
+        "mfeR": 0.25575116103249634
+      }
+    },
+    "costs": {
+      "grossR": 0.04999999999999812,
+      "feeR": 0.0542880286748029,
+      "spreadR": 0.021287396047089954,
+      "slippageR": 0.017237151960254892,
+      "netR": -0.042812576682149626
+    }
+  }
+]

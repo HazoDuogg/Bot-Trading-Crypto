@@ -1,0 +1,394 @@
+{
+  "warning": "WARNING: IN-SAMPLE calibration period. Pipeline diagnostic only; do not infer profitability.",
+  "generatedAt": "2026-09-03T03:57:07.507Z",
+  "strategyFingerprint": {
+    "hash": "12eacdcc766694ec6ebbdf3f5d52b8e8235c94cfba79feb66da8ff55558832c4",
+    "constants": {
+      "D1": {
+        "window": 5,
+        "sideCandles": 2
+      },
+      "D2": {
+        "atrPeriod": 14,
+        "atrBufferMultiplier": 0.1
+      },
+      "D3": {
+        "minCandles": 3,
+        "impulseRangeMultiplier": 1.5,
+        "requiredOverlapRatio": 1
+      },
+      "D4": {
+        "window": 20,
+        "sweepRejectionMin": 0.6,
+        "cleanEfficiencyMin": 0.148,
+        "cleanSweepMax": 1,
+        "chaoticEfficiencyMax": 0.041,
+        "chaoticSweepMin": 3
+      },
+      "D5": {
+        "window": 8,
+        "atrPeriod": 14,
+        "maxBandwidthAtrRatio": 1.5
+      },
+      "D6": {
+        "counterTestWindow": 10,
+        "secondTestCounterWindow": 20,
+        "reclaimWindow": 3,
+        "minimumTestOccurrence": 1
+      },
+      "D7": {
+        "minBodyRatio": 0.55,
+        "minRangeAtrRatio": 1
+      },
+      "D8": {
+        "maxDistanceAtrRatio": 2
+      }
+    }
+  },
+  "executionAssumptions": {
+    "periodDays": 180,
+    "riskBudgetUsd": 100,
+    "minimumStopDistanceAtrMultiple": 1.2,
+    "entryMakerFeeRate": 0.00018,
+    "takeProfitMakerFeeRate": 0.00018,
+    "stopLossTakerFeeRate": 0.00045,
+    "adverseSlippageRate": 0.0002,
+    "spreadProxy": "M1_RANGE_FRACTION_AT_ENTRY_AND_EXIT",
+    "spreadProxyM1RangeFraction": 0.1,
+    "exchangeFilterSource": "BINANCE_FUTURES_EXCHANGE_INFO_2026-09-01",
+    "coinConfig": {
+      "BTCUSDT": {
+        "tickSize": 0.1,
+        "lotSize": 0.001,
+        "leverage": 20
+      },
+      "ETHUSDT": {
+        "tickSize": 0.01,
+        "lotSize": 0.001,
+        "leverage": 20
+      },
+      "SOLUSDT": {
+        "tickSize": 0.01,
+        "lotSize": 0.01,
+        "leverage": 10
+      },
+      "HYPEUSDT": {
+        "tickSize": 0.001,
+        "lotSize": 0.01,
+        "leverage": 10
+      },
+      "DOGEUSDT": {
+        "tickSize": 0.00001,
+        "lotSize": 1,
+        "leverage": 10
+      }
+    }
+  },
+  "coinRuns": {
+    "BTCUSDT": {
+      "status": "COMPLETED"
+    },
+    "ETHUSDT": {
+      "status": "COMPLETED"
+    },
+    "SOLUSDT": {
+      "status": "COMPLETED"
+    },
+    "HYPEUSDT": {
+      "status": "COMPLETED"
+    },
+    "DOGEUSDT": {
+      "status": "COMPLETED"
+    }
+  },
+  "report": {
+    "note": "WARNING: IN-SAMPLE calibration period. Pipeline diagnostic only; do not infer profitability.",
+    "baselineVariant": "RETEST_LIMIT_ONLY",
+    "overall": {
+      "zeroCost": {
+        "closedTrades": 5,
+        "grossR": 0.38761507357709213,
+        "feeR": 0,
+        "spreadR": 0,
+        "slippageR": 0,
+        "netR": 0.38761507357709213,
+        "profitFactor": 1.387615073577094,
+        "expectancyPerTrade": 0.07752301471541842,
+        "maxDrawdownR": 0.9999999999999948,
+        "winRate": 0.8,
+        "ambiguousTrades": 0,
+        "openTrades": 0
+      },
+      "realisticCost": {
+        "closedTrades": 5,
+        "grossR": 0.38761507357709213,
+        "feeR": 0.18107158129599707,
+        "spreadR": 0.16581502686810312,
+        "slippageR": 0.05509632239912647,
+        "netR": -0.014367856986134304,
+        "profitFactor": 0.98812130351603,
+        "expectancyPerTrade": -0.002873571397226861,
+        "maxDrawdownR": 1.0421185456199586,
+        "winRate": 0.4,
+        "ambiguousTrades": 0,
+        "openTrades": 0
+      }
+    },
+    "byCoin": {
+      "BTCUSDT": {
+        "zeroCost": {
+          "closedTrades": 1,
+          "grossR": 0.04999999999999812,
+          "feeR": 0,
+          "spreadR": 0,
+          "slippageR": 0,
+          "netR": 0.04999999999999812,
+          "profitFactor": null,
+          "expectancyPerTrade": 0.04999999999999812,
+          "maxDrawdownR": 0,
+          "winRate": 1,
+          "ambiguousTrades": 0,
+          "openTrades": 0
+        },
+        "realisticCost": {
+          "closedTrades": 1,
+          "grossR": 0.04999999999999812,
+          "feeR": 0.0542880286748029,
+          "spreadR": 0.021287396047089954,
+          "slippageR": 0.017237151960254892,
+          "netR": -0.042812576682149626,
+          "profitFactor": 0,
+          "expectancyPerTrade": -0.042812576682149626,
+          "maxDrawdownR": 0.042812576682149626,
+          "winRate": 0,
+          "ambiguousTrades": 0,
+          "openTrades": 0
+        }
+      },
+      "ETHUSDT": {
+        "zeroCost": {
+          "closedTrades": 4,
+          "grossR": 0.337615073577094,
+          "feeR": 0,
+          "spreadR": 0,
+          "slippageR": 0,
+          "netR": 0.337615073577094,
+          "profitFactor": 1.3376150735770955,
+          "expectancyPerTrade": 0.0844037683942735,
+          "maxDrawdownR": 0.9999999999999948,
+          "winRate": 0.75,
+          "ambiguousTrades": 0,
+          "openTrades": 0
+        },
+        "realisticCost": {
+          "closedTrades": 4,
+          "grossR": 0.337615073577094,
+          "feeR": 0.12678355262119417,
+          "spreadR": 0.14452763082101316,
+          "slippageR": 0.03785917043887158,
+          "netR": 0.028444719696015322,
+          "profitFactor": 1.024379745507097,
+          "expectancyPerTrade": 0.0071111799240038305,
+          "maxDrawdownR": 1.0421185456199586,
+          "winRate": 0.5,
+          "ambiguousTrades": 0,
+          "openTrades": 0
+        }
+      },
+      "SOLUSDT": {
+        "zeroCost": {
+          "closedTrades": 0,
+          "grossR": 0,
+          "feeR": 0,
+          "spreadR": 0,
+          "slippageR": 0,
+          "netR": 0,
+          "profitFactor": null,
+          "expectancyPerTrade": null,
+          "maxDrawdownR": 0,
+          "winRate": null,
+          "ambiguousTrades": 0,
+          "openTrades": 0
+        },
+        "realisticCost": {
+          "closedTrades": 0,
+          "grossR": 0,
+          "feeR": 0,
+          "spreadR": 0,
+          "slippageR": 0,
+          "netR": 0,
+          "profitFactor": null,
+          "expectancyPerTrade": null,
+          "maxDrawdownR": 0,
+          "winRate": null,
+          "ambiguousTrades": 0,
+          "openTrades": 0
+        }
+      },
+      "HYPEUSDT": {
+        "zeroCost": {
+          "closedTrades": 0,
+          "grossR": 0,
+          "feeR": 0,
+          "spreadR": 0,
+          "slippageR": 0,
+          "netR": 0,
+          "profitFactor": null,
+          "expectancyPerTrade": null,
+          "maxDrawdownR": 0,
+          "winRate": null,
+          "ambiguousTrades": 0,
+          "openTrades": 0
+        },
+        "realisticCost": {
+          "closedTrades": 0,
+          "grossR": 0,
+          "feeR": 0,
+          "spreadR": 0,
+          "slippageR": 0,
+          "netR": 0,
+          "profitFactor": null,
+          "expectancyPerTrade": null,
+          "maxDrawdownR": 0,
+          "winRate": null,
+          "ambiguousTrades": 0,
+          "openTrades": 0
+        }
+      },
+      "DOGEUSDT": {
+        "zeroCost": {
+          "closedTrades": 0,
+          "grossR": 0,
+          "feeR": 0,
+          "spreadR": 0,
+          "slippageR": 0,
+          "netR": 0,
+          "profitFactor": null,
+          "expectancyPerTrade": null,
+          "maxDrawdownR": 0,
+          "winRate": null,
+          "ambiguousTrades": 0,
+          "openTrades": 0
+        },
+        "realisticCost": {
+          "closedTrades": 0,
+          "grossR": 0,
+          "feeR": 0,
+          "spreadR": 0,
+          "slippageR": 0,
+          "netR": 0,
+          "profitFactor": null,
+          "expectancyPerTrade": null,
+          "maxDrawdownR": 0,
+          "winRate": null,
+          "ambiguousTrades": 0,
+          "openTrades": 0
+        }
+      }
+    },
+    "bySetupFamily": {
+      "A_COMPRESSION_BREAKOUT": {
+        "zeroCost": {
+          "closedTrades": 5,
+          "grossR": 0.38761507357709213,
+          "feeR": 0,
+          "spreadR": 0,
+          "slippageR": 0,
+          "netR": 0.38761507357709213,
+          "profitFactor": 1.387615073577094,
+          "expectancyPerTrade": 0.07752301471541842,
+          "maxDrawdownR": 0.9999999999999948,
+          "winRate": 0.8,
+          "ambiguousTrades": 0,
+          "openTrades": 0
+        },
+        "realisticCost": {
+          "closedTrades": 5,
+          "grossR": 0.38761507357709213,
+          "feeR": 0.18107158129599707,
+          "spreadR": 0.16581502686810312,
+          "slippageR": 0.05509632239912647,
+          "netR": -0.014367856986134304,
+          "profitFactor": 0.98812130351603,
+          "expectancyPerTrade": -0.002873571397226861,
+          "maxDrawdownR": 1.0421185456199586,
+          "winRate": 0.4,
+          "ambiguousTrades": 0,
+          "openTrades": 0
+        }
+      }
+    },
+    "byDirection": {
+      "BULL": {
+        "zeroCost": {
+          "closedTrades": 2,
+          "grossR": 1.0163658725908666,
+          "feeR": 0,
+          "spreadR": 0,
+          "slippageR": 0,
+          "netR": 1.0163658725908666,
+          "profitFactor": null,
+          "expectancyPerTrade": 0.5081829362954333,
+          "maxDrawdownR": 0,
+          "winRate": 1,
+          "ambiguousTrades": 0,
+          "openTrades": 0
+        },
+        "realisticCost": {
+          "closedTrades": 2,
+          "grossR": 1.0163658725908666,
+          "feeR": 0.07558218185147203,
+          "spreadR": 0.06658615793476247,
+          "slippageR": 0.02157169554568281,
+          "netR": 0.8526258372589494,
+          "profitFactor": 20.91531235293402,
+          "expectancyPerTrade": 0.4263129186294747,
+          "maxDrawdownR": 0.04281257668214966,
+          "winRate": 0.5,
+          "ambiguousTrades": 0,
+          "openTrades": 0
+        }
+      },
+      "BEAR": {
+        "zeroCost": {
+          "closedTrades": 3,
+          "grossR": -0.6287507990137745,
+          "feeR": 0,
+          "spreadR": 0,
+          "slippageR": 0,
+          "netR": -0.6287507990137745,
+          "profitFactor": 0.37124920098622216,
+          "expectancyPerTrade": -0.20958359967125817,
+          "maxDrawdownR": 0.9999999999999948,
+          "winRate": 0.6666666666666666,
+          "ambiguousTrades": 0,
+          "openTrades": 0
+        },
+        "realisticCost": {
+          "closedTrades": 3,
+          "grossR": -0.6287507990137745,
+          "feeR": 0.10548939944452504,
+          "spreadR": 0.09922886893334065,
+          "slippageR": 0.033524626853443665,
+          "netR": -0.8669936942450837,
+          "profitFactor": 0.2569065243798445,
+          "expectancyPerTrade": -0.28899789808169457,
+          "maxDrawdownR": 1.0421185456199586,
+          "winRate": 0.3333333333333333,
+          "ambiguousTrades": 0,
+          "openTrades": 0
+        }
+      }
+    },
+    "minimumStopDistanceBlocked": {
+      "total": 2,
+      "byCoin": {
+        "BTCUSDT": 0,
+        "ETHUSDT": 2,
+        "SOLUSDT": 0,
+        "HYPEUSDT": 0,
+        "DOGEUSDT": 0
+      }
+    }
+  }
+}

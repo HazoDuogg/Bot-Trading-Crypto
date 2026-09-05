@@ -1,0 +1,87 @@
+{
+  "warning": "Ablation study on top of D5=1.95 (TICKET-042/044 baseline), not a production config change.",
+  "rows": [
+    {
+      "removedCondition": "none",
+      "closedTrades": 61,
+      "winRate": 0.5901639344262295,
+      "netRPerTrade": 0.146843048998261,
+      "totalNetR": 8.957425988893922,
+      "maxDrawdownR": 4.634605207825321,
+      "netRPerTradeDeltaVsBaseline": 0
+    },
+    {
+      "removedCondition": "D1",
+      "closedTrades": 61,
+      "winRate": 0.5901639344262295,
+      "netRPerTrade": 0.146843048998261,
+      "totalNetR": 8.957425988893922,
+      "maxDrawdownR": 4.634605207825321,
+      "netRPerTradeDeltaVsBaseline": 0
+    },
+    {
+      "removedCondition": "D2",
+      "closedTrades": 23,
+      "winRate": 0.391304347826087,
+      "netRPerTrade": -0.25020012671717795,
+      "totalNetR": -5.754602914495092,
+      "maxDrawdownR": 5.754602914495092,
+      "netRPerTradeDeltaVsBaseline": -0.39704317571543896
+    },
+    {
+      "removedCondition": "D3",
+      "closedTrades": 61,
+      "winRate": 0.5901639344262295,
+      "netRPerTrade": 0.146843048998261,
+      "totalNetR": 8.957425988893922,
+      "maxDrawdownR": 4.634605207825321,
+      "netRPerTradeDeltaVsBaseline": 0
+    },
+    {
+      "removedCondition": "D4",
+      "closedTrades": 61,
+      "winRate": 0.5901639344262295,
+      "netRPerTrade": 0.146843048998261,
+      "totalNetR": 8.957425988893922,
+      "maxDrawdownR": 4.634605207825321,
+      "netRPerTradeDeltaVsBaseline": 0
+    },
+    {
+      "removedCondition": "D5",
+      "closedTrades": 239,
+      "winRate": 0.5313807531380753,
+      "netRPerTrade": 0.028801619067280095,
+      "totalNetR": 6.883586957079943,
+      "maxDrawdownR": 16.513833528785373,
+      "netRPerTradeDeltaVsBaseline": -0.1180414299309809
+    },
+    {
+      "removedCondition": "D6",
+      "closedTrades": 101,
+      "winRate": 0.5247524752475248,
+      "netRPerTrade": 0.017631046043564202,
+      "totalNetR": 1.7807356503999845,
+      "maxDrawdownR": 14.485795363069027,
+      "netRPerTradeDeltaVsBaseline": -0.12921200295469681
+    },
+    {
+      "removedCondition": "D7",
+      "closedTrades": 309,
+      "winRate": 0.4627831715210356,
+      "netRPerTrade": -0.07297219331302779,
+      "totalNetR": -22.548407733725586,
+      "maxDrawdownR": 27.012576538451317,
+      "netRPerTradeDeltaVsBaseline": -0.2198152423112888
+    },
+    {
+      "removedCondition": "D8",
+      "closedTrades": 61,
+      "winRate": 0.5901639344262295,
+      "netRPerTrade": 0.146843048998261,
+      "totalNetR": 8.957425988893922,
+      "maxDrawdownR": 4.634605207825321,
+      "netRPerTradeDeltaVsBaseline": 0
+    }
+  ],
+  "elapsedMinutes": 15.566166666666666
+}

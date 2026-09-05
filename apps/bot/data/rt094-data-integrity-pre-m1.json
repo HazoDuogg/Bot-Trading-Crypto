@@ -1,0 +1,132 @@
+{
+  "BTCUSDT": {
+    "m15": {
+      "firstTimestamp": 1693233000000,
+      "lastTimestamp": 1787839200000,
+      "candleCount": 105119,
+      "expectedIntervals": 105119,
+      "uniqueIntervals": 105119,
+      "missingIntervals": 0,
+      "duplicateTimestamps": 0,
+      "outOfOrderTimestamps": 0,
+      "coveragePct": 100
+    },
+    "m5": {
+      "firstTimestamp": 1693233000000,
+      "lastTimestamp": 1787839800000,
+      "candleCount": 315357,
+      "expectedIntervals": 315357,
+      "uniqueIntervals": 315357,
+      "missingIntervals": 0,
+      "duplicateTimestamps": 0,
+      "outOfOrderTimestamps": 0,
+      "coveragePct": 100
+    },
+    "tickSize": 0.1,
+    "tickSizeSource": "BINANCE_FUTURES_EXCHANGE_INFO_2026-08-30"
+  },
+  "ETHUSDT": {
+    "m15": {
+      "firstTimestamp": 1693233000000,
+      "lastTimestamp": 1787839200000,
+      "candleCount": 105119,
+      "expectedIntervals": 105119,
+      "uniqueIntervals": 105119,
+      "missingIntervals": 0,
+      "duplicateTimestamps": 0,
+      "outOfOrderTimestamps": 0,
+      "coveragePct": 100
+    },
+    "m5": {
+      "firstTimestamp": 1693233000000,
+      "lastTimestamp": 1787839800000,
+      "candleCount": 315357,
+      "expectedIntervals": 315357,
+      "uniqueIntervals": 315357,
+      "missingIntervals": 0,
+      "duplicateTimestamps": 0,
+      "outOfOrderTimestamps": 0,
+      "coveragePct": 100
+    },
+    "tickSize": 0.01,
+    "tickSizeSource": "BINANCE_FUTURES_EXCHANGE_INFO_2026-08-30"
+  },
+  "SOLUSDT": {
+    "m15": {
+      "firstTimestamp": 1693233000000,
+      "lastTimestamp": 1787839200000,
+      "candleCount": 105119,
+      "expectedIntervals": 105119,
+      "uniqueIntervals": 105119,
+      "missingIntervals": 0,
+      "duplicateTimestamps": 0,
+      "outOfOrderTimestamps": 0,
+      "coveragePct": 100
+    },
+    "m5": {
+      "firstTimestamp": 1693233000000,
+      "lastTimestamp": 1787839800000,
+      "candleCount": 315357,
+      "expectedIntervals": 315357,
+      "uniqueIntervals": 315357,
+      "missingIntervals": 0,
+      "duplicateTimestamps": 0,
+      "outOfOrderTimestamps": 0,
+      "coveragePct": 100
+    },
+    "tickSize": 0.01,
+    "tickSizeSource": "BINANCE_FUTURES_EXCHANGE_INFO_2026-08-30"
+  },
+  "HYPEUSDT": {
+    "m15": {
+      "firstTimestamp": 1748601000000,
+      "lastTimestamp": 1787839200000,
+      "candleCount": 43599,
+      "expectedIntervals": 43599,
+      "uniqueIntervals": 43599,
+      "missingIntervals": 0,
+      "duplicateTimestamps": 0,
+      "outOfOrderTimestamps": 0,
+      "coveragePct": 100
+    },
+    "m5": {
+      "firstTimestamp": 1748601000000,
+      "lastTimestamp": 1787839800000,
+      "candleCount": 130797,
+      "expectedIntervals": 130797,
+      "uniqueIntervals": 130797,
+      "missingIntervals": 0,
+      "duplicateTimestamps": 0,
+      "outOfOrderTimestamps": 0,
+      "coveragePct": 100
+    },
+    "tickSize": 0.001,
+    "tickSizeSource": "BINANCE_FUTURES_EXCHANGE_INFO_2026-08-30"
+  },
+  "DOGEUSDT": {
+    "m15": {
+      "firstTimestamp": 1693233000000,
+      "lastTimestamp": 1787839200000,
+      "candleCount": 105119,
+      "expectedIntervals": 105119,
+      "uniqueIntervals": 105119,
+      "missingIntervals": 0,
+      "duplicateTimestamps": 0,
+      "outOfOrderTimestamps": 0,
+      "coveragePct": 100
+    },
+    "m5": {
+      "firstTimestamp": 1693233000000,
+      "lastTimestamp": 1787839800000,
+      "candleCount": 315357,
+      "expectedIntervals": 315357,
+      "uniqueIntervals": 315357,
+      "missingIntervals": 0,
+      "duplicateTimestamps": 0,
+      "outOfOrderTimestamps": 0,
+      "coveragePct": 100
+    },
+    "tickSize": 0.00001,
+    "tickSizeSource": "BINANCE_FUTURES_EXCHANGE_INFO_2026-08-30"
+  }
+}

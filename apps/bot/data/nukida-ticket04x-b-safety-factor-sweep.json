@@ -1,0 +1,235 @@
+{
+  "splitTimestamp": 1740536100000,
+  "totalOosRows": 507634,
+  "unresolved": 0,
+  "safetyFactorsSwept": [
+    0.8,
+    1,
+    1.1,
+    1.2,
+    1.5
+  ],
+  "before": {
+    "WIN_NET_PROFIT": {
+      "count": 215114,
+      "avgGrossR": 1.0105265299435744,
+      "avgNetR": 0.7977646652399799,
+      "sumNetR": 171610.34819843303
+    },
+    "WIN_FEE_EATEN": {
+      "count": 75012,
+      "avgGrossR": 0.05560961678751608,
+      "avgNetR": -0.2195597801923057,
+      "sumNetR": -16469.618231785236
+    },
+    "LOSS": {
+      "count": 217508,
+      "avgGrossR": -1.0005459833570869,
+      "avgNetR": -1.2889752573317625,
+      "sumNetR": -280362.430271717
+    }
+  },
+  "overallSumNetRBefore": -125221.70030506921,
+  "bySafetyFactor": {
+    "1": {
+      "after": {
+        "WIN_NET_PROFIT": {
+          "count": 221911,
+          "avgGrossR": 0.9152306279573326,
+          "avgNetR": 0.7099430664261666,
+          "sumNetR": 157544.17581369705
+        },
+        "WIN_FEE_EATEN": {
+          "count": 68199,
+          "avgGrossR": 0.283065356984378,
+          "avgNetR": -0.04666084446427871,
+          "sumNetR": -3182.222931619344
+        },
+        "LOSS": {
+          "count": 217524,
+          "avgGrossR": -1.0028269614259933,
+          "avgNetR": -1.2912756318431835,
+          "sumNetR": -280883.4405410566
+        }
+      },
+      "transitionCountsBeforeGroupToAfterGroup": {
+        "WIN_NET_PROFIT": {
+          "WIN_NET_PROFIT": 200268,
+          "WIN_FEE_EATEN": 14845,
+          "LOSS": 1
+        },
+        "WIN_FEE_EATEN": {
+          "WIN_NET_PROFIT": 21643,
+          "WIN_FEE_EATEN": 53354,
+          "LOSS": 15
+        },
+        "LOSS": {
+          "WIN_NET_PROFIT": 0,
+          "WIN_FEE_EATEN": 0,
+          "LOSS": 217508
+        }
+      },
+      "overallSumNetRAfter": -126521.48765897893
+    },
+    "0.8": {
+      "after": {
+        "WIN_NET_PROFIT": {
+          "count": 202184,
+          "avgGrossR": 1.008955322233003,
+          "avgNetR": 0.7994184201300826,
+          "sumNetR": 161629.61385558062
+        },
+        "WIN_FEE_EATEN": {
+          "count": 87933,
+          "avgGrossR": 0.2057511043251965,
+          "avgNetR": -0.08066217555663212,
+          "sumNetR": -7092.867083221332
+        },
+        "LOSS": {
+          "count": 217517,
+          "avgGrossR": -1.0014449697349834,
+          "avgNetR": -1.2898841261760878,
+          "sumNetR": -280571.7254734441
+        }
+      },
+      "transitionCountsBeforeGroupToAfterGroup": {
+        "WIN_NET_PROFIT": {
+          "WIN_NET_PROFIT": 201760,
+          "WIN_FEE_EATEN": 13354,
+          "LOSS": 0
+        },
+        "WIN_FEE_EATEN": {
+          "WIN_NET_PROFIT": 424,
+          "WIN_FEE_EATEN": 74579,
+          "LOSS": 9
+        },
+        "LOSS": {
+          "WIN_NET_PROFIT": 0,
+          "WIN_FEE_EATEN": 0,
+          "LOSS": 217508
+        }
+      },
+      "overallSumNetRAfter": -126034.9787010848
+    },
+    "1.1": {
+      "after": {
+        "WIN_NET_PROFIT": {
+          "count": 251409,
+          "avgGrossR": 0.8316353471455586,
+          "avgNetR": 0.6206311323475503,
+          "sumNetR": 156032.25235236526
+        },
+        "WIN_FEE_EATEN": {
+          "count": 38693,
+          "avgGrossR": 0.34896256468180276,
+          "avgNetR": -0.045511368044093295,
+          "sumNetR": -1760.971363730102
+        },
+        "LOSS": {
+          "count": 217532,
+          "avgGrossR": -1.003693306486217,
+          "avgNetR": -1.2921511203079978,
+          "sumNetR": -281084.2175028394
+        }
+      },
+      "transitionCountsBeforeGroupToAfterGroup": {
+        "WIN_NET_PROFIT": {
+          "WIN_NET_PROFIT": 205072,
+          "WIN_FEE_EATEN": 10041,
+          "LOSS": 1
+        },
+        "WIN_FEE_EATEN": {
+          "WIN_NET_PROFIT": 46337,
+          "WIN_FEE_EATEN": 28652,
+          "LOSS": 23
+        },
+        "LOSS": {
+          "WIN_NET_PROFIT": 0,
+          "WIN_FEE_EATEN": 0,
+          "LOSS": 217508
+        }
+      },
+      "overallSumNetRAfter": -126812.93651420422
+    },
+    "1.2": {
+      "after": {
+        "WIN_NET_PROFIT": {
+          "count": 272495,
+          "avgGrossR": 0.7906935500863549,
+          "avgNetR": 0.5696007206431524,
+          "sumNetR": 155213.3483716558
+        },
+        "WIN_FEE_EATEN": {
+          "count": 17597,
+          "avgGrossR": 0.4173204339702865,
+          "avgNetR": -0.05656731247134189,
+          "sumNetR": -995.4149975582033
+        },
+        "LOSS": {
+          "count": 217542,
+          "avgGrossR": -1.0048177468277177,
+          "avgNetR": -1.2932897678542088,
+          "sumNetR": -281344.84267854027
+        }
+      },
+      "transitionCountsBeforeGroupToAfterGroup": {
+        "WIN_NET_PROFIT": {
+          "WIN_NET_PROFIT": 209923,
+          "WIN_FEE_EATEN": 5190,
+          "LOSS": 1
+        },
+        "WIN_FEE_EATEN": {
+          "WIN_NET_PROFIT": 62572,
+          "WIN_FEE_EATEN": 12407,
+          "LOSS": 33
+        },
+        "LOSS": {
+          "WIN_NET_PROFIT": 0,
+          "WIN_FEE_EATEN": 0,
+          "LOSS": 217508
+        }
+      },
+      "overallSumNetRAfter": -127126.90930444267
+    },
+    "1.5": {
+      "after": {
+        "WIN_NET_PROFIT": {
+          "count": 286191,
+          "avgGrossR": 0.7732366293838349,
+          "avgNetR": 0.5408063468923265,
+          "sumNetR": 154773.90922346181
+        },
+        "WIN_FEE_EATEN": {
+          "count": 3852,
+          "avgGrossR": 0.6106588977114991,
+          "avgNetR": -0.15866046845050386,
+          "sumNetR": -611.1601244713409
+        },
+        "LOSS": {
+          "count": 217591,
+          "avgGrossR": -1.0090102538704486,
+          "avgNetR": -1.2975197356032617,
+          "sumNetR": -282328.6167896493
+        }
+      },
+      "transitionCountsBeforeGroupToAfterGroup": {
+        "WIN_NET_PROFIT": {
+          "WIN_NET_PROFIT": 213615,
+          "WIN_FEE_EATEN": 1494,
+          "LOSS": 5
+        },
+        "WIN_FEE_EATEN": {
+          "WIN_NET_PROFIT": 72576,
+          "WIN_FEE_EATEN": 2358,
+          "LOSS": 78
+        },
+        "LOSS": {
+          "WIN_NET_PROFIT": 0,
+          "WIN_FEE_EATEN": 0,
+          "LOSS": 217508
+        }
+      },
+      "overallSumNetRAfter": -128165.86769065884
+    }
+  }
+}

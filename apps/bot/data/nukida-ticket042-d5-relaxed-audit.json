@@ -1,0 +1,109 @@
+{
+  "warning": "TICKET-042 AUDIT ONLY: compares the D5 compression threshold at 1.50 (production default, unchanged), 1.95 (old pre-TICKET-037 default, re-run on the current engine), and 2.20 (relaxed). Not a recommendation and not a production config change. Scope excludes the undefined M5/M15 accumulation mechanism referenced in the ticket.",
+  "generatedAt": "2026-09-03T05:37:24.744Z",
+  "windowCount": 7,
+  "thresholds": {
+    "baseline": 1.5,
+    "old195": 1.95,
+    "relaxed": 2.2
+  },
+  "baseline": {
+    "rawD1D8SignalCount": 50,
+    "windowsRun": 7,
+    "closedTrades": 16,
+    "winRate": 0.5,
+    "zeroCost": {
+      "netRPerTrade": 0.043273333194074295,
+      "totalNetR": 0.6923733311051887,
+      "maxDrawdownR": 3.1649562882055933
+    },
+    "realisticCost": {
+      "netRPerTrade": -0.04070175509665667,
+      "totalNetR": -0.6512280815465067,
+      "maxDrawdownR": 3.9162214623651903
+    }
+  },
+  "old195": {
+    "rawD1D8SignalCount": 156,
+    "windowsRun": 7,
+    "closedTrades": 61,
+    "winRate": 0.5901639344262295,
+    "zeroCost": {
+      "netRPerTrade": 0.22877055532661322,
+      "totalNetR": 13.955003874923406,
+      "maxDrawdownR": 3.999999999999993
+    },
+    "realisticCost": {
+      "netRPerTrade": 0.146843048998261,
+      "totalNetR": 8.957425988893922,
+      "maxDrawdownR": 4.634605207825321
+    }
+  },
+  "relaxed": {
+    "rawD1D8SignalCount": 233,
+    "windowsRun": 7,
+    "closedTrades": 99,
+    "winRate": 0.5454545454545454,
+    "zeroCost": {
+      "netRPerTrade": 0.14522816753247092,
+      "totalNetR": 14.377588585714621,
+      "maxDrawdownR": 5.697618676922894
+    },
+    "realisticCost": {
+      "netRPerTrade": 0.06532108747907937,
+      "totalNetR": 6.466787660428858,
+      "maxDrawdownR": 8.492245452821528
+    }
+  },
+  "bisectionNote": "The ticket's cited \"601 trades\" baseline was measured at TICKET-033 (D5 default was 1.95 then). TICKET-037 deliberately lowered the D5 default to 1.50 and added a D7 max-body-ratio cap (554->52 trades). TICKET-038/039/040/041 each further changed entry/exit mechanics (52->30->16->15->16). This is the cumulative, intentional effect of four separate later tickets, not a defect, and \"601\" cannot be reproduced on current code by design.",
+  "bisectionTrail": [
+    {
+      "commit": "e17d717 TICKET-033",
+      "d5Default": 1.95,
+      "closedTrades": 601,
+      "note": "cited \"601\" baseline"
+    },
+    {
+      "commit": "108bf8d TICKET-035",
+      "d5Default": 1.95,
+      "closedTrades": 601,
+      "note": "unchanged"
+    },
+    {
+      "commit": "5b18645 TICKET-036",
+      "d5Default": 1.95,
+      "closedTrades": 554,
+      "note": "unrelated change"
+    },
+    {
+      "commit": "d63cdb7 TICKET-037",
+      "d5Default": 1.5,
+      "closedTrades": 52,
+      "note": "D5 default lowered 1.95->1.50 + new D7 max-body-ratio cap added"
+    },
+    {
+      "commit": "81ffdfa TICKET-038",
+      "d5Default": 1.5,
+      "closedTrades": 30,
+      "note": "BTC trend alignment gate added"
+    },
+    {
+      "commit": "9190955 TICKET-039",
+      "d5Default": 1.5,
+      "closedTrades": 16,
+      "note": "single M1-candle retest window rewrite"
+    },
+    {
+      "commit": "d772cda TICKET-040",
+      "d5Default": 1.5,
+      "closedTrades": 15,
+      "note": "liquidity sweep gate added"
+    },
+    {
+      "commit": "69e406e TICKET-041",
+      "d5Default": 1.5,
+      "closedTrades": 16,
+      "note": "position management V2 (exit engine only)"
+    }
+  ]
+}

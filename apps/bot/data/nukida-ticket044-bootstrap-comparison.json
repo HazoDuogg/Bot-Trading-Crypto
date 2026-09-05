@@ -1,0 +1,17 @@
+{
+  "warning": "randomPool co tuong quan/chong lan giua cac entry lien ke (cung dung chung doan gia), nen phep bootstrap nay chi mang tinh tham khao tuong doi, khong phai kiem dinh thong ke chat che theo dung nghia co dien.",
+  "N": 61,
+  "realMeanNetR": 0.146843048998261,
+  "realTotalTradesUsed": 61,
+  "structureFloorMeanNetR": -0.24408925622834102,
+  "bootstrap": {
+    "mean": -0.24358174881083647,
+    "std": 0.12612302568584016,
+    "p5": -0.4496980636861159,
+    "p25": -0.3282463730413236,
+    "p50": -0.24464730160275147,
+    "p75": -0.15824390732498542,
+    "p95": -0.03482411308314739
+  },
+  "percentileRank": 99.84
+}

@@ -1,0 +1,21 @@
+{
+  "note": "log(costR) = logC + alpha * log(atr15/price); predictedCostR = C * (atr15/price)^alpha",
+  "splitTimestamp": 1740536100000,
+  "splitTimestampIso": "2025-02-26T02:15:00.000Z",
+  "nInSample": 420360,
+  "nOos": 507634,
+  "priceMisses": 0,
+  "alpha": -0.6954943561633422,
+  "logC": -5.2311181812309195,
+  "C": 0.005347542436734789,
+  "inSample": {
+    "r2": 0.7908678824030365,
+    "rmseLog": 0.2091357308550184,
+    "meanAbsPctError": 0.16096146615397966
+  },
+  "oos": {
+    "r2": 0.7883919723728733,
+    "rmseLog": 0.2100115087683011,
+    "meanAbsPctError": 0.1640277475177974
+  }
+}

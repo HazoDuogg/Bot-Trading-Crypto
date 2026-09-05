@@ -1,0 +1,64 @@
+{
+  "splitTimestamp": 1740536100000,
+  "totalOosRows": 507634,
+  "unresolved": 0,
+  "before": {
+    "WIN_NET_PROFIT": {
+      "count": 215114,
+      "avgGrossR": 1.0105265299435895,
+      "avgNetR": 0.7977646652399643,
+      "sumNetR": 171610.34819842968
+    },
+    "WIN_FEE_EATEN": {
+      "count": 75012,
+      "avgGrossR": 0.0556096167875198,
+      "avgNetR": -0.21955978019230402,
+      "sumNetR": -16469.61823178511
+    },
+    "LOSS": {
+      "count": 217508,
+      "avgGrossR": -1.0005459833570867,
+      "avgNetR": -1.2889752573317996,
+      "sumNetR": -280362.43027172505
+    }
+  },
+  "after": {
+    "WIN_NET_PROFIT": {
+      "count": 272495,
+      "avgGrossR": 0.7906935500863561,
+      "avgNetR": 0.5696007206431601,
+      "sumNetR": 155213.34837165792
+    },
+    "WIN_FEE_EATEN": {
+      "count": 17597,
+      "avgGrossR": 0.4173204339702887,
+      "avgNetR": -0.056567312471341884,
+      "sumNetR": -995.4149975582031
+    },
+    "LOSS": {
+      "count": 217542,
+      "avgGrossR": -1.0048177468277175,
+      "avgNetR": -1.2932897678542485,
+      "sumNetR": -281344.84267854894
+    }
+  },
+  "transitionCountsBeforeGroupToAfterGroup": {
+    "WIN_NET_PROFIT": {
+      "WIN_NET_PROFIT": 209923,
+      "WIN_FEE_EATEN": 5190,
+      "LOSS": 1
+    },
+    "WIN_FEE_EATEN": {
+      "WIN_NET_PROFIT": 62572,
+      "WIN_FEE_EATEN": 12407,
+      "LOSS": 33
+    },
+    "LOSS": {
+      "WIN_NET_PROFIT": 0,
+      "WIN_FEE_EATEN": 0,
+      "LOSS": 217508
+    }
+  },
+  "overallSumNetRBefore": -125221.70030508048,
+  "overallSumNetRAfter": -127126.90930444922
+}
