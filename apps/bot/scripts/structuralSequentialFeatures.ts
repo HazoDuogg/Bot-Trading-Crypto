@@ -315,7 +315,7 @@ async function main(): Promise<void> {
     printVerification(coin, candles, atrByCoin.get(coin)!, index, featuresByCoin.get(coin)![index]);
   }
 
-  const outputPath = resolve(dataDirectory, 'nukida-ticket04x-c-structural-features.xlsx');
+  const outputPath = resolve(reportsDirectory, 'nukida-ticket04x-c-structural-features.xlsx');
   const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({ filename: outputPath, useStyles: false });
   const nullCounts: Record<FeatureName, number> = Object.fromEntries(NEW_FEATURE_NAMES.map((f) => [f, 0])) as Record<FeatureName, number>;
   let totalRows = 0;
