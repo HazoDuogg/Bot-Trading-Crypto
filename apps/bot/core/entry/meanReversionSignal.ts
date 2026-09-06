@@ -14,6 +14,11 @@ export interface MeanReversionResult {
   regime: Regime | null;
   zScore: number | null;
   signal: Signal;
+  // TICKET-04X-O: the exact mean/std of the same 20-candle window the z-score above was computed
+  // from — exposed so a consumer (e.g. an SL-distance comparison) reuses them rather than
+  // re-deriving a second, possibly-diverging copy. Non-null whenever zScore is non-null.
+  windowMean: number | null;
+  windowStd: number | null;
 }
 
 function mean(values: readonly number[]): number {
@@ -27,16 +32,24 @@ function populationStd(values: readonly number[]): number {
   return Math.sqrt(values.reduce((sum, v) => sum + (v - m) ** 2, 0) / values.length);
 }
 
+export function computeWindowStats(
+  m5Closes: readonly number[],
+  index: number,
+  lookback = ZSCORE_LOOKBACK,
+): { mean: number; std: number } | null {
+  if (index < lookback) return null;
+  const window = m5Closes.slice(index - lookback, index);
+  return { mean: mean(window), std: populationStd(window) };
+}
+
 // z-score at 5m candle i uses ONLY the ZSCORE_LOOKBACK candles strictly before it (closes[i-20..
 // i-1]), never candle i itself — avoids self-inclusion bias and matches this project's established
 // "candles before entry" causal convention. Requires i >= ZSCORE_LOOKBACK; the first
 // ZSCORE_LOOKBACK candles (indices 0..19) are warmup and produce signal 'NONE'.
 export function computeZScore(m5Closes: readonly number[], index: number, lookback = ZSCORE_LOOKBACK): number | null {
-  if (index < lookback) return null;
-  const window = m5Closes.slice(index - lookback, index);
-  const std = populationStd(window);
-  if (std === 0) return null;
-  return (m5Closes[index] - mean(window)) / std;
+  const stats = computeWindowStats(m5Closes, index, lookback);
+  if (stats === null || stats.std === 0) return null;
+  return (m5Closes[index] - stats.mean) / stats.std;
 }
 
 export function classifyMeanReversionSignal(
@@ -72,8 +85,15 @@ export function computeMeanReversionSignals(
       m15Cursor += 1;
     }
     const regime = latestClosedAdx === null ? null : classifyRegime(latestClosedAdx);
-    const zScore = computeZScore(m5Closes, i);
-    results[i] = { regime, zScore, signal: classifyMeanReversionSignal(regime, zScore) };
+    const stats = computeWindowStats(m5Closes, i);
+    const zScore = stats === null || stats.std === 0 ? null : (m5Closes[i] - stats.mean) / stats.std;
+    results[i] = {
+      regime,
+      zScore,
+      signal: classifyMeanReversionSignal(regime, zScore),
+      windowMean: stats?.mean ?? null,
+      windowStd: stats?.std ?? null,
+    };
   }
   return results;
 }
