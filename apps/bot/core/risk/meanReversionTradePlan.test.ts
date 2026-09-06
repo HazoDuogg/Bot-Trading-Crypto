@@ -33,11 +33,22 @@ describe('createMeanReversionTradePlan', () => {
     expect(() => createMeanReversionTradePlan({ ...BASE, signal: 'LONG', atr14: NaN })).toThrow('atr14');
   });
 
-  it('applies no SL floor (chosen option (a)): an arbitrarily tiny positive ATR is still accepted', () => {
+  it('returns null (not throw) when riskPerUnit is below the 3xtickSize SL floor', () => {
+    // atr14=0.001 -> riskPerUnit=0.0015, far below 3*tickSize(0.1)=0.3.
     const plan = createMeanReversionTradePlan({ ...BASE, signal: 'LONG', atr14: 0.001 });
+    expect(plan).toBeNull();
+  });
+
+  it('accepts riskPerUnit exactly at the 3xtickSize floor (inclusive boundary, same convention as TICKET-04X-O)', () => {
+    // atr14 chosen so riskPerUnit = 1.5*atr14 = 3*tickSize(0.1) = 0.3 exactly.
+    const plan = createMeanReversionTradePlan({ ...BASE, signal: 'LONG', atr14: 0.2 });
     expect(plan).not.toBeNull();
-    expect(plan!.riskPerUnit).toBeCloseTo(0.0015, 12);
-    expect(plan!.stopLoss).toBeCloseTo(50_000 - 0.0015, 9);
+    expect(plan!.riskPerUnit).toBeCloseTo(0.3, 12);
+  });
+
+  it('rejects riskPerUnit just below the floor', () => {
+    const plan = createMeanReversionTradePlan({ ...BASE, signal: 'LONG', atr14: 0.2 - 1e-6 });
+    expect(plan).toBeNull();
   });
 
   it('returns null (not a plan) when the risk-sized position rounds below one lot', () => {

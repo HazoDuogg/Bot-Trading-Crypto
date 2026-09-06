@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { Candle } from '../../backtest/engine/noTradeZone/types.js';
 import { computeAtr } from '../../backtest/engine/noTradeZone/atr.js';
 import { computeMeanReversionSignals } from '../../core/entry/meanReversionSignal.js';
+import { TOO_TIGHT_TICK_COUNT } from '../../core/risk/meanReversionTradePlan.js';
 
 // TICKET-04X-O: pure descriptive comparison of two SL-distance formulas at TICKET-04X-N's own
 // signal points. No entry/exit simulation, no fill simulation, no PnL anywhere in this file.
@@ -13,9 +14,9 @@ const ATR_PERIOD = 14;
 const ATR_MULTIPLE = 1.5;
 const ZSCORE_SL_MULTIPLE = 3;
 const BTC_TICK_SIZE = 0.1; // matches DEFAULT_COIN_BACKTEST_CONFIG.BTCUSDT.tickSize
-// Locked BEFORE running, per the ticket: 3 ticks worth of relative price is the "too tight to be
-// economically meaningful" flag for the z-score SL. Not adjusted after seeing the results below.
-const TOO_TIGHT_TICK_COUNT = 3;
+// TOO_TIGHT_TICK_COUNT (locked BEFORE running, per the ticket) now lives in
+// meanReversionTradePlan.ts (TICKET-04X-P reuses it as an actual SL floor) — imported here so the
+// two files can never independently drift to two different "3"s.
 
 async function loadCsv(csvPath: string): Promise<Candle[]> {
   const rows = (await readFile(csvPath, 'utf8')).trim().split(/\r?\n/u).slice(1);
