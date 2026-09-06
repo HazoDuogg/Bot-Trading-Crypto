@@ -1,0 +1,601 @@
+import { readFile, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import type { Candle } from '../engine/noTradeZone/types.js';
+import {
+  createNukidaFsm,
+  type FsmConfig,
+} from '../../research/archive/legacy-5coin-entry/nukidaFsm.js';
+import { computeStrategyFingerprint } from '../engine/fingerprint.js';
+import {
+  MIN_STOP_DISTANCE_ATR_MULTIPLE,
+  type TradePlan,
+} from '../../core/risk/tradePlan.js';
+import type { SetupSignal } from '../../research/archive/legacy-5coin-entry/setupDetectorA.js';
+import { loadRecentM1Candles } from '../engine/controlTest.js';
+import {
+  BINANCE_USDM_VIP0_BNB_DISCOUNT_MAKER_FEE_RATE,
+  BINANCE_USDM_VIP0_BNB_DISCOUNT_TAKER_FEE_RATE,
+  calculateExecutionCosts,
+  DEFAULT_ADVERSE_SLIPPAGE_RATE,
+  SPREAD_PROXY_M1_RANGE_FRACTION,
+  type ExecutionCostResult,
+} from '../engine/costModel.js';
+import { M15_CANDLE_DURATION_MS } from '../engine/intrabarExecution.js';
+import {
+  simulatePositionManagementV2,
+  type PositionManagementV2Result,
+} from '../../core/risk/positionManagementV2.js';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+export const IN_SAMPLE_WARNING =
+  'WARNING: IN-SAMPLE calibration period. Pipeline diagnostic only; do not infer profitability.';
+
+export interface CoinBacktestInput {
+  coin: string;
+  m15Candles: readonly Candle[];
+  m1Candles: readonly Candle[];
+  fsmConfig: FsmConfig;
+}
+
+export interface TradeLogEntry {
+  coin: string;
+  setupFamily: SetupSignal['setupFamily'];
+  signalTime: number;
+  orderActiveTime: number;
+  firstTouchFillTimestamp: number;
+  firstTouchFillPrice: number;
+  minutesSignalToFill: number;
+  entryFillTimestamp: number;
+  tradePlan: TradePlan;
+  reasonTrace: SetupSignal['reasonTrace'];
+  execution: PositionManagementV2Result;
+  MFE: number;
+  MAE: number;
+  costR: number | null;
+  postStopHorizons: PostStopHorizons;
+  costs: ExecutionCostResult | null;
+  // Set when any exit leg was forced to the loss side by a same-candle SL/TP collision.
+  reasonCode?: string;
+}
+
+export interface PostStopHorizonSnapshot {
+  reached1_5R: boolean;
+  reached2R: boolean;
+  mfeR: number;
+}
+
+export type PostStopHorizons = Record<
+  'min15' | 'min30' | 'min60' | 'min120' | 'min240',
+  PostStopHorizonSnapshot
+>;
+
+export interface PerformanceMetrics {
+  closedTrades: number;
+  grossR: number;
+  feeR: number;
+  spreadR: number;
+  slippageR: number;
+  netR: number;
+  profitFactor: number | null;
+  expectancyPerTrade: number | null;
+  maxDrawdownR: number;
+  winRate: number | null;
+  ambiguousTrades: number;
+  openTrades: number;
+}
+
+export interface DualCostMetrics {
+  zeroCost: PerformanceMetrics;
+  realisticCost: PerformanceMetrics;
+}
+
+export interface BacktestReport {
+  note: string;
+  baselineVariant: 'RETEST_LIMIT_ONLY';
+  overall: DualCostMetrics;
+  byCoin: Record<string, DualCostMetrics>;
+  bySetupFamily: Record<string, DualCostMetrics>;
+  byDirection: Record<string, DualCostMetrics>;
+  minimumStopDistanceBlocked: { total: number; byCoin: Record<string, number> };
+}
+
+export interface NukidaBacktestResult {
+  warning: string;
+  tradeLogs: TradeLogEntry[];
+  report: BacktestReport;
+}
+
+interface ResolvedTrade {
+  timestamp: number;
+  grossR: number;
+  realisticR: number;
+  feeR: number;
+  spreadR: number;
+  slippageR: number;
+}
+
+function firstM1After(candles: readonly Candle[], timestamp: number): number {
+  let left = 0;
+  let right = candles.length;
+  while (left < right) {
+    const middle = Math.floor((left + right) / 2);
+    if (candles[middle].openTime <= timestamp) left = middle + 1;
+    else right = middle;
+  }
+  return left;
+}
+
+// Each leg is costed against calculateExecutionCosts's own (size-invariant) R-ratios, then
+// weighted by leg.fraction before summing — the ratios don't already carry that weighting.
+function executionCosts(
+  tradePlan: TradePlan,
+  execution: PositionManagementV2Result,
+  m1Candles: readonly Candle[],
+  entryCandle: Candle | undefined,
+): TradeLogEntry['costs'] {
+  if (execution.outcome === 'OPEN_DATA_END') return null;
+  if (entryCandle === undefined) {
+    throw new Error('Closed execution is missing its M1 entry cost proxy candle');
+  }
+  const totals: ExecutionCostResult = { grossR: 0, feeR: 0, spreadR: 0, slippageR: 0, netR: 0 };
+  for (const leg of execution.exitLegs) {
+    const exitCandle = m1Candles[firstM1After(m1Candles, leg.exitTimestamp - 1)];
+    if (exitCandle === undefined) {
+      throw new Error('Closed execution leg is missing its M1 exit cost proxy candle');
+    }
+    const legCosts = calculateExecutionCosts({
+      tradePlan,
+      exitPrice: leg.exitPrice,
+      exitReason: leg.reason === 'PARTIAL_EXIT' || leg.reason === 'TAKE_PROFIT_2' ? 'TAKE_PROFIT' : 'STOP_LOSS',
+      entryM1Candle: entryCandle,
+      exitM1Candle: exitCandle,
+    });
+    totals.grossR += leg.fraction * legCosts.grossR;
+    totals.feeR += leg.fraction * legCosts.feeR;
+    totals.spreadR += leg.fraction * legCosts.spreadR;
+    totals.slippageR += leg.fraction * legCosts.slippageR;
+    totals.netR += leg.fraction * legCosts.netR;
+  }
+  return totals;
+}
+
+function excursionR(
+  tradePlan: TradePlan,
+  candles: readonly Candle[],
+): { MFE: number; MAE: number } {
+  if (candles.length === 0) return { MFE: 0, MAE: 0 };
+  let highest = Number.NEGATIVE_INFINITY;
+  let lowest = Number.POSITIVE_INFINITY;
+  for (const candle of candles) {
+    highest = Math.max(highest, candle.high);
+    lowest = Math.min(lowest, candle.low);
+  }
+  return tradePlan.direction === 'BULL'
+    ? {
+        MFE: Math.max(0, (highest - tradePlan.entryPrice) / tradePlan.riskPerUnit),
+        MAE: Math.max(0, (tradePlan.entryPrice - lowest) / tradePlan.riskPerUnit),
+      }
+    : {
+        MFE: Math.max(0, (tradePlan.entryPrice - lowest) / tradePlan.riskPerUnit),
+        MAE: Math.max(0, (highest - tradePlan.entryPrice) / tradePlan.riskPerUnit),
+      };
+}
+
+function costR(costs: TradeLogEntry['costs']): TradeLogEntry['costR'] {
+  return costs === null ? null : costs.feeR + costs.spreadR + costs.slippageR;
+}
+
+const POST_STOP_HORIZON_MINUTES = Object.freeze({
+  min15: 15,
+  min30: 30,
+  min60: 60,
+  min120: 120,
+  min240: 240,
+} as const);
+
+// Only stop-type terminal outcomes are "loss-like" for this diagnostic; a TAKE_PROFIT_2 exit,
+// an open trade, or a timeout close aren't the kind of premature-stop question this measures.
+const STOP_OUTCOMES = new Set(['INITIAL_STOP', 'BREAKEVEN_STOP', 'TRAILING_STOP']);
+
+function postStopHorizons(
+  tradePlan: TradePlan,
+  execution: PositionManagementV2Result,
+  m1Candles: readonly Candle[],
+): PostStopHorizons {
+  const result = Object.fromEntries(
+    Object.keys(POST_STOP_HORIZON_MINUTES).map((key) => [
+      key,
+      { reached1_5R: false, reached2R: false, mfeR: 0 },
+    ]),
+  ) as PostStopHorizons;
+  if (!STOP_OUTCOMES.has(execution.outcome) || execution.exitLegs.length === 0) return result;
+  const exitTimestamp = execution.exitLegs.at(-1)!.exitTimestamp;
+  let candleIndex = firstM1After(m1Candles, exitTimestamp);
+  let highest = Number.NEGATIVE_INFINITY;
+  let lowest = Number.POSITIVE_INFINITY;
+  for (const [key, minutes] of Object.entries(POST_STOP_HORIZON_MINUTES) as Array<
+    [keyof PostStopHorizons, number]
+  >) {
+    const horizonEnd = exitTimestamp + minutes * 60 * 1000;
+    while (
+      candleIndex < m1Candles.length &&
+      m1Candles[candleIndex].openTime <= horizonEnd
+    ) {
+      const candle = m1Candles[candleIndex];
+      highest = Math.max(highest, candle.high);
+      lowest = Math.min(lowest, candle.low);
+      candleIndex += 1;
+    }
+    const mfeR =
+      highest === Number.NEGATIVE_INFINITY
+        ? 0
+        : tradePlan.direction === 'BULL'
+          ? Math.max(0, (highest - tradePlan.entryPrice) / tradePlan.riskPerUnit)
+          : Math.max(0, (tradePlan.entryPrice - lowest) / tradePlan.riskPerUnit);
+    result[key] = {
+      reached1_5R: mfeR >= 1.5,
+      reached2R: mfeR >= 2,
+      mfeR,
+    };
+  }
+  return result;
+}
+
+function runCoin(input: CoinBacktestInput): { logs: TradeLogEntry[]; minimumStopBlocked: number } {
+  const fsm = createNukidaFsm(input.fsmConfig);
+  const logs: TradeLogEntry[] = [];
+  let minimumStopBlocked = 0;
+  for (let index = 0; index < input.m15Candles.length; index += 1) {
+    const events = fsm.onClosedCandle(input.m15Candles, index);
+    for (const event of events) {
+      if (
+        event.state === 'TRADE_PLAN_REJECTED' &&
+        event.reasonCode === 'MIN_STOP_DISTANCE'
+      ) {
+        minimumStopBlocked += 1;
+        continue;
+      }
+      if (event.state !== 'TRADE_PLAN_READY') continue;
+      if (event.tradePlan === undefined || event.setupSignal === undefined || event.entry === undefined) {
+        throw new Error('TRADE_PLAN_READY must include tradePlan, setupSignal, and entry');
+      }
+      // TICKET-039: single-pass M1 engine already resolved the fill; windowStartTimestamp
+      // doubles as both signalTime and orderActiveTime now (previously two separate lookups).
+      const windowStartTimestamp =
+        input.m15Candles[event.setupSignal.triggerIndex].openTime + M15_CANDLE_DURATION_MS;
+      const entryFillTimestamp = event.entry.fillTimestamp - 1;
+      const m1Start = firstM1After(input.m1Candles, entryFillTimestamp);
+      const postFillM1 = input.m1Candles.slice(m1Start);
+      const execution = simulatePositionManagementV2({
+        tradePlan: event.tradePlan,
+        entryFillTimestamp,
+        m1Candles: postFillM1,
+      });
+      const observedM1 = postFillM1.slice(
+        0,
+        execution.outcome === 'OPEN_DATA_END' ? undefined : execution.m1CandlesConsumed,
+      );
+      const excursions = excursionR(event.tradePlan, observedM1);
+      const costs = executionCosts(event.tradePlan, execution, input.m1Candles, postFillM1[0]);
+      const forcedLossLeg = execution.exitLegs.find(
+        (leg) => leg.reasonCode === 'AMBIGUOUS_FORCED_LOSS',
+      );
+      logs.push({
+        coin: input.coin,
+        setupFamily: event.setupSignal.setupFamily,
+        signalTime: windowStartTimestamp,
+        orderActiveTime: windowStartTimestamp,
+        firstTouchFillTimestamp: event.entry.fillTimestamp,
+        firstTouchFillPrice: event.entry.fillPrice,
+        minutesSignalToFill: (event.entry.fillTimestamp - windowStartTimestamp) / (60 * 1000),
+        entryFillTimestamp,
+        tradePlan: event.tradePlan,
+        reasonTrace: event.setupSignal.reasonTrace,
+        execution,
+        ...excursions,
+        costR: costR(costs),
+        postStopHorizons: postStopHorizons(event.tradePlan, execution, postFillM1),
+        costs,
+        ...(forcedLossLeg === undefined ? {} : { reasonCode: forcedLossLeg.reasonCode }),
+      });
+    }
+  }
+  return { logs, minimumStopBlocked };
+}
+
+function isResolvedCosts(costs: TradeLogEntry['costs']): costs is ExecutionCostResult {
+  return costs !== null;
+}
+
+function metricSet(logs: readonly TradeLogEntry[], realistic: boolean): PerformanceMetrics {
+  const resolved: ResolvedTrade[] = logs
+    .filter((log) => isResolvedCosts(log.costs))
+    .map((log) => ({
+      timestamp: log.execution.exitLegs.at(-1)!.exitTimestamp,
+      grossR: (log.costs as ExecutionCostResult).grossR,
+      realisticR: (log.costs as ExecutionCostResult).netR,
+      feeR: (log.costs as ExecutionCostResult).feeR,
+      spreadR: (log.costs as ExecutionCostResult).spreadR,
+      slippageR: (log.costs as ExecutionCostResult).slippageR,
+    }))
+    .sort((left, right) => left.timestamp - right.timestamp);
+  const values = resolved.map((trade) => (realistic ? trade.realisticR : trade.grossR));
+  const grossR = resolved.reduce((sum, trade) => sum + trade.grossR, 0);
+  const feeR = realistic ? resolved.reduce((sum, trade) => sum + trade.feeR, 0) : 0;
+  const spreadR = realistic ? resolved.reduce((sum, trade) => sum + trade.spreadR, 0) : 0;
+  const slippageR = realistic ? resolved.reduce((sum, trade) => sum + trade.slippageR, 0) : 0;
+  const netR = values.reduce((sum, value) => sum + value, 0);
+  const gains = values.filter((value) => value > 0).reduce((sum, value) => sum + value, 0);
+  const losses = values.filter((value) => value < 0).reduce((sum, value) => sum + value, 0);
+  let equity = 0;
+  let peak = 0;
+  let maxDrawdownR = 0;
+  for (const value of values) {
+    equity += value;
+    peak = Math.max(peak, equity);
+    maxDrawdownR = Math.max(maxDrawdownR, peak - equity);
+  }
+  return {
+    closedTrades: resolved.length,
+    grossR,
+    feeR,
+    spreadR,
+    slippageR,
+    netR,
+    profitFactor: losses === 0 ? null : gains / Math.abs(losses),
+    expectancyPerTrade: resolved.length === 0 ? null : netR / resolved.length,
+    maxDrawdownR,
+    winRate:
+      resolved.length === 0 ? null : values.filter((value) => value > 0).length / resolved.length,
+    ambiguousTrades: logs.filter((log) => log.reasonCode === 'AMBIGUOUS_FORCED_LOSS').length,
+    openTrades: logs.filter((log) => log.execution.outcome === 'OPEN_DATA_END').length,
+  };
+}
+
+function dualMetrics(logs: readonly TradeLogEntry[]): DualCostMetrics {
+  return { zeroCost: metricSet(logs, false), realisticCost: metricSet(logs, true) };
+}
+
+function groupMetrics(
+  logs: readonly TradeLogEntry[],
+  keys: readonly string[],
+  select: (log: TradeLogEntry) => string,
+): Record<string, DualCostMetrics> {
+  return Object.fromEntries(
+    keys.map((key) => [key, dualMetrics(logs.filter((log) => select(log) === key))]),
+  );
+}
+
+export function buildBacktestReport(
+  logs: readonly TradeLogEntry[],
+  coins: readonly string[],
+  minimumStopBlockedByCoin: Readonly<Record<string, number>> = {},
+  note = IN_SAMPLE_WARNING,
+): BacktestReport {
+  return {
+    note,
+    baselineVariant: 'RETEST_LIMIT_ONLY',
+    overall: dualMetrics(logs),
+    byCoin: groupMetrics(logs, coins, (log) => log.coin),
+    bySetupFamily: groupMetrics(logs, ['A_COMPRESSION_BREAKOUT'], (log) => log.setupFamily),
+    byDirection: groupMetrics(logs, ['BULL', 'BEAR'], (log) => log.tradePlan.direction),
+    minimumStopDistanceBlocked: {
+      total: Object.values(minimumStopBlockedByCoin).reduce((sum, count) => sum + count, 0),
+      byCoin: Object.fromEntries(coins.map((coin) => [coin, minimumStopBlockedByCoin[coin] ?? 0])),
+    },
+  };
+}
+
+export function runNukidaBacktest(input: {
+  coins: readonly CoinBacktestInput[];
+  warning?: string;
+}): NukidaBacktestResult {
+  const coinResults = input.coins.map((coin) => ({ coin: coin.coin, ...runCoin(coin) }));
+  const tradeLogs = coinResults.flatMap((result) => result.logs).sort(
+    (left, right) => left.entryFillTimestamp - right.entryFillTimestamp,
+  );
+  const minimumStopBlockedByCoin = Object.fromEntries(
+    coinResults.map((result) => [result.coin, result.minimumStopBlocked]),
+  );
+  return {
+    warning: input.warning ?? IN_SAMPLE_WARNING,
+    tradeLogs,
+    report: buildBacktestReport(
+      tradeLogs,
+      input.coins.map((coin) => coin.coin),
+      minimumStopBlockedByCoin,
+      input.warning ?? IN_SAMPLE_WARNING,
+    ),
+  };
+}
+
+export const DEFAULT_COIN_BACKTEST_CONFIG = Object.freeze({
+  BTCUSDT: { tickSize: 0.1, lotSize: 0.001, leverage: 20 },
+  ETHUSDT: { tickSize: 0.01, lotSize: 0.001, leverage: 20 },
+  SOLUSDT: { tickSize: 0.01, lotSize: 0.01, leverage: 10 },
+  HYPEUSDT: { tickSize: 0.001, lotSize: 0.01, leverage: 10 },
+  DOGEUSDT: { tickSize: 0.00001, lotSize: 1, leverage: 10 },
+});
+
+export interface BacktestStrategyVariantOptions {
+  takeProfitRMultiple?: number;
+}
+
+async function loadM15File(csvPath: string): Promise<Candle[]> {
+  const rows = (await readFile(csvPath, 'utf8')).trim().split(/\r?\n/u).slice(1);
+  const all = rows.map((row, index) => {
+    const values = row.split(',').map(Number);
+    if (values.length !== 6 || values.some((value) => !Number.isFinite(value))) {
+      throw new Error(`Invalid M15 CSV row ${index + 2}`);
+    }
+    const [openTime, open, high, low, close, volume] = values;
+    return { openTime, open, high, low, close, volume };
+  });
+  if (all.length === 0) throw new Error('M15 CSV contains no candles');
+  return all;
+}
+
+export async function loadM15CandlesBetween(
+  csvPath: string,
+  startInclusive: number,
+  endExclusive: number,
+): Promise<Candle[]> {
+  if (!Number.isSafeInteger(startInclusive) || !Number.isSafeInteger(endExclusive)) {
+    throw new Error('M15 window bounds must be UTC epoch millisecond integers');
+  }
+  if (endExclusive <= startInclusive) throw new Error('M15 window end must be after start');
+  const result = (await loadM15File(csvPath)).filter(
+    (candle) => candle.openTime >= startInclusive && candle.openTime < endExclusive,
+  );
+  if (result.length === 0) throw new Error('M15 CSV has no candles in the requested window');
+  return result;
+}
+
+async function loadRecentM15(csvPath: string): Promise<Candle[]> {
+  const all = await loadM15File(csvPath);
+  const cutoff = all.at(-1)!.openTime - 180 * DAY_MS;
+  return all.filter((candle) => candle.openTime >= cutoff);
+}
+
+export function defaultDataGate(candles: readonly Candle[], index: number) {
+  if (index === 0) return { accepted: true };
+  const accepted = candles[index].openTime - candles[index - 1].openTime === 900_000;
+  return { accepted, reasonCode: accepted ? undefined : 'M15_GAP_OR_DUPLICATE' };
+}
+
+export async function runFullNukidaBacktest(
+  dataDirectory: string,
+  options: BacktestStrategyVariantOptions = {},
+): Promise<{
+  result: NukidaBacktestResult;
+  coinRuns: Record<string, { status: 'COMPLETED' | 'SKIPPED'; error?: string }>;
+}> {
+  const coinRuns: Record<string, { status: 'COMPLETED' | 'SKIPPED'; error?: string }> = {};
+  const completed: CoinBacktestInput[] = [];
+  for (const [coin, config] of Object.entries(DEFAULT_COIN_BACKTEST_CONFIG)) {
+    try {
+      const m15Candles = await loadRecentM15(resolve(dataDirectory, `${coin}_15m_3y.csv`));
+      const m15Anchor = m15Candles.at(-1)!.openTime;
+      const m1Candles = await loadRecentM1Candles(
+        resolve(dataDirectory, `${coin}_rt094_1m.csv`),
+        180,
+        m15Anchor,
+      );
+      completed.push({
+        coin,
+        m15Candles,
+        m1Candles,
+        fsmConfig: {
+          ...config,
+          riskBudgetUsd: 100,
+          takeProfitRMultiple: options.takeProfitRMultiple,
+          dataGate: defaultDataGate,
+          m1Candles,
+        },
+      });
+      coinRuns[coin] = { status: 'COMPLETED' };
+    } catch (error) {
+      coinRuns[coin] = {
+        status: 'SKIPPED',
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+  return { result: runNukidaBacktest({ coins: completed }), coinRuns };
+}
+
+export async function writeBacktestArtifacts(
+  dataDirectory: string,
+  result: NukidaBacktestResult,
+  coinRuns: Record<string, { status: 'COMPLETED' | 'SKIPPED'; error?: string }>,
+  artifactStem = 'nukida-backtest',
+): Promise<{ tradesPath: string; reportPath: string }> {
+  const tradesPath = resolve(dataDirectory, `${artifactStem}-trades-6m.json`);
+  const reportPath = resolve(dataDirectory, `${artifactStem}-report-6m.json`);
+  await writeFile(tradesPath, `${JSON.stringify(result.tradeLogs, null, 2)}\n`, 'utf8');
+  await writeFile(
+    reportPath,
+    `${JSON.stringify(
+      {
+        warning: result.warning,
+        generatedAt: new Date().toISOString(),
+        strategyFingerprint: computeStrategyFingerprint(),
+        executionAssumptions: {
+          periodDays: 180,
+          riskBudgetUsd: 100,
+          minimumStopDistanceAtrMultiple: MIN_STOP_DISTANCE_ATR_MULTIPLE,
+          entryMakerFeeRate: BINANCE_USDM_VIP0_BNB_DISCOUNT_MAKER_FEE_RATE,
+          takeProfitMakerFeeRate: BINANCE_USDM_VIP0_BNB_DISCOUNT_MAKER_FEE_RATE,
+          stopLossTakerFeeRate: BINANCE_USDM_VIP0_BNB_DISCOUNT_TAKER_FEE_RATE,
+          adverseSlippageRate: DEFAULT_ADVERSE_SLIPPAGE_RATE,
+          spreadProxy: 'M1_RANGE_FRACTION_AT_ENTRY_AND_EXIT',
+          spreadProxyM1RangeFraction: SPREAD_PROXY_M1_RANGE_FRACTION,
+          exchangeFilterSource: 'BINANCE_FUTURES_EXCHANGE_INFO_2026-09-01',
+          coinConfig: DEFAULT_COIN_BACKTEST_CONFIG,
+        },
+        coinRuns,
+        report: result.report,
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  );
+  return { tradesPath, reportPath };
+}
+
+function printMetrics(label: string, metrics: DualCostMetrics): void {
+  for (const [costLabel, values] of Object.entries(metrics)) {
+    console.info(
+      `${label} ${costLabel}: closed=${values.closedTrades}, grossR=${values.grossR.toFixed(2)}, ` +
+        `feeR=${values.feeR.toFixed(2)}, spreadR=${values.spreadR.toFixed(2)}, ` +
+        `slippageR=${values.slippageR.toFixed(2)}, netR=${values.netR.toFixed(2)}, ` +
+        `PF=${values.profitFactor?.toFixed(2) ?? 'N/A'}, ` +
+        `expectancy=${values.expectancyPerTrade?.toFixed(3) ?? 'N/A'}R, ` +
+        `maxDD=${values.maxDrawdownR.toFixed(2)}R, winRate=` +
+        `${values.winRate === null ? 'N/A' : `${(values.winRate * 100).toFixed(1)}%`}, ` +
+        `AMBIGUOUS=${values.ambiguousTrades}, OPEN=${values.openTrades}`,
+    );
+  }
+}
+
+async function main(): Promise<void> {
+  const dataDirectory = fileURLToPath(new URL('../../data/', import.meta.url));
+  console.info(IN_SAMPLE_WARNING);
+  console.info('Baseline: retest/limit only; breakout-entry variant is not part of this run.');
+  const { result, coinRuns } = await runFullNukidaBacktest(dataDirectory);
+  const paths = await writeBacktestArtifacts(dataDirectory, result, coinRuns);
+  console.info(
+    `Coin runs: ${Object.entries(coinRuns)
+      .map(([coin, run]) => `${coin}=${run.status}`)
+      .join(', ')}`,
+  );
+  printMetrics('OVERALL', result.report.overall);
+  console.info(
+    `MIN_STOP_DISTANCE blocked=${result.report.minimumStopDistanceBlocked.total}; ` +
+      Object.entries(result.report.minimumStopDistanceBlocked.byCoin)
+        .map(([coin, count]) => `${coin}=${count}`)
+        .join(', '),
+  );
+  const forcedLossCount = result.tradeLogs.filter(
+    (log) => log.reasonCode === 'AMBIGUOUS_FORCED_LOSS',
+  ).length;
+  console.info(
+    `AMBIGUOUS_FORCED_LOSS legs: count=${forcedLossCount}/${result.tradeLogs.length} ` +
+      `(${result.tradeLogs.length === 0 ? 'N/A' : ((100 * forcedLossCount) / result.tradeLogs.length).toFixed(2)}%)`,
+  );
+  for (const [coin, metrics] of Object.entries(result.report.byCoin)) printMetrics(coin, metrics);
+  for (const [family, metrics] of Object.entries(result.report.bySetupFamily)) {
+    printMetrics(family, metrics);
+  }
+  for (const [direction, metrics] of Object.entries(result.report.byDirection)) {
+    printMetrics(direction, metrics);
+  }
+  console.info(`Trades: ${paths.tradesPath}`);
+  console.info(`Report: ${paths.reportPath}`);
+}
+
+const isMain =
+  process.argv[1] !== undefined && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
+if (isMain) await main();
