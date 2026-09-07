@@ -1,0 +1,62 @@
+{
+  "warning": "TICKET-04X-V: MFE_R thuan tuy mo ta tiem nang gia trong ca cua so time-stop (200 phut), khong dai dien PnL/TP/SL that -- khong tinh lai va khong toi uu gi tu file nay.",
+  "generatedAt": "2026-09-07T11:13:41.788Z",
+  "horizonMinutes": 200,
+  "mfeMilestonesR": [
+    2.67,
+    4,
+    6
+  ],
+  "processedTrades": 27953,
+  "insufficientDataCount": 3,
+  "byOutcome": {
+    "TAKE_PROFIT": {
+      "n": 5384,
+      "meanMfeR": 5.435482565440746,
+      "medianMfeR": 4.512445249515528,
+      "p75MfeR": 6.150971728271238,
+      "p90MfeR": 8.634281119893172,
+      "pctAtOrAbove": {
+        "2.67R": 100,
+        "4R": 63.187221396731054,
+        "6R": 26.337295690936106
+      }
+    },
+    "STOP_LOSS": {
+      "n": 19701,
+      "meanMfeR": 2.041364794070227,
+      "medianMfeR": 1.4201016290938093,
+      "p75MfeR": 2.5069621655618946,
+      "p90MfeR": 4.456800780791422,
+      "pctAtOrAbove": {
+        "2.67R": 22.734886553982033,
+        "4R": 12.04507385411908,
+        "6R": 5.446424039388863
+      }
+    },
+    "AMBIGUOUS_FORCED_LOSS": {
+      "n": 5,
+      "meanMfeR": 8.70602136314856,
+      "medianMfeR": 8.306872584974244,
+      "p75MfeR": 8.700455034142879,
+      "p90MfeR": 11.051364133355985,
+      "pctAtOrAbove": {
+        "2.67R": 100,
+        "4R": 100,
+        "6R": 100
+      }
+    },
+    "TIME_STOP": {
+      "n": 2863,
+      "meanMfeR": 2.1124832132615916,
+      "medianMfeR": 2.170440484425816,
+      "p75MfeR": 2.56453319214505,
+      "p90MfeR": 2.7847505934337127,
+      "pctAtOrAbove": {
+        "2.67R": 17.74362556758645,
+        "4R": 0,
+        "6R": 0
+      }
+    }
+  }
+}
