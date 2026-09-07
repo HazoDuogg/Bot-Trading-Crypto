@@ -1,0 +1,1873 @@
+{
+  "periodLabel": "BOOKTICKER_WINDOW_2023H2_2024Q1",
+  "selectionReason": "MEDIAN_AVG_ADX",
+  "weekStartTimestamp": 1702857600000,
+  "weekEndTimestampExclusive": 1703462400000,
+  "tickSize": 0.1,
+  "tickSizeInference": {
+    "tickSize": 0.1,
+    "supportingPrices": 2000,
+    "outlierPrices": 0,
+    "source": "M1_CLOSE_DECIMAL_GRID"
+  },
+  "dayQualityFlags": [
+    {
+      "date": "2023-12-18",
+      "rowCount": 18753978,
+      "outOfOrder": 416129,
+      "duplicateTimestamp": 11503734,
+      "bidGreaterThanAsk": 0,
+      "nonPositivePriceOrQty": 0
+    },
+    {
+      "date": "2023-12-19",
+      "rowCount": 18082198,
+      "outOfOrder": 0,
+      "duplicateTimestamp": 11662590,
+      "bidGreaterThanAsk": 0,
+      "nonPositivePriceOrQty": 0
+    },
+    {
+      "date": "2023-12-20",
+      "rowCount": 18983636,
+      "outOfOrder": 645787,
+      "duplicateTimestamp": 11549315,
+      "bidGreaterThanAsk": 0,
+      "nonPositivePriceOrQty": 0
+    },
+    {
+      "date": "2023-12-21",
+      "rowCount": 17429494,
+      "outOfOrder": 0,
+      "duplicateTimestamp": 11482153,
+      "bidGreaterThanAsk": 0,
+      "nonPositivePriceOrQty": 0
+    },
+    {
+      "date": "2023-12-22",
+      "rowCount": 15208907,
+      "outOfOrder": 0,
+      "duplicateTimestamp": 9711427,
+      "bidGreaterThanAsk": 0,
+      "nonPositivePriceOrQty": 0
+    },
+    {
+      "date": "2023-12-23",
+      "rowCount": 8749207,
+      "outOfOrder": 0,
+      "duplicateTimestamp": 4846177,
+      "bidGreaterThanAsk": 0,
+      "nonPositivePriceOrQty": 0
+    },
+    {
+      "date": "2023-12-24",
+      "rowCount": 10626324,
+      "outOfOrder": 0,
+      "duplicateTimestamp": 6201045,
+      "bidGreaterThanAsk": 0,
+      "nonPositivePriceOrQty": 0
+    }
+  ],
+  "signals": [
+    {
+      "index": 29370,
+      "direction": "LONG",
+      "decisionAt": 1702890900200,
+      "outcome": "FILLED",
+      "limitPrice": 41070.4,
+      "filledAtEventTime": 1702890900805,
+      "minutesToFill": 0.010083333333333333
+    },
+    {
+      "index": 29371,
+      "direction": "LONG",
+      "decisionAt": 1702891200200,
+      "outcome": "FILLED",
+      "limitPrice": 41042.7,
+      "filledAtEventTime": 1702891200801,
+      "minutesToFill": 0.010016666666666667
+    },
+    {
+      "index": 29372,
+      "direction": "LONG",
+      "decisionAt": 1702891500200,
+      "outcome": "FILLED",
+      "limitPrice": 40832.7,
+      "filledAtEventTime": 1702891512194,
+      "minutesToFill": 0.1999
+    },
+    {
+      "index": 29373,
+      "direction": "LONG",
+      "decisionAt": 1702891800200,
+      "outcome": "FILLED",
+      "limitPrice": 40914.2,
+      "filledAtEventTime": 1702891800234,
+      "minutesToFill": 0.0005666666666666667
+    },
+    {
+      "index": 29413,
+      "direction": "LONG",
+      "decisionAt": 1702903800200,
+      "outcome": "FILLED",
+      "limitPrice": 40937.8,
+      "filledAtEventTime": 1702903809453,
+      "minutesToFill": 0.15421666666666667
+    },
+    {
+      "index": 29414,
+      "direction": "LONG",
+      "decisionAt": 1702904100200,
+      "outcome": "FILLED",
+      "limitPrice": 40946.7,
+      "filledAtEventTime": 1702904122920,
+      "minutesToFill": 0.37866666666666665
+    },
+    {
+      "index": 29415,
+      "direction": "LONG",
+      "decisionAt": 1702904400200,
+      "outcome": "FILLED",
+      "limitPrice": 40941.1,
+      "filledAtEventTime": 1702904409557,
+      "minutesToFill": 0.15595
+    },
+    {
+      "index": 29420,
+      "direction": "SHORT",
+      "decisionAt": 1702905900200,
+      "outcome": "FILLED",
+      "limitPrice": 41155,
+      "filledAtEventTime": 1702905901395,
+      "minutesToFill": 0.019916666666666666
+    },
+    {
+      "index": 29421,
+      "direction": "SHORT",
+      "decisionAt": 1702906200200,
+      "outcome": "FILLED",
+      "limitPrice": 41202.3,
+      "filledAtEventTime": 1702906200242,
+      "minutesToFill": 0.0007
+    },
+    {
+      "index": 29422,
+      "direction": "SHORT",
+      "decisionAt": 1702906500200,
+      "outcome": "FILLED",
+      "limitPrice": 41317.8,
+      "filledAtEventTime": 1702906501552,
+      "minutesToFill": 0.022533333333333332
+    },
+    {
+      "index": 29425,
+      "direction": "SHORT",
+      "decisionAt": 1702907400200,
+      "outcome": "FILLED",
+      "limitPrice": 41300.1,
+      "filledAtEventTime": 1702907400200,
+      "minutesToFill": 0
+    },
+    {
+      "index": 29426,
+      "direction": "SHORT",
+      "decisionAt": 1702907700200,
+      "outcome": "EXPIRED",
+      "limitPrice": 41460.7,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 29428,
+      "direction": "SHORT",
+      "decisionAt": 1702908300200,
+      "outcome": "FILLED",
+      "limitPrice": 41429.1,
+      "filledAtEventTime": 1702908316911,
+      "minutesToFill": 0.2785166666666667
+    },
+    {
+      "index": 29434,
+      "direction": "SHORT",
+      "decisionAt": 1702910100200,
+      "outcome": "FILLED",
+      "limitPrice": 41658.2,
+      "filledAtEventTime": 1702910103241,
+      "minutesToFill": 0.05068333333333333
+    },
+    {
+      "index": 29435,
+      "direction": "SHORT",
+      "decisionAt": 1702910400200,
+      "outcome": "FILLED",
+      "limitPrice": 41680.2,
+      "filledAtEventTime": 1702910411617,
+      "minutesToFill": 0.19028333333333333
+    },
+    {
+      "index": 29436,
+      "direction": "SHORT",
+      "decisionAt": 1702910700200,
+      "outcome": "FILLED",
+      "limitPrice": 41729,
+      "filledAtEventTime": 1702910842304,
+      "minutesToFill": 2.3684
+    },
+    {
+      "index": 29437,
+      "direction": "SHORT",
+      "decisionAt": 1702911000200,
+      "outcome": "FILLED",
+      "limitPrice": 41772.4,
+      "filledAtEventTime": 1702911011751,
+      "minutesToFill": 0.19251666666666667
+    },
+    {
+      "index": 29453,
+      "direction": "LONG",
+      "decisionAt": 1702915800200,
+      "outcome": "EXPIRED",
+      "limitPrice": 41178.3,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 29468,
+      "direction": "SHORT",
+      "decisionAt": 1702920300200,
+      "outcome": "FILLED",
+      "limitPrice": 41583.4,
+      "filledAtEventTime": 1702920308341,
+      "minutesToFill": 0.13568333333333332
+    },
+    {
+      "index": 29469,
+      "direction": "SHORT",
+      "decisionAt": 1702920600200,
+      "outcome": "FILLED",
+      "limitPrice": 41612.1,
+      "filledAtEventTime": 1702920603510,
+      "minutesToFill": 0.05516666666666667
+    },
+    {
+      "index": 29487,
+      "direction": "SHORT",
+      "decisionAt": 1702926000200,
+      "outcome": "FILLED",
+      "limitPrice": 41662.2,
+      "filledAtEventTime": 1702926000225,
+      "minutesToFill": 0.0004166666666666667
+    },
+    {
+      "index": 29489,
+      "direction": "SHORT",
+      "decisionAt": 1702926600200,
+      "outcome": "FILLED",
+      "limitPrice": 41715.5,
+      "filledAtEventTime": 1702926609556,
+      "minutesToFill": 0.15593333333333334
+    },
+    {
+      "index": 29506,
+      "direction": "SHORT",
+      "decisionAt": 1702931700200,
+      "outcome": "FILLED",
+      "limitPrice": 41826.1,
+      "filledAtEventTime": 1702931703203,
+      "minutesToFill": 0.05005
+    },
+    {
+      "index": 29507,
+      "direction": "SHORT",
+      "decisionAt": 1702932000200,
+      "outcome": "FILLED",
+      "limitPrice": 41802.5,
+      "filledAtEventTime": 1702932001744,
+      "minutesToFill": 0.025733333333333334
+    },
+    {
+      "index": 29508,
+      "direction": "SHORT",
+      "decisionAt": 1702932300200,
+      "outcome": "FILLED",
+      "limitPrice": 41913.1,
+      "filledAtEventTime": 1702932302723,
+      "minutesToFill": 0.04205
+    },
+    {
+      "index": 29509,
+      "direction": "SHORT",
+      "decisionAt": 1702932600200,
+      "outcome": "FILLED",
+      "limitPrice": 41978.9,
+      "filledAtEventTime": 1702932613829,
+      "minutesToFill": 0.22715
+    },
+    {
+      "index": 29510,
+      "direction": "SHORT",
+      "decisionAt": 1702932900200,
+      "outcome": "FILLED",
+      "limitPrice": 42001.1,
+      "filledAtEventTime": 1702932900393,
+      "minutesToFill": 0.0032166666666666667
+    },
+    {
+      "index": 29715,
+      "direction": "LONG",
+      "decisionAt": 1702994400200,
+      "outcome": "FILLED",
+      "limitPrice": 42894,
+      "filledAtEventTime": 1702994400575,
+      "minutesToFill": 0.00625
+    },
+    {
+      "index": 29716,
+      "direction": "LONG",
+      "decisionAt": 1702994700200,
+      "outcome": "FILLED",
+      "limitPrice": 42863.9,
+      "filledAtEventTime": 1702994709589,
+      "minutesToFill": 0.15648333333333334
+    },
+    {
+      "index": 29717,
+      "direction": "LONG",
+      "decisionAt": 1702995000200,
+      "outcome": "FILLED",
+      "limitPrice": 42772.1,
+      "filledAtEventTime": 1702995002129,
+      "minutesToFill": 0.03215
+    },
+    {
+      "index": 29718,
+      "direction": "LONG",
+      "decisionAt": 1702995300200,
+      "outcome": "FILLED",
+      "limitPrice": 42649.2,
+      "filledAtEventTime": 1702995300631,
+      "minutesToFill": 0.007183333333333333
+    },
+    {
+      "index": 29719,
+      "direction": "LONG",
+      "decisionAt": 1702995600200,
+      "outcome": "FILLED",
+      "limitPrice": 42649.9,
+      "filledAtEventTime": 1702995600309,
+      "minutesToFill": 0.0018166666666666667
+    },
+    {
+      "index": 29725,
+      "direction": "LONG",
+      "decisionAt": 1702997400200,
+      "outcome": "FILLED",
+      "limitPrice": 42511.4,
+      "filledAtEventTime": 1702997400382,
+      "minutesToFill": 0.003033333333333333
+    },
+    {
+      "index": 29726,
+      "direction": "LONG",
+      "decisionAt": 1702997700200,
+      "outcome": "FILLED",
+      "limitPrice": 42323.2,
+      "filledAtEventTime": 1702997707765,
+      "minutesToFill": 0.12608333333333333
+    },
+    {
+      "index": 29832,
+      "direction": "LONG",
+      "decisionAt": 1703029500200,
+      "outcome": "FILLED",
+      "limitPrice": 42245.5,
+      "filledAtEventTime": 1703029507490,
+      "minutesToFill": 0.1215
+    },
+    {
+      "index": 29843,
+      "direction": "SHORT",
+      "decisionAt": 1703032800200,
+      "outcome": "FILLED",
+      "limitPrice": 42452,
+      "filledAtEventTime": 1703032801080,
+      "minutesToFill": 0.014666666666666666
+    },
+    {
+      "index": 29845,
+      "direction": "SHORT",
+      "decisionAt": 1703033400200,
+      "outcome": "FILLED",
+      "limitPrice": 42460.1,
+      "filledAtEventTime": 1703033401267,
+      "minutesToFill": 0.017783333333333335
+    },
+    {
+      "index": 29848,
+      "direction": "SHORT",
+      "decisionAt": 1703034300200,
+      "outcome": "FILLED",
+      "limitPrice": 42490.6,
+      "filledAtEventTime": 1703034586066,
+      "minutesToFill": 4.764433333333334
+    },
+    {
+      "index": 29857,
+      "direction": "LONG",
+      "decisionAt": 1703037000200,
+      "outcome": "FILLED",
+      "limitPrice": 42292.6,
+      "filledAtEventTime": 1703037019000,
+      "minutesToFill": 0.31333333333333335
+    },
+    {
+      "index": 29861,
+      "direction": "LONG",
+      "decisionAt": 1703038200200,
+      "outcome": "FILLED",
+      "limitPrice": 42253.1,
+      "filledAtEventTime": 1703038201214,
+      "minutesToFill": 0.0169
+    },
+    {
+      "index": 29887,
+      "direction": "SHORT",
+      "decisionAt": 1703046000200,
+      "outcome": "FILLED",
+      "limitPrice": 42588.7,
+      "filledAtEventTime": 1703046000786,
+      "minutesToFill": 0.009766666666666667
+    },
+    {
+      "index": 29888,
+      "direction": "SHORT",
+      "decisionAt": 1703046300200,
+      "outcome": "FILLED",
+      "limitPrice": 42594.6,
+      "filledAtEventTime": 1703046306124,
+      "minutesToFill": 0.09873333333333334
+    },
+    {
+      "index": 29889,
+      "direction": "SHORT",
+      "decisionAt": 1703046600200,
+      "outcome": "FILLED",
+      "limitPrice": 42634.2,
+      "filledAtEventTime": 1703046601565,
+      "minutesToFill": 0.02275
+    },
+    {
+      "index": 29890,
+      "direction": "SHORT",
+      "decisionAt": 1703046900200,
+      "outcome": "FILLED",
+      "limitPrice": 42656.7,
+      "filledAtEventTime": 1703046901356,
+      "minutesToFill": 0.019266666666666668
+    },
+    {
+      "index": 29891,
+      "direction": "SHORT",
+      "decisionAt": 1703047200200,
+      "outcome": "FILLED",
+      "limitPrice": 42723.9,
+      "filledAtEventTime": 1703047201024,
+      "minutesToFill": 0.013733333333333334
+    },
+    {
+      "index": 29893,
+      "direction": "SHORT",
+      "decisionAt": 1703047800200,
+      "outcome": "FILLED",
+      "limitPrice": 42733.3,
+      "filledAtEventTime": 1703047835148,
+      "minutesToFill": 0.5824666666666667
+    },
+    {
+      "index": 29894,
+      "direction": "SHORT",
+      "decisionAt": 1703048100200,
+      "outcome": "FILLED",
+      "limitPrice": 42769.5,
+      "filledAtEventTime": 1703048102028,
+      "minutesToFill": 0.030466666666666666
+    },
+    {
+      "index": 29895,
+      "direction": "SHORT",
+      "decisionAt": 1703048400200,
+      "outcome": "FILLED",
+      "limitPrice": 42841,
+      "filledAtEventTime": 1703048400720,
+      "minutesToFill": 0.008666666666666666
+    },
+    {
+      "index": 29911,
+      "direction": "SHORT",
+      "decisionAt": 1703053200200,
+      "outcome": "FILLED",
+      "limitPrice": 42825.1,
+      "filledAtEventTime": 1703053205814,
+      "minutesToFill": 0.09356666666666667
+    },
+    {
+      "index": 29912,
+      "direction": "SHORT",
+      "decisionAt": 1703053500200,
+      "outcome": "FILLED",
+      "limitPrice": 43007.5,
+      "filledAtEventTime": 1703053501086,
+      "minutesToFill": 0.014766666666666668
+    },
+    {
+      "index": 30191,
+      "direction": "LONG",
+      "decisionAt": 1703137200200,
+      "outcome": "FILLED",
+      "limitPrice": 43616.4,
+      "filledAtEventTime": 1703137226336,
+      "minutesToFill": 0.4356
+    },
+    {
+      "index": 30192,
+      "direction": "LONG",
+      "decisionAt": 1703137500200,
+      "outcome": "FILLED",
+      "limitPrice": 43589.5,
+      "filledAtEventTime": 1703137505291,
+      "minutesToFill": 0.08485
+    },
+    {
+      "index": 30193,
+      "direction": "LONG",
+      "decisionAt": 1703137800200,
+      "outcome": "FILLED",
+      "limitPrice": 43526.5,
+      "filledAtEventTime": 1703137800476,
+      "minutesToFill": 0.0046
+    },
+    {
+      "index": 30194,
+      "direction": "LONG",
+      "decisionAt": 1703138100200,
+      "outcome": "FILLED",
+      "limitPrice": 43512.2,
+      "filledAtEventTime": 1703138100967,
+      "minutesToFill": 0.012783333333333334
+    },
+    {
+      "index": 30195,
+      "direction": "LONG",
+      "decisionAt": 1703138400200,
+      "outcome": "FILLED",
+      "limitPrice": 43541.4,
+      "filledAtEventTime": 1703138407887,
+      "minutesToFill": 0.12811666666666666
+    },
+    {
+      "index": 30207,
+      "direction": "SHORT",
+      "decisionAt": 1703142000200,
+      "outcome": "FILLED",
+      "limitPrice": 43848.9,
+      "filledAtEventTime": 1703142001458,
+      "minutesToFill": 0.020966666666666668
+    },
+    {
+      "index": 30209,
+      "direction": "SHORT",
+      "decisionAt": 1703142600200,
+      "outcome": "FILLED",
+      "limitPrice": 43865.9,
+      "filledAtEventTime": 1703142783805,
+      "minutesToFill": 3.0600833333333335
+    },
+    {
+      "index": 30210,
+      "direction": "SHORT",
+      "decisionAt": 1703142900200,
+      "outcome": "FILLED",
+      "limitPrice": 43894.3,
+      "filledAtEventTime": 1703142901929,
+      "minutesToFill": 0.028816666666666668
+    },
+    {
+      "index": 30224,
+      "direction": "SHORT",
+      "decisionAt": 1703147100200,
+      "outcome": "FILLED",
+      "limitPrice": 43934.8,
+      "filledAtEventTime": 1703147100815,
+      "minutesToFill": 0.01025
+    },
+    {
+      "index": 30225,
+      "direction": "SHORT",
+      "decisionAt": 1703147400200,
+      "outcome": "FILLED",
+      "limitPrice": 43966.9,
+      "filledAtEventTime": 1703147592335,
+      "minutesToFill": 3.20225
+    },
+    {
+      "index": 30226,
+      "direction": "SHORT",
+      "decisionAt": 1703147700200,
+      "outcome": "EXPIRED",
+      "limitPrice": 43968.9,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 30231,
+      "direction": "LONG",
+      "decisionAt": 1703149200200,
+      "outcome": "FILLED",
+      "limitPrice": 43707.4,
+      "filledAtEventTime": 1703149209995,
+      "minutesToFill": 0.16325
+    },
+    {
+      "index": 30236,
+      "direction": "LONG",
+      "decisionAt": 1703150700200,
+      "outcome": "FILLED",
+      "limitPrice": 43659.1,
+      "filledAtEventTime": 1703150700790,
+      "minutesToFill": 0.009833333333333333
+    },
+    {
+      "index": 30253,
+      "direction": "SHORT",
+      "decisionAt": 1703155800200,
+      "outcome": "FILLED",
+      "limitPrice": 43941.4,
+      "filledAtEventTime": 1703155804851,
+      "minutesToFill": 0.07751666666666666
+    },
+    {
+      "index": 30254,
+      "direction": "SHORT",
+      "decisionAt": 1703156100200,
+      "outcome": "FILLED",
+      "limitPrice": 44040.8,
+      "filledAtEventTime": 1703156100420,
+      "minutesToFill": 0.0036666666666666666
+    },
+    {
+      "index": 30255,
+      "direction": "SHORT",
+      "decisionAt": 1703156400200,
+      "outcome": "FILLED",
+      "limitPrice": 44038.6,
+      "filledAtEventTime": 1703156406614,
+      "minutesToFill": 0.1069
+    },
+    {
+      "index": 30257,
+      "direction": "SHORT",
+      "decisionAt": 1703157000200,
+      "outcome": "FILLED",
+      "limitPrice": 44115,
+      "filledAtEventTime": 1703157007921,
+      "minutesToFill": 0.12868333333333334
+    },
+    {
+      "index": 30258,
+      "direction": "SHORT",
+      "decisionAt": 1703157300200,
+      "outcome": "FILLED",
+      "limitPrice": 44108.1,
+      "filledAtEventTime": 1703157301727,
+      "minutesToFill": 0.02545
+    },
+    {
+      "index": 30271,
+      "direction": "SHORT",
+      "decisionAt": 1703161200200,
+      "outcome": "FILLED",
+      "limitPrice": 44145.7,
+      "filledAtEventTime": 1703161281562,
+      "minutesToFill": 1.3560333333333334
+    },
+    {
+      "index": 30272,
+      "direction": "SHORT",
+      "decisionAt": 1703161500200,
+      "outcome": "FILLED",
+      "limitPrice": 44220.6,
+      "filledAtEventTime": 1703161501734,
+      "minutesToFill": 0.025566666666666668
+    },
+    {
+      "index": 30325,
+      "direction": "LONG",
+      "decisionAt": 1703177400200,
+      "outcome": "FILLED",
+      "limitPrice": 43578.5,
+      "filledAtEventTime": 1703177400216,
+      "minutesToFill": 0.0002666666666666667
+    },
+    {
+      "index": 30329,
+      "direction": "LONG",
+      "decisionAt": 1703178600200,
+      "outcome": "FILLED",
+      "limitPrice": 43523,
+      "filledAtEventTime": 1703178604139,
+      "minutesToFill": 0.06565
+    },
+    {
+      "index": 30330,
+      "direction": "LONG",
+      "decisionAt": 1703178900200,
+      "outcome": "FILLED",
+      "limitPrice": 43498,
+      "filledAtEventTime": 1703178915648,
+      "minutesToFill": 0.2574666666666667
+    },
+    {
+      "index": 30337,
+      "direction": "LONG",
+      "decisionAt": 1703181000200,
+      "outcome": "FILLED",
+      "limitPrice": 43430.9,
+      "filledAtEventTime": 1703181028619,
+      "minutesToFill": 0.47365
+    },
+    {
+      "index": 30352,
+      "direction": "SHORT",
+      "decisionAt": 1703185500200,
+      "outcome": "FILLED",
+      "limitPrice": 43682.9,
+      "filledAtEventTime": 1703185500332,
+      "minutesToFill": 0.0022
+    },
+    {
+      "index": 30353,
+      "direction": "SHORT",
+      "decisionAt": 1703185800200,
+      "outcome": "FILLED",
+      "limitPrice": 43727.9,
+      "filledAtEventTime": 1703185802383,
+      "minutesToFill": 0.03638333333333333
+    },
+    {
+      "index": 30375,
+      "direction": "SHORT",
+      "decisionAt": 1703192400200,
+      "outcome": "EXPIRED",
+      "limitPrice": 43835,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 30383,
+      "direction": "SHORT",
+      "decisionAt": 1703194800200,
+      "outcome": "FILLED",
+      "limitPrice": 44015.1,
+      "filledAtEventTime": 1703194885431,
+      "minutesToFill": 1.4205166666666666
+    },
+    {
+      "index": 30384,
+      "direction": "SHORT",
+      "decisionAt": 1703195100200,
+      "outcome": "FILLED",
+      "limitPrice": 44048.5,
+      "filledAtEventTime": 1703195101446,
+      "minutesToFill": 0.020766666666666666
+    },
+    {
+      "index": 30385,
+      "direction": "SHORT",
+      "decisionAt": 1703195400200,
+      "outcome": "EXPIRED",
+      "limitPrice": 44112.7,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 30403,
+      "direction": "LONG",
+      "decisionAt": 1703200800200,
+      "outcome": "FILLED",
+      "limitPrice": 43918.7,
+      "filledAtEventTime": 1703200858056,
+      "minutesToFill": 0.9642666666666667
+    },
+    {
+      "index": 30406,
+      "direction": "LONG",
+      "decisionAt": 1703201700200,
+      "outcome": "FILLED",
+      "limitPrice": 43895.2,
+      "filledAtEventTime": 1703201708207,
+      "minutesToFill": 0.13345
+    },
+    {
+      "index": 30407,
+      "direction": "LONG",
+      "decisionAt": 1703202000200,
+      "outcome": "FILLED",
+      "limitPrice": 43856.2,
+      "filledAtEventTime": 1703202024784,
+      "minutesToFill": 0.40973333333333334
+    },
+    {
+      "index": 30425,
+      "direction": "SHORT",
+      "decisionAt": 1703207400200,
+      "outcome": "EXPIRED",
+      "limitPrice": 43988.1,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 30427,
+      "direction": "SHORT",
+      "decisionAt": 1703208000200,
+      "outcome": "FILLED",
+      "limitPrice": 44002.5,
+      "filledAtEventTime": 1703208004557,
+      "minutesToFill": 0.07261666666666666
+    },
+    {
+      "index": 30428,
+      "direction": "SHORT",
+      "decisionAt": 1703208300200,
+      "outcome": "FILLED",
+      "limitPrice": 44010.1,
+      "filledAtEventTime": 1703208302070,
+      "minutesToFill": 0.031166666666666665
+    },
+    {
+      "index": 30429,
+      "direction": "SHORT",
+      "decisionAt": 1703208600200,
+      "outcome": "FILLED",
+      "limitPrice": 44037.2,
+      "filledAtEventTime": 1703208717208,
+      "minutesToFill": 1.9501333333333333
+    },
+    {
+      "index": 30430,
+      "direction": "SHORT",
+      "decisionAt": 1703208900200,
+      "outcome": "FILLED",
+      "limitPrice": 44127.6,
+      "filledAtEventTime": 1703208902803,
+      "minutesToFill": 0.043383333333333336
+    },
+    {
+      "index": 30431,
+      "direction": "SHORT",
+      "decisionAt": 1703209200200,
+      "outcome": "EXPIRED",
+      "limitPrice": 44242.9,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 30432,
+      "direction": "SHORT",
+      "decisionAt": 1703209500200,
+      "outcome": "FILLED",
+      "limitPrice": 44185.2,
+      "filledAtEventTime": 1703209501062,
+      "minutesToFill": 0.014366666666666666
+    },
+    {
+      "index": 30433,
+      "direction": "SHORT",
+      "decisionAt": 1703209800200,
+      "outcome": "EXPIRED",
+      "limitPrice": 44307.5,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 30464,
+      "direction": "SHORT",
+      "decisionAt": 1703219100200,
+      "outcome": "FILLED",
+      "limitPrice": 44083.5,
+      "filledAtEventTime": 1703219101643,
+      "minutesToFill": 0.02405
+    },
+    {
+      "index": 30465,
+      "direction": "SHORT",
+      "decisionAt": 1703219400200,
+      "outcome": "FILLED",
+      "limitPrice": 44110,
+      "filledAtEventTime": 1703219421304,
+      "minutesToFill": 0.35173333333333334
+    },
+    {
+      "index": 30466,
+      "direction": "SHORT",
+      "decisionAt": 1703219700200,
+      "outcome": "EXPIRED",
+      "limitPrice": 44119.9,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 30469,
+      "direction": "SHORT",
+      "decisionAt": 1703220600200,
+      "outcome": "FILLED",
+      "limitPrice": 44154.4,
+      "filledAtEventTime": 1703220621271,
+      "minutesToFill": 0.35118333333333335
+    },
+    {
+      "index": 30470,
+      "direction": "SHORT",
+      "decisionAt": 1703220900200,
+      "outcome": "EXPIRED",
+      "limitPrice": 44173.2,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 30490,
+      "direction": "SHORT",
+      "decisionAt": 1703226900200,
+      "outcome": "FILLED",
+      "limitPrice": 44457.7,
+      "filledAtEventTime": 1703226900275,
+      "minutesToFill": 0.00125
+    },
+    {
+      "index": 30492,
+      "direction": "LONG",
+      "decisionAt": 1703227500200,
+      "outcome": "FILLED",
+      "limitPrice": 44021.9,
+      "filledAtEventTime": 1703227503071,
+      "minutesToFill": 0.04785
+    },
+    {
+      "index": 30493,
+      "direction": "LONG",
+      "decisionAt": 1703227800200,
+      "outcome": "FILLED",
+      "limitPrice": 43986.5,
+      "filledAtEventTime": 1703227802736,
+      "minutesToFill": 0.04226666666666667
+    },
+    {
+      "index": 30495,
+      "direction": "LONG",
+      "decisionAt": 1703228400200,
+      "outcome": "FILLED",
+      "limitPrice": 43906.4,
+      "filledAtEventTime": 1703228400379,
+      "minutesToFill": 0.0029833333333333335
+    },
+    {
+      "index": 30496,
+      "direction": "LONG",
+      "decisionAt": 1703228700200,
+      "outcome": "FILLED",
+      "limitPrice": 43906.4,
+      "filledAtEventTime": 1703228702643,
+      "minutesToFill": 0.040716666666666665
+    },
+    {
+      "index": 30523,
+      "direction": "LONG",
+      "decisionAt": 1703236800200,
+      "outcome": "FILLED",
+      "limitPrice": 43534.9,
+      "filledAtEventTime": 1703236800273,
+      "minutesToFill": 0.0012166666666666667
+    },
+    {
+      "index": 30524,
+      "direction": "LONG",
+      "decisionAt": 1703237100200,
+      "outcome": "FILLED",
+      "limitPrice": 43557.2,
+      "filledAtEventTime": 1703237101742,
+      "minutesToFill": 0.0257
+    },
+    {
+      "index": 30552,
+      "direction": "SHORT",
+      "decisionAt": 1703245500200,
+      "outcome": "FILLED",
+      "limitPrice": 43836,
+      "filledAtEventTime": 1703245502456,
+      "minutesToFill": 0.0376
+    },
+    {
+      "index": 30557,
+      "direction": "LONG",
+      "decisionAt": 1703247000200,
+      "outcome": "FILLED",
+      "limitPrice": 43674.8,
+      "filledAtEventTime": 1703247005354,
+      "minutesToFill": 0.0859
+    },
+    {
+      "index": 30558,
+      "direction": "LONG",
+      "decisionAt": 1703247300200,
+      "outcome": "FILLED",
+      "limitPrice": 43598,
+      "filledAtEventTime": 1703247305632,
+      "minutesToFill": 0.09053333333333333
+    },
+    {
+      "index": 30559,
+      "direction": "LONG",
+      "decisionAt": 1703247600200,
+      "outcome": "FILLED",
+      "limitPrice": 43610.2,
+      "filledAtEventTime": 1703247826053,
+      "minutesToFill": 3.7642166666666665
+    },
+    {
+      "index": 30560,
+      "direction": "LONG",
+      "decisionAt": 1703247900200,
+      "outcome": "FILLED",
+      "limitPrice": 43590,
+      "filledAtEventTime": 1703247993434,
+      "minutesToFill": 1.5539
+    },
+    {
+      "index": 30575,
+      "direction": "SHORT",
+      "decisionAt": 1703252400200,
+      "outcome": "FILLED",
+      "limitPrice": 43790.2,
+      "filledAtEventTime": 1703252403688,
+      "minutesToFill": 0.058133333333333335
+    },
+    {
+      "index": 30576,
+      "direction": "SHORT",
+      "decisionAt": 1703252700200,
+      "outcome": "FILLED",
+      "limitPrice": 43808.6,
+      "filledAtEventTime": 1703252704885,
+      "minutesToFill": 0.07808333333333334
+    },
+    {
+      "index": 30577,
+      "direction": "SHORT",
+      "decisionAt": 1703253000200,
+      "outcome": "FILLED",
+      "limitPrice": 43791.9,
+      "filledAtEventTime": 1703253002795,
+      "minutesToFill": 0.04325
+    },
+    {
+      "index": 30584,
+      "direction": "LONG",
+      "decisionAt": 1703255100200,
+      "outcome": "FILLED",
+      "limitPrice": 43449.2,
+      "filledAtEventTime": 1703255136798,
+      "minutesToFill": 0.6099666666666667
+    },
+    {
+      "index": 30585,
+      "direction": "LONG",
+      "decisionAt": 1703255400200,
+      "outcome": "FILLED",
+      "limitPrice": 43449.7,
+      "filledAtEventTime": 1703255408248,
+      "minutesToFill": 0.13413333333333333
+    },
+    {
+      "index": 30611,
+      "direction": "LONG",
+      "decisionAt": 1703263200200,
+      "outcome": "FILLED",
+      "limitPrice": 43580.3,
+      "filledAtEventTime": 1703263205289,
+      "minutesToFill": 0.08481666666666667
+    },
+    {
+      "index": 30612,
+      "direction": "LONG",
+      "decisionAt": 1703263500200,
+      "outcome": "FILLED",
+      "limitPrice": 43571,
+      "filledAtEventTime": 1703263501370,
+      "minutesToFill": 0.0195
+    },
+    {
+      "index": 30613,
+      "direction": "LONG",
+      "decisionAt": 1703263800200,
+      "outcome": "EXPIRED",
+      "limitPrice": 43508.1,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 30614,
+      "direction": "LONG",
+      "decisionAt": 1703264100200,
+      "outcome": "EXPIRED",
+      "limitPrice": 43549.3,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 30632,
+      "direction": "SHORT",
+      "decisionAt": 1703269500200,
+      "outcome": "FILLED",
+      "limitPrice": 43831.2,
+      "filledAtEventTime": 1703269502986,
+      "minutesToFill": 0.04643333333333333
+    },
+    {
+      "index": 30633,
+      "direction": "SHORT",
+      "decisionAt": 1703269800200,
+      "outcome": "FILLED",
+      "limitPrice": 43900.9,
+      "filledAtEventTime": 1703269800276,
+      "minutesToFill": 0.0012666666666666666
+    },
+    {
+      "index": 30634,
+      "direction": "SHORT",
+      "decisionAt": 1703270100200,
+      "outcome": "FILLED",
+      "limitPrice": 43960.5,
+      "filledAtEventTime": 1703270105340,
+      "minutesToFill": 0.08566666666666667
+    },
+    {
+      "index": 30636,
+      "direction": "SHORT",
+      "decisionAt": 1703270700200,
+      "outcome": "FILLED",
+      "limitPrice": 43961.7,
+      "filledAtEventTime": 1703270838499,
+      "minutesToFill": 2.3049833333333334
+    },
+    {
+      "index": 30638,
+      "direction": "SHORT",
+      "decisionAt": 1703271300200,
+      "outcome": "FILLED",
+      "limitPrice": 44033,
+      "filledAtEventTime": 1703271300642,
+      "minutesToFill": 0.007366666666666666
+    },
+    {
+      "index": 30683,
+      "direction": "SHORT",
+      "decisionAt": 1703284800200,
+      "outcome": "FILLED",
+      "limitPrice": 43799.4,
+      "filledAtEventTime": 1703284800284,
+      "minutesToFill": 0.0014
+    },
+    {
+      "index": 30687,
+      "direction": "SHORT",
+      "decisionAt": 1703286000200,
+      "outcome": "FILLED",
+      "limitPrice": 43826.8,
+      "filledAtEventTime": 1703286138761,
+      "minutesToFill": 2.30935
+    },
+    {
+      "index": 30688,
+      "direction": "SHORT",
+      "decisionAt": 1703286300200,
+      "outcome": "FILLED",
+      "limitPrice": 43832.9,
+      "filledAtEventTime": 1703286307792,
+      "minutesToFill": 0.12653333333333333
+    },
+    {
+      "index": 30689,
+      "direction": "SHORT",
+      "decisionAt": 1703286600200,
+      "outcome": "FILLED",
+      "limitPrice": 43907.1,
+      "filledAtEventTime": 1703286617552,
+      "minutesToFill": 0.2892
+    },
+    {
+      "index": 30690,
+      "direction": "SHORT",
+      "decisionAt": 1703286900200,
+      "outcome": "FILLED",
+      "limitPrice": 43946.2,
+      "filledAtEventTime": 1703286905201,
+      "minutesToFill": 0.08335
+    },
+    {
+      "index": 30691,
+      "direction": "SHORT",
+      "decisionAt": 1703287200200,
+      "outcome": "EXPIRED",
+      "limitPrice": 44053.1,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 30692,
+      "direction": "SHORT",
+      "decisionAt": 1703287500200,
+      "outcome": "FILLED",
+      "limitPrice": 43998.2,
+      "filledAtEventTime": 1703287757458,
+      "minutesToFill": 4.287633333333333
+    },
+    {
+      "index": 30693,
+      "direction": "SHORT",
+      "decisionAt": 1703287800200,
+      "outcome": "FILLED",
+      "limitPrice": 44000,
+      "filledAtEventTime": 1703287875535,
+      "minutesToFill": 1.2555833333333333
+    },
+    {
+      "index": 30694,
+      "direction": "SHORT",
+      "decisionAt": 1703288100200,
+      "outcome": "FILLED",
+      "limitPrice": 44040,
+      "filledAtEventTime": 1703288100376,
+      "minutesToFill": 0.0029333333333333334
+    },
+    {
+      "index": 30710,
+      "direction": "LONG",
+      "decisionAt": 1703292900200,
+      "outcome": "FILLED",
+      "limitPrice": 43856.9,
+      "filledAtEventTime": 1703292906327,
+      "minutesToFill": 0.10211666666666666
+    },
+    {
+      "index": 30711,
+      "direction": "LONG",
+      "decisionAt": 1703293200200,
+      "outcome": "FILLED",
+      "limitPrice": 43843,
+      "filledAtEventTime": 1703293200409,
+      "minutesToFill": 0.0034833333333333335
+    },
+    {
+      "index": 30715,
+      "direction": "LONG",
+      "decisionAt": 1703294400200,
+      "outcome": "FILLED",
+      "limitPrice": 43790,
+      "filledAtEventTime": 1703294400595,
+      "minutesToFill": 0.006583333333333333
+    },
+    {
+      "index": 30717,
+      "direction": "LONG",
+      "decisionAt": 1703295000200,
+      "outcome": "FILLED",
+      "limitPrice": 43782.1,
+      "filledAtEventTime": 1703295042181,
+      "minutesToFill": 0.6996833333333333
+    },
+    {
+      "index": 30718,
+      "direction": "LONG",
+      "decisionAt": 1703295300200,
+      "outcome": "FILLED",
+      "limitPrice": 43763.5,
+      "filledAtEventTime": 1703295345024,
+      "minutesToFill": 0.7470666666666667
+    },
+    {
+      "index": 30722,
+      "direction": "LONG",
+      "decisionAt": 1703296500200,
+      "outcome": "FILLED",
+      "limitPrice": 43710.5,
+      "filledAtEventTime": 1703296525007,
+      "minutesToFill": 0.41345
+    },
+    {
+      "index": 30723,
+      "direction": "LONG",
+      "decisionAt": 1703296800200,
+      "outcome": "FILLED",
+      "limitPrice": 43656.8,
+      "filledAtEventTime": 1703296801423,
+      "minutesToFill": 0.020383333333333333
+    },
+    {
+      "index": 30724,
+      "direction": "LONG",
+      "decisionAt": 1703297100200,
+      "outcome": "FILLED",
+      "limitPrice": 43622.2,
+      "filledAtEventTime": 1703297185939,
+      "minutesToFill": 1.4289833333333333
+    },
+    {
+      "index": 30725,
+      "direction": "LONG",
+      "decisionAt": 1703297400200,
+      "outcome": "EXPIRED",
+      "limitPrice": 43595.7,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 30810,
+      "direction": "SHORT",
+      "decisionAt": 1703322900200,
+      "outcome": "FILLED",
+      "limitPrice": 43669.8,
+      "filledAtEventTime": 1703322923218,
+      "minutesToFill": 0.3836333333333333
+    },
+    {
+      "index": 30811,
+      "direction": "SHORT",
+      "decisionAt": 1703323200200,
+      "outcome": "FILLED",
+      "limitPrice": 43670,
+      "filledAtEventTime": 1703323211481,
+      "minutesToFill": 0.18801666666666667
+    },
+    {
+      "index": 30834,
+      "direction": "LONG",
+      "decisionAt": 1703330100200,
+      "outcome": "FILLED",
+      "limitPrice": 43564,
+      "filledAtEventTime": 1703330116970,
+      "minutesToFill": 0.2795
+    },
+    {
+      "index": 30835,
+      "direction": "LONG",
+      "decisionAt": 1703330400200,
+      "outcome": "EXPIRED",
+      "limitPrice": 43528.9,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 30838,
+      "direction": "LONG",
+      "decisionAt": 1703331300200,
+      "outcome": "FILLED",
+      "limitPrice": 43521.9,
+      "filledAtEventTime": 1703331391325,
+      "minutesToFill": 1.51875
+    },
+    {
+      "index": 30845,
+      "direction": "SHORT",
+      "decisionAt": 1703333400200,
+      "outcome": "FILLED",
+      "limitPrice": 43701.6,
+      "filledAtEventTime": 1703333414245,
+      "minutesToFill": 0.23408333333333334
+    },
+    {
+      "index": 30847,
+      "direction": "SHORT",
+      "decisionAt": 1703334000200,
+      "outcome": "FILLED",
+      "limitPrice": 43679,
+      "filledAtEventTime": 1703334043161,
+      "minutesToFill": 0.7160166666666666
+    },
+    {
+      "index": 30850,
+      "direction": "SHORT",
+      "decisionAt": 1703334900200,
+      "outcome": "FILLED",
+      "limitPrice": 43706.4,
+      "filledAtEventTime": 1703334905448,
+      "minutesToFill": 0.08746666666666666
+    },
+    {
+      "index": 30853,
+      "direction": "SHORT",
+      "decisionAt": 1703335800200,
+      "outcome": "FILLED",
+      "limitPrice": 43740.5,
+      "filledAtEventTime": 1703335810870,
+      "minutesToFill": 0.17783333333333334
+    },
+    {
+      "index": 30857,
+      "direction": "SHORT",
+      "decisionAt": 1703337000200,
+      "outcome": "EXPIRED",
+      "limitPrice": 43799.1,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 30879,
+      "direction": "SHORT",
+      "decisionAt": 1703343600200,
+      "outcome": "FILLED",
+      "limitPrice": 43818.4,
+      "filledAtEventTime": 1703343600436,
+      "minutesToFill": 0.003933333333333333
+    },
+    {
+      "index": 30889,
+      "direction": "SHORT",
+      "decisionAt": 1703346600200,
+      "outcome": "FILLED",
+      "limitPrice": 43839.1,
+      "filledAtEventTime": 1703346603314,
+      "minutesToFill": 0.0519
+    },
+    {
+      "index": 30901,
+      "direction": "SHORT",
+      "decisionAt": 1703350200200,
+      "outcome": "EXPIRED",
+      "limitPrice": 43870.1,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 30943,
+      "direction": "LONG",
+      "decisionAt": 1703362800200,
+      "outcome": "FILLED",
+      "limitPrice": 43685.8,
+      "filledAtEventTime": 1703362815578,
+      "minutesToFill": 0.2563
+    },
+    {
+      "index": 30955,
+      "direction": "SHORT",
+      "decisionAt": 1703366400200,
+      "outcome": "FILLED",
+      "limitPrice": 43781,
+      "filledAtEventTime": 1703366400508,
+      "minutesToFill": 0.0051333333333333335
+    },
+    {
+      "index": 30956,
+      "direction": "SHORT",
+      "decisionAt": 1703366700200,
+      "outcome": "FILLED",
+      "limitPrice": 43786.4,
+      "filledAtEventTime": 1703366703457,
+      "minutesToFill": 0.054283333333333336
+    },
+    {
+      "index": 30957,
+      "direction": "SHORT",
+      "decisionAt": 1703367000200,
+      "outcome": "FILLED",
+      "limitPrice": 43796.6,
+      "filledAtEventTime": 1703367000561,
+      "minutesToFill": 0.006016666666666667
+    },
+    {
+      "index": 30959,
+      "direction": "SHORT",
+      "decisionAt": 1703367600200,
+      "outcome": "FILLED",
+      "limitPrice": 43802.7,
+      "filledAtEventTime": 1703367677637,
+      "minutesToFill": 1.2906166666666667
+    },
+    {
+      "index": 30975,
+      "direction": "LONG",
+      "decisionAt": 1703372400200,
+      "outcome": "FILLED",
+      "limitPrice": 43767.4,
+      "filledAtEventTime": 1703372405769,
+      "minutesToFill": 0.09281666666666667
+    },
+    {
+      "index": 30986,
+      "direction": "LONG",
+      "decisionAt": 1703375700200,
+      "outcome": "FILLED",
+      "limitPrice": 43747.7,
+      "filledAtEventTime": 1703375701213,
+      "minutesToFill": 0.016883333333333334
+    },
+    {
+      "index": 30987,
+      "direction": "LONG",
+      "decisionAt": 1703376000200,
+      "outcome": "FILLED",
+      "limitPrice": 43725.2,
+      "filledAtEventTime": 1703376004489,
+      "minutesToFill": 0.07148333333333333
+    },
+    {
+      "index": 30988,
+      "direction": "LONG",
+      "decisionAt": 1703376300200,
+      "outcome": "FILLED",
+      "limitPrice": 43710,
+      "filledAtEventTime": 1703376313121,
+      "minutesToFill": 0.21535
+    },
+    {
+      "index": 30989,
+      "direction": "LONG",
+      "decisionAt": 1703376600200,
+      "outcome": "EXPIRED",
+      "limitPrice": 43660.8,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 30990,
+      "direction": "LONG",
+      "decisionAt": 1703376900200,
+      "outcome": "FILLED",
+      "limitPrice": 43680.4,
+      "filledAtEventTime": 1703376925058,
+      "minutesToFill": 0.4143
+    },
+    {
+      "index": 30991,
+      "direction": "LONG",
+      "decisionAt": 1703377200200,
+      "outcome": "EXPIRED",
+      "limitPrice": 43645.9,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 31001,
+      "direction": "SHORT",
+      "decisionAt": 1703380200200,
+      "outcome": "FILLED",
+      "limitPrice": 43887.6,
+      "filledAtEventTime": 1703380206872,
+      "minutesToFill": 0.1112
+    },
+    {
+      "index": 31002,
+      "direction": "SHORT",
+      "decisionAt": 1703380500200,
+      "outcome": "FILLED",
+      "limitPrice": 43859.3,
+      "filledAtEventTime": 1703380523474,
+      "minutesToFill": 0.3879
+    },
+    {
+      "index": 31003,
+      "direction": "SHORT",
+      "decisionAt": 1703380800200,
+      "outcome": "FILLED",
+      "limitPrice": 43891.2,
+      "filledAtEventTime": 1703380804261,
+      "minutesToFill": 0.06768333333333333
+    },
+    {
+      "index": 31004,
+      "direction": "SHORT",
+      "decisionAt": 1703381100200,
+      "outcome": "FILLED",
+      "limitPrice": 43902.8,
+      "filledAtEventTime": 1703381240605,
+      "minutesToFill": 2.3400833333333333
+    },
+    {
+      "index": 31036,
+      "direction": "SHORT",
+      "decisionAt": 1703390700200,
+      "outcome": "FILLED",
+      "limitPrice": 43921.3,
+      "filledAtEventTime": 1703390708205,
+      "minutesToFill": 0.13341666666666666
+    },
+    {
+      "index": 31037,
+      "direction": "SHORT",
+      "decisionAt": 1703391000200,
+      "outcome": "FILLED",
+      "limitPrice": 43960.1,
+      "filledAtEventTime": 1703391009117,
+      "minutesToFill": 0.14861666666666667
+    },
+    {
+      "index": 31038,
+      "direction": "SHORT",
+      "decisionAt": 1703391300200,
+      "outcome": "FILLED",
+      "limitPrice": 43959.7,
+      "filledAtEventTime": 1703391309091,
+      "minutesToFill": 0.14818333333333333
+    },
+    {
+      "index": 31045,
+      "direction": "LONG",
+      "decisionAt": 1703393400200,
+      "outcome": "FILLED",
+      "limitPrice": 43803.5,
+      "filledAtEventTime": 1703393419190,
+      "minutesToFill": 0.3165
+    },
+    {
+      "index": 31050,
+      "direction": "LONG",
+      "decisionAt": 1703394900200,
+      "outcome": "EXPIRED",
+      "limitPrice": 43759.9,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 31052,
+      "direction": "LONG",
+      "decisionAt": 1703395500200,
+      "outcome": "FILLED",
+      "limitPrice": 43741.7,
+      "filledAtEventTime": 1703395586380,
+      "minutesToFill": 1.4363333333333332
+    },
+    {
+      "index": 31053,
+      "direction": "LONG",
+      "decisionAt": 1703395800200,
+      "outcome": "FILLED",
+      "limitPrice": 43700,
+      "filledAtEventTime": 1703395806171,
+      "minutesToFill": 0.09951666666666667
+    },
+    {
+      "index": 31054,
+      "direction": "LONG",
+      "decisionAt": 1703396100200,
+      "outcome": "FILLED",
+      "limitPrice": 43624.4,
+      "filledAtEventTime": 1703396100327,
+      "minutesToFill": 0.002116666666666667
+    },
+    {
+      "index": 31055,
+      "direction": "LONG",
+      "decisionAt": 1703396400200,
+      "outcome": "FILLED",
+      "limitPrice": 43558,
+      "filledAtEventTime": 1703396401636,
+      "minutesToFill": 0.023933333333333334
+    },
+    {
+      "index": 31056,
+      "direction": "LONG",
+      "decisionAt": 1703396700200,
+      "outcome": "FILLED",
+      "limitPrice": 43547.4,
+      "filledAtEventTime": 1703396700463,
+      "minutesToFill": 0.004383333333333334
+    },
+    {
+      "index": 31057,
+      "direction": "LONG",
+      "decisionAt": 1703397000200,
+      "outcome": "FILLED",
+      "limitPrice": 43545.1,
+      "filledAtEventTime": 1703397024420,
+      "minutesToFill": 0.4036666666666667
+    },
+    {
+      "index": 31104,
+      "direction": "SHORT",
+      "decisionAt": 1703411100200,
+      "outcome": "FILLED",
+      "limitPrice": 43716.9,
+      "filledAtEventTime": 1703411265377,
+      "minutesToFill": 2.75295
+    },
+    {
+      "index": 31105,
+      "direction": "SHORT",
+      "decisionAt": 1703411400200,
+      "outcome": "FILLED",
+      "limitPrice": 43724.6,
+      "filledAtEventTime": 1703411456059,
+      "minutesToFill": 0.9309833333333334
+    },
+    {
+      "index": 31111,
+      "direction": "LONG",
+      "decisionAt": 1703413200200,
+      "outcome": "FILLED",
+      "limitPrice": 43573.7,
+      "filledAtEventTime": 1703413200941,
+      "minutesToFill": 0.01235
+    },
+    {
+      "index": 31113,
+      "direction": "LONG",
+      "decisionAt": 1703413800200,
+      "outcome": "FILLED",
+      "limitPrice": 43586.3,
+      "filledAtEventTime": 1703413823389,
+      "minutesToFill": 0.38648333333333335
+    },
+    {
+      "index": 31114,
+      "direction": "LONG",
+      "decisionAt": 1703414100200,
+      "outcome": "FILLED",
+      "limitPrice": 43560,
+      "filledAtEventTime": 1703414143603,
+      "minutesToFill": 0.7233833333333334
+    },
+    {
+      "index": 31115,
+      "direction": "LONG",
+      "decisionAt": 1703414400200,
+      "outcome": "FILLED",
+      "limitPrice": 43496.9,
+      "filledAtEventTime": 1703414403961,
+      "minutesToFill": 0.06268333333333333
+    },
+    {
+      "index": 31146,
+      "direction": "SHORT",
+      "decisionAt": 1703423700200,
+      "outcome": "FILLED",
+      "limitPrice": 43701.7,
+      "filledAtEventTime": 1703423721230,
+      "minutesToFill": 0.3505
+    },
+    {
+      "index": 31147,
+      "direction": "SHORT",
+      "decisionAt": 1703424000200,
+      "outcome": "EXPIRED",
+      "limitPrice": 43712.8,
+      "filledAtEventTime": null,
+      "minutesToFill": null
+    },
+    {
+      "index": 31149,
+      "direction": "SHORT",
+      "decisionAt": 1703424600200,
+      "outcome": "FILLED",
+      "limitPrice": 43752.3,
+      "filledAtEventTime": 1703424601570,
+      "minutesToFill": 0.022833333333333334
+    },
+    {
+      "index": 31150,
+      "direction": "SHORT",
+      "decisionAt": 1703424900200,
+      "outcome": "FILLED",
+      "limitPrice": 43739.3,
+      "filledAtEventTime": 1703424910615,
+      "minutesToFill": 0.17358333333333334
+    },
+    {
+      "index": 31154,
+      "direction": "SHORT",
+      "decisionAt": 1703426100200,
+      "outcome": "FILLED",
+      "limitPrice": 43772.6,
+      "filledAtEventTime": 1703426106209,
+      "minutesToFill": 0.10015
+    },
+    {
+      "index": 31155,
+      "direction": "SHORT",
+      "decisionAt": 1703426400200,
+      "outcome": "FILLED",
+      "limitPrice": 43791,
+      "filledAtEventTime": 1703426401051,
+      "minutesToFill": 0.014183333333333333
+    },
+    {
+      "index": 31157,
+      "direction": "SHORT",
+      "decisionAt": 1703427000200,
+      "outcome": "FILLED",
+      "limitPrice": 43842.9,
+      "filledAtEventTime": 1703427011270,
+      "minutesToFill": 0.1845
+    },
+    {
+      "index": 31158,
+      "direction": "SHORT",
+      "decisionAt": 1703427300200,
+      "outcome": "FILLED",
+      "limitPrice": 43900.1,
+      "filledAtEventTime": 1703427305024,
+      "minutesToFill": 0.0804
+    },
+    {
+      "index": 31159,
+      "direction": "SHORT",
+      "decisionAt": 1703427600200,
+      "outcome": "FILLED",
+      "limitPrice": 43892.9,
+      "filledAtEventTime": 1703427600260,
+      "minutesToFill": 0.001
+    },
+    {
+      "index": 31180,
+      "direction": "LONG",
+      "decisionAt": 1703433900200,
+      "outcome": "FILLED",
+      "limitPrice": 43592.2,
+      "filledAtEventTime": 1703433900310,
+      "minutesToFill": 0.0018333333333333333
+    },
+    {
+      "index": 31181,
+      "direction": "LONG",
+      "decisionAt": 1703434200200,
+      "outcome": "FILLED",
+      "limitPrice": 43585.4,
+      "filledAtEventTime": 1703434205169,
+      "minutesToFill": 0.08281666666666666
+    },
+    {
+      "index": 31210,
+      "direction": "LONG",
+      "decisionAt": 1703442900200,
+      "outcome": "FILLED",
+      "limitPrice": 43624.4,
+      "filledAtEventTime": 1703442900949,
+      "minutesToFill": 0.012483333333333334
+    },
+    {
+      "index": 31218,
+      "direction": "SHORT",
+      "decisionAt": 1703445300200,
+      "outcome": "FILLED",
+      "limitPrice": 43702.8,
+      "filledAtEventTime": 1703445304892,
+      "minutesToFill": 0.0782
+    },
+    {
+      "index": 31223,
+      "direction": "LONG",
+      "decisionAt": 1703446800200,
+      "outcome": "FILLED",
+      "limitPrice": 43602.5,
+      "filledAtEventTime": 1703446803821,
+      "minutesToFill": 0.06035
+    }
+  ]
+}
