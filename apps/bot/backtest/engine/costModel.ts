@@ -100,3 +100,46 @@ export function calculateExecutionCosts(input: ExecutionCostInput): ExecutionCos
     netR: grossR - feeR - spreadR - slippageR,
   };
 }
+
+// TICKET-04X-S: a held perpetual-futures position pays/receives funding at each funding timestamp
+// (00:00/08:00/16:00 UTC) it is open across — separate from the fee/spread/slippage costs above,
+// which are one-time execution costs at entry/exit only.
+export interface FundingRateEvent {
+  fundingTime: number;
+  fundingRate: number;
+  markPrice: number;
+}
+
+export interface FundingCostInput {
+  direction: 'BULL' | 'BEAR';
+  positionSize: number;
+  entryFillTime: number;
+  exitTime: number;
+  fundingEvents: readonly FundingRateEvent[];
+}
+
+export interface FundingCostResult {
+  // Positive = net cost paid by the position over its lifetime; negative = net credit received.
+  fundingUsd: number;
+  eventsApplied: number;
+}
+
+// Binance convention: a positive fundingRate means longs pay shorts (and vice versa for
+// negative), each event settled against the position's notional at that event's own markPrice —
+// not the trade's entry/exit price, since funding is computed off mark price at the funding
+// instant regardless of where the position's own entry/exit sit.
+export function calculateFundingCost(input: FundingCostInput): FundingCostResult {
+  requireNonNegativeFinite(input.positionSize, 'positionSize');
+  if (!Number.isFinite(input.entryFillTime) || !Number.isFinite(input.exitTime) || input.exitTime < input.entryFillTime) {
+    throw new Error('entryFillTime and exitTime must be finite with exitTime >= entryFillTime');
+  }
+  const sign = input.direction === 'BULL' ? 1 : -1;
+  let fundingUsd = 0;
+  let eventsApplied = 0;
+  for (const event of input.fundingEvents) {
+    if (event.fundingTime < input.entryFillTime || event.fundingTime > input.exitTime) continue;
+    fundingUsd += sign * input.positionSize * event.markPrice * event.fundingRate;
+    eventsApplied += 1;
+  }
+  return { fundingUsd, eventsApplied };
+}

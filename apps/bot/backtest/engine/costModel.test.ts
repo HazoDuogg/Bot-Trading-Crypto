@@ -4,7 +4,9 @@ import type { TradePlan } from '../risk/tradePlan.js';
 import {
   BINANCE_USDM_VIP0_BNB_DISCOUNT_MAKER_FEE_RATE,
   calculateExecutionCosts,
+  calculateFundingCost,
   SPREAD_PROXY_M1_RANGE_FRACTION,
+  type FundingRateEvent,
 } from './costModel.js';
 
 function candle(low: number, high: number): Candle {
@@ -141,5 +143,62 @@ describe('calculateExecutionCosts', () => {
     });
 
     expect(result).toEqual({ grossR: -1, feeR: 0, spreadR: 0.04, slippageR: 0, netR: -1.04 });
+  });
+});
+
+describe('calculateFundingCost', () => {
+  const events: FundingRateEvent[] = [
+    { fundingTime: 8_000, fundingRate: 0.0001, markPrice: 100 },
+    { fundingTime: 16_000, fundingRate: -0.0002, markPrice: 110 },
+    { fundingTime: 24_000, fundingRate: 0.0003, markPrice: 90 },
+  ];
+
+  it('a LONG pays on a positive-rate event and receives on a negative-rate event within [entry, exit]', () => {
+    const result = calculateFundingCost({
+      direction: 'BULL',
+      positionSize: 2,
+      entryFillTime: 0,
+      exitTime: 20_000,
+      fundingEvents: events,
+    });
+    // Only the first two events fall in [0, 20000]: +2*100*0.0001 - 2*110*0.0002 = 0.02 - 0.044
+    expect(result.eventsApplied).toBe(2);
+    expect(result.fundingUsd).toBeCloseTo(0.02 - 0.044, 10);
+  });
+
+  it('a SHORT has the exact opposite sign of a LONG for the same window', () => {
+    const long = calculateFundingCost({ direction: 'BULL', positionSize: 2, entryFillTime: 0, exitTime: 20_000, fundingEvents: events });
+    const short = calculateFundingCost({ direction: 'BEAR', positionSize: 2, entryFillTime: 0, exitTime: 20_000, fundingEvents: events });
+    expect(short.fundingUsd).toBeCloseTo(-long.fundingUsd, 10);
+  });
+
+  it('excludes funding events strictly outside [entryFillTime, exitTime]', () => {
+    const result = calculateFundingCost({
+      direction: 'BULL',
+      positionSize: 1,
+      entryFillTime: 8_001,
+      exitTime: 15_999,
+      fundingEvents: events,
+    });
+    expect(result.eventsApplied).toBe(0);
+    expect(result.fundingUsd).toBe(0);
+  });
+
+  it('includes a funding event exactly on the entry or exit boundary', () => {
+    const result = calculateFundingCost({
+      direction: 'BULL',
+      positionSize: 1,
+      entryFillTime: 8_000,
+      exitTime: 8_000,
+      fundingEvents: events,
+    });
+    expect(result.eventsApplied).toBe(1);
+    expect(result.fundingUsd).toBeCloseTo(100 * 0.0001, 10);
+  });
+
+  it('throws when exitTime precedes entryFillTime', () => {
+    expect(() =>
+      calculateFundingCost({ direction: 'BULL', positionSize: 1, entryFillTime: 100, exitTime: 50, fundingEvents: [] }),
+    ).toThrow();
   });
 });
