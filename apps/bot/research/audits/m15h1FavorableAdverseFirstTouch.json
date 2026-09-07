@@ -1,0 +1,263 @@
+{
+  "warning": "TICKET-04X-U: thu tu thoi gian cham nguong R thuan tuy -- KHONG TP/SL/limit-fill/PnL/$ nao. FAVORABLE_FIRST chi la dieu kien CAN cho gia thuyet \"co the giao dich duoc\", KHONG phai bang chung co loi nhuan sau phi/spread.",
+  "generatedAt": "2026-09-07T11:06:45.838Z",
+  "riskDefinition": "R = riskPerUnit = 1.5 x ATR14(M15)",
+  "favorableThresholdsR": [
+    1,
+    2.6666666666666665
+  ],
+  "adverseThresholdR": 1,
+  "horizonsM15Candles": [
+    4,
+    8,
+    16,
+    40
+  ],
+  "totalSignals": 9355,
+  "tables": {
+    "1.00R": [
+      {
+        "horizon": 4,
+        "LONG": {
+          "FAVORABLE_FIRST": 38,
+          "ADVERSE_FIRST": 76,
+          "SAME_M15_AMBIGUOUS": 12,
+          "FAVORABLE_ONLY": 1151,
+          "ADVERSE_ONLY": 1417,
+          "NEITHER": 1920,
+          "INSUFFICIENT_DATA": 0
+        },
+        "SHORT": {
+          "FAVORABLE_FIRST": 50,
+          "ADVERSE_FIRST": 79,
+          "SAME_M15_AMBIGUOUS": 27,
+          "FAVORABLE_ONLY": 1130,
+          "ADVERSE_ONLY": 1379,
+          "NEITHER": 2076,
+          "INSUFFICIENT_DATA": 0
+        },
+        "ALL": {
+          "FAVORABLE_FIRST": 88,
+          "ADVERSE_FIRST": 155,
+          "SAME_M15_AMBIGUOUS": 39,
+          "FAVORABLE_ONLY": 2281,
+          "ADVERSE_ONLY": 2796,
+          "NEITHER": 3996,
+          "INSUFFICIENT_DATA": 0
+        }
+      },
+      {
+        "horizon": 8,
+        "LONG": {
+          "FAVORABLE_FIRST": 153,
+          "ADVERSE_FIRST": 248,
+          "SAME_M15_AMBIGUOUS": 16,
+          "FAVORABLE_ONLY": 1561,
+          "ADVERSE_ONLY": 1711,
+          "NEITHER": 924,
+          "INSUFFICIENT_DATA": 1
+        },
+        "SHORT": {
+          "FAVORABLE_FIRST": 180,
+          "ADVERSE_FIRST": 225,
+          "SAME_M15_AMBIGUOUS": 34,
+          "FAVORABLE_ONLY": 1593,
+          "ADVERSE_ONLY": 1661,
+          "NEITHER": 1048,
+          "INSUFFICIENT_DATA": 0
+        },
+        "ALL": {
+          "FAVORABLE_FIRST": 333,
+          "ADVERSE_FIRST": 473,
+          "SAME_M15_AMBIGUOUS": 50,
+          "FAVORABLE_ONLY": 3154,
+          "ADVERSE_ONLY": 3372,
+          "NEITHER": 1972,
+          "INSUFFICIENT_DATA": 1
+        }
+      },
+      {
+        "horizon": 16,
+        "LONG": {
+          "FAVORABLE_FIRST": 442,
+          "ADVERSE_FIRST": 579,
+          "SAME_M15_AMBIGUOUS": 18,
+          "FAVORABLE_ONLY": 1637,
+          "ADVERSE_ONLY": 1650,
+          "NEITHER": 287,
+          "INSUFFICIENT_DATA": 1
+        },
+        "SHORT": {
+          "FAVORABLE_FIRST": 467,
+          "ADVERSE_FIRST": 570,
+          "SAME_M15_AMBIGUOUS": 36,
+          "FAVORABLE_ONLY": 1671,
+          "ADVERSE_ONLY": 1636,
+          "NEITHER": 360,
+          "INSUFFICIENT_DATA": 1
+        },
+        "ALL": {
+          "FAVORABLE_FIRST": 909,
+          "ADVERSE_FIRST": 1149,
+          "SAME_M15_AMBIGUOUS": 54,
+          "FAVORABLE_ONLY": 3308,
+          "ADVERSE_ONLY": 3286,
+          "NEITHER": 647,
+          "INSUFFICIENT_DATA": 2
+        }
+      },
+      {
+        "horizon": 40,
+        "LONG": {
+          "FAVORABLE_FIRST": 945,
+          "ADVERSE_FIRST": 1163,
+          "SAME_M15_AMBIGUOUS": 19,
+          "FAVORABLE_ONLY": 1269,
+          "ADVERSE_ONLY": 1180,
+          "NEITHER": 37,
+          "INSUFFICIENT_DATA": 1
+        },
+        "SHORT": {
+          "FAVORABLE_FIRST": 1005,
+          "ADVERSE_FIRST": 1126,
+          "SAME_M15_AMBIGUOUS": 38,
+          "FAVORABLE_ONLY": 1295,
+          "ADVERSE_ONLY": 1229,
+          "NEITHER": 46,
+          "INSUFFICIENT_DATA": 2
+        },
+        "ALL": {
+          "FAVORABLE_FIRST": 1950,
+          "ADVERSE_FIRST": 2289,
+          "SAME_M15_AMBIGUOUS": 57,
+          "FAVORABLE_ONLY": 2564,
+          "ADVERSE_ONLY": 2409,
+          "NEITHER": 83,
+          "INSUFFICIENT_DATA": 3
+        }
+      }
+    ],
+    "2.67R": [
+      {
+        "horizon": 4,
+        "LONG": {
+          "FAVORABLE_FIRST": 1,
+          "ADVERSE_FIRST": 6,
+          "SAME_M15_AMBIGUOUS": 0,
+          "FAVORABLE_ONLY": 93,
+          "ADVERSE_ONLY": 1536,
+          "NEITHER": 2978,
+          "INSUFFICIENT_DATA": 0
+        },
+        "SHORT": {
+          "FAVORABLE_FIRST": 1,
+          "ADVERSE_FIRST": 22,
+          "SAME_M15_AMBIGUOUS": 1,
+          "FAVORABLE_ONLY": 123,
+          "ADVERSE_ONLY": 1511,
+          "NEITHER": 3083,
+          "INSUFFICIENT_DATA": 0
+        },
+        "ALL": {
+          "FAVORABLE_FIRST": 2,
+          "ADVERSE_FIRST": 28,
+          "SAME_M15_AMBIGUOUS": 1,
+          "FAVORABLE_ONLY": 216,
+          "ADVERSE_ONLY": 3047,
+          "NEITHER": 6061,
+          "INSUFFICIENT_DATA": 0
+        }
+      },
+      {
+        "horizon": 8,
+        "LONG": {
+          "FAVORABLE_FIRST": 10,
+          "ADVERSE_FIRST": 40,
+          "SAME_M15_AMBIGUOUS": 0,
+          "FAVORABLE_ONLY": 236,
+          "ADVERSE_ONLY": 2078,
+          "NEITHER": 2249,
+          "INSUFFICIENT_DATA": 1
+        },
+        "SHORT": {
+          "FAVORABLE_FIRST": 6,
+          "ADVERSE_FIRST": 77,
+          "SAME_M15_AMBIGUOUS": 1,
+          "FAVORABLE_ONLY": 292,
+          "ADVERSE_ONLY": 2016,
+          "NEITHER": 2349,
+          "INSUFFICIENT_DATA": 0
+        },
+        "ALL": {
+          "FAVORABLE_FIRST": 16,
+          "ADVERSE_FIRST": 117,
+          "SAME_M15_AMBIGUOUS": 1,
+          "FAVORABLE_ONLY": 528,
+          "ADVERSE_ONLY": 4094,
+          "NEITHER": 4598,
+          "INSUFFICIENT_DATA": 1
+        }
+      },
+      {
+        "horizon": 16,
+        "LONG": {
+          "FAVORABLE_FIRST": 32,
+          "ADVERSE_FIRST": 154,
+          "SAME_M15_AMBIGUOUS": 3,
+          "FAVORABLE_ONLY": 518,
+          "ADVERSE_ONLY": 2500,
+          "NEITHER": 1406,
+          "INSUFFICIENT_DATA": 1
+        },
+        "SHORT": {
+          "FAVORABLE_FIRST": 52,
+          "ADVERSE_FIRST": 246,
+          "SAME_M15_AMBIGUOUS": 2,
+          "FAVORABLE_ONLY": 506,
+          "ADVERSE_ONLY": 2409,
+          "NEITHER": 1525,
+          "INSUFFICIENT_DATA": 1
+        },
+        "ALL": {
+          "FAVORABLE_FIRST": 84,
+          "ADVERSE_FIRST": 400,
+          "SAME_M15_AMBIGUOUS": 5,
+          "FAVORABLE_ONLY": 1024,
+          "ADVERSE_ONLY": 4909,
+          "NEITHER": 2931,
+          "INSUFFICIENT_DATA": 2
+        }
+      },
+      {
+        "horizon": 40,
+        "LONG": {
+          "FAVORABLE_FIRST": 180,
+          "ADVERSE_FIRST": 705,
+          "SAME_M15_AMBIGUOUS": 3,
+          "FAVORABLE_ONLY": 813,
+          "ADVERSE_ONLY": 2419,
+          "NEITHER": 493,
+          "INSUFFICIENT_DATA": 1
+        },
+        "SHORT": {
+          "FAVORABLE_FIRST": 172,
+          "ADVERSE_FIRST": 734,
+          "SAME_M15_AMBIGUOUS": 2,
+          "FAVORABLE_ONLY": 821,
+          "ADVERSE_ONLY": 2490,
+          "NEITHER": 520,
+          "INSUFFICIENT_DATA": 2
+        },
+        "ALL": {
+          "FAVORABLE_FIRST": 352,
+          "ADVERSE_FIRST": 1439,
+          "SAME_M15_AMBIGUOUS": 5,
+          "FAVORABLE_ONLY": 1634,
+          "ADVERSE_ONLY": 4909,
+          "NEITHER": 1013,
+          "INSUFFICIENT_DATA": 3
+        }
+      }
+    ]
+  }
+}
