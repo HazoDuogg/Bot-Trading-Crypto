@@ -1,0 +1,1041 @@
+{
+  "warning": "TICKET-04X-Z Step 3: 12 tuan (mo rong tu 3 tuan TICKET-04X-X), cung cong thuc/nguong da khoa, khong doi. Mau lon hon nhung van chi la tham do so bo tren 12/155+ tuan du kien trong 3 nam -- chua du bao trum de ket luan tong quat toan bo dataset.",
+  "generatedAt": "2026-09-07T14:01:11.741Z",
+  "totalSignals": 2454,
+  "byImbalanceShift": {
+    "LONG": [
+      {
+        "decile": 1,
+        "n": 125,
+        "keyMin": -0.9011050460548371,
+        "keyMax": -0.34575334762460996,
+        "keyMean": -0.49555541462227,
+        "takeProfitCount": 15,
+        "stopLossCount": 80,
+        "takeProfitRatePctOfAll": 12,
+        "takeProfitRatePctOfTpSl": 15.789473684210526,
+        "outcomeCounts": {
+          "STOP_LOSS": 80,
+          "TAKE_PROFIT": 15,
+          "EXPIRED": 20,
+          "TIME_STOP": 10
+        }
+      },
+      {
+        "decile": 2,
+        "n": 125,
+        "keyMin": -0.33582316398514495,
+        "keyMax": -0.20967470019913131,
+        "keyMean": -0.2603494036160084,
+        "takeProfitCount": 18,
+        "stopLossCount": 86,
+        "takeProfitRatePctOfAll": 14.4,
+        "takeProfitRatePctOfTpSl": 17.307692307692307,
+        "outcomeCounts": {
+          "STOP_LOSS": 86,
+          "TAKE_PROFIT": 18,
+          "EXPIRED": 12,
+          "TIME_STOP": 9
+        }
+      },
+      {
+        "decile": 3,
+        "n": 125,
+        "keyMin": -0.20899240088312332,
+        "keyMax": -0.11348156367483922,
+        "keyMean": -0.16219322800680533,
+        "takeProfitCount": 16,
+        "stopLossCount": 88,
+        "takeProfitRatePctOfAll": 12.8,
+        "takeProfitRatePctOfTpSl": 15.384615384615385,
+        "outcomeCounts": {
+          "STOP_LOSS": 88,
+          "EXPIRED": 10,
+          "TAKE_PROFIT": 16,
+          "TIME_STOP": 11
+        }
+      },
+      {
+        "decile": 4,
+        "n": 125,
+        "keyMin": -0.11281846654428651,
+        "keyMax": -0.03819590905927961,
+        "keyMean": -0.07687664127682409,
+        "takeProfitCount": 24,
+        "stopLossCount": 76,
+        "takeProfitRatePctOfAll": 19.2,
+        "takeProfitRatePctOfTpSl": 24,
+        "outcomeCounts": {
+          "STOP_LOSS": 76,
+          "EXPIRED": 15,
+          "TIME_STOP": 10,
+          "TAKE_PROFIT": 24
+        }
+      },
+      {
+        "decile": 5,
+        "n": 126,
+        "keyMin": -0.03751472927848352,
+        "keyMax": 0.04143935040566854,
+        "keyMean": -0.0005671832970409651,
+        "takeProfitCount": 18,
+        "stopLossCount": 80,
+        "takeProfitRatePctOfAll": 14.285714285714286,
+        "takeProfitRatePctOfTpSl": 18.367346938775512,
+        "outcomeCounts": {
+          "STOP_LOSS": 80,
+          "TAKE_PROFIT": 18,
+          "EXPIRED": 13,
+          "TIME_STOP": 15
+        }
+      },
+      {
+        "decile": 6,
+        "n": 125,
+        "keyMin": 0.041451339808497606,
+        "keyMax": 0.12812633561600723,
+        "keyMean": 0.08639808755050107,
+        "takeProfitCount": 20,
+        "stopLossCount": 86,
+        "takeProfitRatePctOfAll": 16,
+        "takeProfitRatePctOfTpSl": 18.867924528301888,
+        "outcomeCounts": {
+          "EXPIRED": 11,
+          "STOP_LOSS": 86,
+          "TAKE_PROFIT": 20,
+          "TIME_STOP": 8
+        }
+      },
+      {
+        "decile": 7,
+        "n": 125,
+        "keyMin": 0.12872346781183125,
+        "keyMax": 0.22703715813338066,
+        "keyMean": 0.1747992524932502,
+        "takeProfitCount": 22,
+        "stopLossCount": 73,
+        "takeProfitRatePctOfAll": 17.6,
+        "takeProfitRatePctOfTpSl": 23.157894736842106,
+        "outcomeCounts": {
+          "TAKE_PROFIT": 22,
+          "STOP_LOSS": 73,
+          "EXPIRED": 16,
+          "TIME_STOP": 14
+        }
+      },
+      {
+        "decile": 8,
+        "n": 125,
+        "keyMin": 0.22748692904756362,
+        "keyMax": 0.3524979253735081,
+        "keyMean": 0.288475249687291,
+        "takeProfitCount": 20,
+        "stopLossCount": 83,
+        "takeProfitRatePctOfAll": 16,
+        "takeProfitRatePctOfTpSl": 19.41747572815534,
+        "outcomeCounts": {
+          "STOP_LOSS": 83,
+          "TAKE_PROFIT": 20,
+          "TIME_STOP": 10,
+          "EXPIRED": 12
+        }
+      },
+      {
+        "decile": 9,
+        "n": 125,
+        "keyMin": 0.35276189707392935,
+        "keyMax": 0.4987329420000494,
+        "keyMean": 0.42046264932267585,
+        "takeProfitCount": 28,
+        "stopLossCount": 79,
+        "takeProfitRatePctOfAll": 22.4,
+        "takeProfitRatePctOfTpSl": 26.16822429906542,
+        "outcomeCounts": {
+          "STOP_LOSS": 79,
+          "TAKE_PROFIT": 28,
+          "TIME_STOP": 6,
+          "EXPIRED": 12
+        }
+      },
+      {
+        "decile": 10,
+        "n": 126,
+        "keyMin": 0.5002941823994642,
+        "keyMax": 1.0931704549991732,
+        "keyMean": 0.6522401944069486,
+        "takeProfitCount": 18,
+        "stopLossCount": 86,
+        "takeProfitRatePctOfAll": 14.285714285714286,
+        "takeProfitRatePctOfTpSl": 17.307692307692307,
+        "outcomeCounts": {
+          "STOP_LOSS": 86,
+          "TAKE_PROFIT": 18,
+          "TIME_STOP": 9,
+          "EXPIRED": 13
+        }
+      }
+    ],
+    "SHORT": [
+      {
+        "decile": 1,
+        "n": 120,
+        "keyMin": -1.0080450199656077,
+        "keyMax": -0.5082684023894783,
+        "keyMean": -0.659680729588177,
+        "takeProfitCount": 20,
+        "stopLossCount": 74,
+        "takeProfitRatePctOfAll": 16.666666666666668,
+        "takeProfitRatePctOfTpSl": 21.27659574468085,
+        "outcomeCounts": {
+          "EXPIRED": 16,
+          "STOP_LOSS": 74,
+          "TAKE_PROFIT": 20,
+          "TIME_STOP": 10
+        }
+      },
+      {
+        "decile": 2,
+        "n": 120,
+        "keyMin": -0.506699800143725,
+        "keyMax": -0.36002407075159937,
+        "keyMean": -0.4255116924978243,
+        "takeProfitCount": 20,
+        "stopLossCount": 72,
+        "takeProfitRatePctOfAll": 16.666666666666668,
+        "takeProfitRatePctOfTpSl": 21.73913043478261,
+        "outcomeCounts": {
+          "TAKE_PROFIT": 20,
+          "STOP_LOSS": 72,
+          "EXPIRED": 14,
+          "TIME_STOP": 14
+        }
+      },
+      {
+        "decile": 3,
+        "n": 120,
+        "keyMin": -0.35917851968343206,
+        "keyMax": -0.25385395653625986,
+        "keyMean": -0.3058690118071591,
+        "takeProfitCount": 16,
+        "stopLossCount": 74,
+        "takeProfitRatePctOfAll": 13.333333333333334,
+        "takeProfitRatePctOfTpSl": 17.77777777777778,
+        "outcomeCounts": {
+          "TAKE_PROFIT": 16,
+          "STOP_LOSS": 74,
+          "EXPIRED": 18,
+          "TIME_STOP": 12
+        }
+      },
+      {
+        "decile": 4,
+        "n": 120,
+        "keyMin": -0.2515949458904496,
+        "keyMax": -0.15211863508802617,
+        "keyMean": -0.19889886373483673,
+        "takeProfitCount": 22,
+        "stopLossCount": 75,
+        "takeProfitRatePctOfAll": 18.333333333333332,
+        "takeProfitRatePctOfTpSl": 22.68041237113402,
+        "outcomeCounts": {
+          "STOP_LOSS": 75,
+          "TIME_STOP": 6,
+          "EXPIRED": 17,
+          "TAKE_PROFIT": 22
+        }
+      },
+      {
+        "decile": 5,
+        "n": 121,
+        "keyMin": -0.15098964670449694,
+        "keyMax": -0.06388711809062807,
+        "keyMean": -0.11016610796780253,
+        "takeProfitCount": 20,
+        "stopLossCount": 76,
+        "takeProfitRatePctOfAll": 16.52892561983471,
+        "takeProfitRatePctOfTpSl": 20.833333333333332,
+        "outcomeCounts": {
+          "STOP_LOSS": 76,
+          "TIME_STOP": 14,
+          "EXPIRED": 11,
+          "TAKE_PROFIT": 20
+        }
+      },
+      {
+        "decile": 6,
+        "n": 120,
+        "keyMin": -0.06356368898844461,
+        "keyMax": 0.008972900416359869,
+        "keyMean": -0.02716310699885623,
+        "takeProfitCount": 22,
+        "stopLossCount": 73,
+        "takeProfitRatePctOfAll": 18.333333333333332,
+        "takeProfitRatePctOfTpSl": 23.157894736842106,
+        "outcomeCounts": {
+          "STOP_LOSS": 73,
+          "EXPIRED": 15,
+          "TIME_STOP": 10,
+          "TAKE_PROFIT": 22
+        }
+      },
+      {
+        "decile": 7,
+        "n": 120,
+        "keyMin": 0.009003175777913486,
+        "keyMax": 0.09903358475176371,
+        "keyMean": 0.049596311861742064,
+        "takeProfitCount": 20,
+        "stopLossCount": 73,
+        "takeProfitRatePctOfAll": 16.666666666666668,
+        "takeProfitRatePctOfTpSl": 21.50537634408602,
+        "outcomeCounts": {
+          "EXPIRED": 13,
+          "STOP_LOSS": 73,
+          "TIME_STOP": 14,
+          "TAKE_PROFIT": 20
+        }
+      },
+      {
+        "decile": 8,
+        "n": 120,
+        "keyMin": 0.09921707411132169,
+        "keyMax": 0.2051410471594302,
+        "keyMean": 0.14732867797597482,
+        "takeProfitCount": 23,
+        "stopLossCount": 70,
+        "takeProfitRatePctOfAll": 19.166666666666668,
+        "takeProfitRatePctOfTpSl": 24.731182795698924,
+        "outcomeCounts": {
+          "STOP_LOSS": 70,
+          "EXPIRED": 16,
+          "TIME_STOP": 11,
+          "TAKE_PROFIT": 23
+        }
+      },
+      {
+        "decile": 9,
+        "n": 120,
+        "keyMin": 0.20795121965902674,
+        "keyMax": 0.34031876669097033,
+        "keyMean": 0.2731328489590011,
+        "takeProfitCount": 17,
+        "stopLossCount": 79,
+        "takeProfitRatePctOfAll": 14.166666666666666,
+        "takeProfitRatePctOfTpSl": 17.708333333333332,
+        "outcomeCounts": {
+          "STOP_LOSS": 79,
+          "TIME_STOP": 12,
+          "EXPIRED": 12,
+          "TAKE_PROFIT": 17
+        }
+      },
+      {
+        "decile": 10,
+        "n": 121,
+        "keyMin": 0.3415366311706646,
+        "keyMax": 1.1086959320578267,
+        "keyMean": 0.49353845873373337,
+        "takeProfitCount": 19,
+        "stopLossCount": 71,
+        "takeProfitRatePctOfAll": 15.702479338842975,
+        "takeProfitRatePctOfTpSl": 21.11111111111111,
+        "outcomeCounts": {
+          "STOP_LOSS": 71,
+          "TAKE_PROFIT": 19,
+          "EXPIRED": 20,
+          "TIME_STOP": 11
+        }
+      }
+    ],
+    "ALL": [
+      {
+        "decile": 1,
+        "n": 245,
+        "keyMin": -1.0080450199656077,
+        "keyMax": -0.42900655433457646,
+        "keyMean": -0.5923261448223728,
+        "takeProfitCount": 39,
+        "stopLossCount": 150,
+        "takeProfitRatePctOfAll": 15.918367346938776,
+        "takeProfitRatePctOfTpSl": 20.634920634920636,
+        "outcomeCounts": {
+          "EXPIRED": 38,
+          "STOP_LOSS": 150,
+          "TAKE_PROFIT": 39,
+          "TIME_STOP": 18
+        }
+      },
+      {
+        "decile": 2,
+        "n": 245,
+        "keyMin": -0.42781162442444043,
+        "keyMax": -0.2869308591062396,
+        "keyMean": -0.35320474323746603,
+        "takeProfitCount": 39,
+        "stopLossCount": 151,
+        "takeProfitRatePctOfAll": 15.918367346938776,
+        "takeProfitRatePctOfTpSl": 20.526315789473685,
+        "outcomeCounts": {
+          "STOP_LOSS": 151,
+          "TIME_STOP": 25,
+          "TAKE_PROFIT": 39,
+          "EXPIRED": 30
+        }
+      },
+      {
+        "decile": 3,
+        "n": 246,
+        "keyMin": -0.286273147439802,
+        "keyMax": -0.17660023802439873,
+        "keyMean": -0.22660973680603924,
+        "takeProfitCount": 29,
+        "stopLossCount": 171,
+        "takeProfitRatePctOfAll": 11.788617886178862,
+        "takeProfitRatePctOfTpSl": 14.5,
+        "outcomeCounts": {
+          "TIME_STOP": 20,
+          "STOP_LOSS": 171,
+          "TAKE_PROFIT": 29,
+          "EXPIRED": 26
+        }
+      },
+      {
+        "decile": 4,
+        "n": 245,
+        "keyMin": -0.1765730872941369,
+        "keyMax": -0.09071079755903748,
+        "keyMean": -0.13399165689921164,
+        "takeProfitCount": 40,
+        "stopLossCount": 154,
+        "takeProfitRatePctOfAll": 16.3265306122449,
+        "takeProfitRatePctOfTpSl": 20.61855670103093,
+        "outcomeCounts": {
+          "STOP_LOSS": 154,
+          "TAKE_PROFIT": 40,
+          "EXPIRED": 28,
+          "TIME_STOP": 23
+        }
+      },
+      {
+        "decile": 5,
+        "n": 246,
+        "keyMin": -0.09066540642898047,
+        "keyMax": -0.01300703485203275,
+        "keyMean": -0.05145009776312773,
+        "takeProfitCount": 48,
+        "stopLossCount": 153,
+        "takeProfitRatePctOfAll": 19.51219512195122,
+        "takeProfitRatePctOfTpSl": 23.880597014925375,
+        "outcomeCounts": {
+          "STOP_LOSS": 153,
+          "TAKE_PROFIT": 48,
+          "TIME_STOP": 20,
+          "EXPIRED": 25
+        }
+      },
+      {
+        "decile": 6,
+        "n": 245,
+        "keyMin": -0.012864486297421526,
+        "keyMax": 0.06910019323619701,
+        "keyMean": 0.025586688267449743,
+        "takeProfitCount": 42,
+        "stopLossCount": 148,
+        "takeProfitRatePctOfAll": 17.142857142857142,
+        "takeProfitRatePctOfTpSl": 22.105263157894736,
+        "outcomeCounts": {
+          "STOP_LOSS": 148,
+          "TAKE_PROFIT": 42,
+          "EXPIRED": 28,
+          "TIME_STOP": 27
+        }
+      },
+      {
+        "decile": 7,
+        "n": 245,
+        "keyMin": 0.06975318039434837,
+        "keyMax": 0.1631613428104283,
+        "keyMean": 0.1152602513072379,
+        "takeProfitCount": 42,
+        "stopLossCount": 155,
+        "takeProfitRatePctOfAll": 17.142857142857142,
+        "takeProfitRatePctOfTpSl": 21.31979695431472,
+        "outcomeCounts": {
+          "STOP_LOSS": 155,
+          "TAKE_PROFIT": 42,
+          "TIME_STOP": 23,
+          "EXPIRED": 25
+        }
+      },
+      {
+        "decile": 8,
+        "n": 246,
+        "keyMin": 0.16338430996042164,
+        "keyMax": 0.2869815164334041,
+        "keyMean": 0.2207203896970421,
+        "takeProfitCount": 37,
+        "stopLossCount": 155,
+        "takeProfitRatePctOfAll": 15.040650406504065,
+        "takeProfitRatePctOfTpSl": 19.270833333333332,
+        "outcomeCounts": {
+          "EXPIRED": 28,
+          "STOP_LOSS": 155,
+          "TIME_STOP": 26,
+          "TAKE_PROFIT": 37
+        }
+      },
+      {
+        "decile": 9,
+        "n": 245,
+        "keyMin": 0.2872565937909566,
+        "keyMax": 0.4315436704776356,
+        "keyMean": 0.351588209396435,
+        "takeProfitCount": 44,
+        "stopLossCount": 166,
+        "takeProfitRatePctOfAll": 17.959183673469386,
+        "takeProfitRatePctOfTpSl": 20.952380952380953,
+        "outcomeCounts": {
+          "STOP_LOSS": 166,
+          "EXPIRED": 22,
+          "TAKE_PROFIT": 44,
+          "TIME_STOP": 13
+        }
+      },
+      {
+        "decile": 10,
+        "n": 246,
+        "keyMin": 0.4321646427519734,
+        "keyMax": 1.1086959320578267,
+        "keyMean": 0.5922275217072002,
+        "takeProfitCount": 38,
+        "stopLossCount": 151,
+        "takeProfitRatePctOfAll": 15.447154471544716,
+        "takeProfitRatePctOfTpSl": 20.105820105820104,
+        "outcomeCounts": {
+          "EXPIRED": 36,
+          "TAKE_PROFIT": 38,
+          "STOP_LOSS": 151,
+          "TIME_STOP": 21
+        }
+      }
+    ]
+  },
+  "byImbalance1min": {
+    "LONG": [
+      {
+        "decile": 1,
+        "n": 125,
+        "keyMin": -0.9439072912174288,
+        "keyMax": -0.5624767286505906,
+        "keyMean": -0.6874835823903623,
+        "takeProfitCount": 19,
+        "stopLossCount": 83,
+        "takeProfitRatePctOfAll": 15.2,
+        "takeProfitRatePctOfTpSl": 18.627450980392158,
+        "outcomeCounts": {
+          "STOP_LOSS": 83,
+          "EXPIRED": 18,
+          "TAKE_PROFIT": 19,
+          "TIME_STOP": 5
+        }
+      },
+      {
+        "decile": 2,
+        "n": 125,
+        "keyMin": -0.5620812159913658,
+        "keyMax": -0.4386820344410381,
+        "keyMean": -0.5012922854356829,
+        "takeProfitCount": 18,
+        "stopLossCount": 83,
+        "takeProfitRatePctOfAll": 14.4,
+        "takeProfitRatePctOfTpSl": 17.821782178217823,
+        "outcomeCounts": {
+          "STOP_LOSS": 83,
+          "TIME_STOP": 15,
+          "TAKE_PROFIT": 18,
+          "EXPIRED": 9
+        }
+      },
+      {
+        "decile": 3,
+        "n": 125,
+        "keyMin": -0.43849705425316804,
+        "keyMax": -0.319899964272955,
+        "keyMean": -0.3788208531263392,
+        "takeProfitCount": 19,
+        "stopLossCount": 80,
+        "takeProfitRatePctOfAll": 15.2,
+        "takeProfitRatePctOfTpSl": 19.19191919191919,
+        "outcomeCounts": {
+          "TAKE_PROFIT": 19,
+          "EXPIRED": 14,
+          "STOP_LOSS": 80,
+          "TIME_STOP": 12
+        }
+      },
+      {
+        "decile": 4,
+        "n": 125,
+        "keyMin": -0.3192681532304174,
+        "keyMax": -0.2263038481058007,
+        "keyMean": -0.27032369364517356,
+        "takeProfitCount": 17,
+        "stopLossCount": 80,
+        "takeProfitRatePctOfAll": 13.6,
+        "takeProfitRatePctOfTpSl": 17.52577319587629,
+        "outcomeCounts": {
+          "STOP_LOSS": 80,
+          "TIME_STOP": 11,
+          "EXPIRED": 17,
+          "TAKE_PROFIT": 17
+        }
+      },
+      {
+        "decile": 5,
+        "n": 126,
+        "keyMin": -0.2254808724729271,
+        "keyMax": -0.12946730532970901,
+        "keyMean": -0.17753575249149375,
+        "takeProfitCount": 21,
+        "stopLossCount": 76,
+        "takeProfitRatePctOfAll": 16.666666666666668,
+        "takeProfitRatePctOfTpSl": 21.649484536082475,
+        "outcomeCounts": {
+          "EXPIRED": 15,
+          "TAKE_PROFIT": 21,
+          "STOP_LOSS": 76,
+          "TIME_STOP": 14
+        }
+      },
+      {
+        "decile": 6,
+        "n": 125,
+        "keyMin": -0.12846491142085956,
+        "keyMax": -0.028953756883178545,
+        "keyMean": -0.07322538134313894,
+        "takeProfitCount": 16,
+        "stopLossCount": 90,
+        "takeProfitRatePctOfAll": 12.8,
+        "takeProfitRatePctOfTpSl": 15.09433962264151,
+        "outcomeCounts": {
+          "STOP_LOSS": 90,
+          "TIME_STOP": 7,
+          "TAKE_PROFIT": 16,
+          "EXPIRED": 12
+        }
+      },
+      {
+        "decile": 7,
+        "n": 125,
+        "keyMin": -0.028722030981067525,
+        "keyMax": 0.08334352112206458,
+        "keyMean": 0.027002961576738028,
+        "takeProfitCount": 25,
+        "stopLossCount": 77,
+        "takeProfitRatePctOfAll": 20,
+        "takeProfitRatePctOfTpSl": 24.50980392156863,
+        "outcomeCounts": {
+          "STOP_LOSS": 77,
+          "TIME_STOP": 14,
+          "TAKE_PROFIT": 25,
+          "EXPIRED": 9
+        }
+      },
+      {
+        "decile": 8,
+        "n": 125,
+        "keyMin": 0.08469034072330103,
+        "keyMax": 0.2127747822480313,
+        "keyMean": 0.1514594723318617,
+        "takeProfitCount": 22,
+        "stopLossCount": 85,
+        "takeProfitRatePctOfAll": 17.6,
+        "takeProfitRatePctOfTpSl": 20.560747663551403,
+        "outcomeCounts": {
+          "STOP_LOSS": 85,
+          "EXPIRED": 10,
+          "TIME_STOP": 8,
+          "TAKE_PROFIT": 22
+        }
+      },
+      {
+        "decile": 9,
+        "n": 125,
+        "keyMin": 0.21345332124822025,
+        "keyMax": 0.3837822225431456,
+        "keyMean": 0.28947445915080244,
+        "takeProfitCount": 25,
+        "stopLossCount": 78,
+        "takeProfitRatePctOfAll": 20,
+        "takeProfitRatePctOfTpSl": 24.271844660194176,
+        "outcomeCounts": {
+          "STOP_LOSS": 78,
+          "EXPIRED": 15,
+          "TAKE_PROFIT": 25,
+          "TIME_STOP": 7
+        }
+      },
+      {
+        "decile": 10,
+        "n": 126,
+        "keyMin": 0.38737123159383924,
+        "keyMax": 0.8459918784779664,
+        "keyMean": 0.5358399418232855,
+        "takeProfitCount": 17,
+        "stopLossCount": 85,
+        "takeProfitRatePctOfAll": 13.492063492063492,
+        "takeProfitRatePctOfTpSl": 16.666666666666668,
+        "outcomeCounts": {
+          "TIME_STOP": 9,
+          "STOP_LOSS": 85,
+          "EXPIRED": 15,
+          "TAKE_PROFIT": 17
+        }
+      }
+    ],
+    "SHORT": [
+      {
+        "decile": 1,
+        "n": 120,
+        "keyMin": -0.8286714452408737,
+        "keyMax": -0.3725453791747968,
+        "keyMean": -0.5125401043394485,
+        "takeProfitCount": 22,
+        "stopLossCount": 73,
+        "takeProfitRatePctOfAll": 18.333333333333332,
+        "takeProfitRatePctOfTpSl": 23.157894736842106,
+        "outcomeCounts": {
+          "STOP_LOSS": 73,
+          "TIME_STOP": 12,
+          "EXPIRED": 13,
+          "TAKE_PROFIT": 22
+        }
+      },
+      {
+        "decile": 2,
+        "n": 120,
+        "keyMin": -0.3702716382655638,
+        "keyMax": -0.2199649674052407,
+        "keyMean": -0.28482203976694975,
+        "takeProfitCount": 25,
+        "stopLossCount": 70,
+        "takeProfitRatePctOfAll": 20.833333333333332,
+        "takeProfitRatePctOfTpSl": 26.31578947368421,
+        "outcomeCounts": {
+          "STOP_LOSS": 70,
+          "EXPIRED": 11,
+          "TAKE_PROFIT": 25,
+          "TIME_STOP": 14
+        }
+      },
+      {
+        "decile": 3,
+        "n": 120,
+        "keyMin": -0.21828610043501742,
+        "keyMax": -0.09324229521633333,
+        "keyMean": -0.1543144340971167,
+        "takeProfitCount": 15,
+        "stopLossCount": 80,
+        "takeProfitRatePctOfAll": 12.5,
+        "takeProfitRatePctOfTpSl": 15.789473684210526,
+        "outcomeCounts": {
+          "TAKE_PROFIT": 15,
+          "STOP_LOSS": 80,
+          "EXPIRED": 15,
+          "TIME_STOP": 10
+        }
+      },
+      {
+        "decile": 4,
+        "n": 120,
+        "keyMin": -0.09309192330764847,
+        "keyMax": 0.014618152010565943,
+        "keyMean": -0.039226925967045426,
+        "takeProfitCount": 17,
+        "stopLossCount": 74,
+        "takeProfitRatePctOfAll": 14.166666666666666,
+        "takeProfitRatePctOfTpSl": 18.681318681318682,
+        "outcomeCounts": {
+          "TAKE_PROFIT": 17,
+          "STOP_LOSS": 74,
+          "EXPIRED": 17,
+          "TIME_STOP": 12
+        }
+      },
+      {
+        "decile": 5,
+        "n": 121,
+        "keyMin": 0.01480482984726765,
+        "keyMax": 0.10268338978004392,
+        "keyMean": 0.058086914929541225,
+        "takeProfitCount": 28,
+        "stopLossCount": 71,
+        "takeProfitRatePctOfAll": 23.140495867768596,
+        "takeProfitRatePctOfTpSl": 28.282828282828284,
+        "outcomeCounts": {
+          "TAKE_PROFIT": 28,
+          "TIME_STOP": 8,
+          "STOP_LOSS": 71,
+          "EXPIRED": 14
+        }
+      },
+      {
+        "decile": 6,
+        "n": 120,
+        "keyMin": 0.10368470379322273,
+        "keyMax": 0.20256773833200217,
+        "keyMean": 0.15003418414424036,
+        "takeProfitCount": 16,
+        "stopLossCount": 76,
+        "takeProfitRatePctOfAll": 13.333333333333334,
+        "takeProfitRatePctOfTpSl": 17.391304347826086,
+        "outcomeCounts": {
+          "TAKE_PROFIT": 16,
+          "TIME_STOP": 14,
+          "STOP_LOSS": 76,
+          "EXPIRED": 14
+        }
+      },
+      {
+        "decile": 7,
+        "n": 120,
+        "keyMin": 0.2026695141484246,
+        "keyMax": 0.3074122127819864,
+        "keyMean": 0.2503021626875599,
+        "takeProfitCount": 24,
+        "stopLossCount": 67,
+        "takeProfitRatePctOfAll": 20,
+        "takeProfitRatePctOfTpSl": 26.373626373626372,
+        "outcomeCounts": {
+          "TAKE_PROFIT": 24,
+          "STOP_LOSS": 67,
+          "EXPIRED": 18,
+          "TIME_STOP": 11
+        }
+      },
+      {
+        "decile": 8,
+        "n": 120,
+        "keyMin": 0.30785825192024946,
+        "keyMax": 0.4124853883652232,
+        "keyMean": 0.36067671886516633,
+        "takeProfitCount": 18,
+        "stopLossCount": 83,
+        "takeProfitRatePctOfAll": 15,
+        "takeProfitRatePctOfTpSl": 17.821782178217823,
+        "outcomeCounts": {
+          "STOP_LOSS": 83,
+          "EXPIRED": 11,
+          "TAKE_PROFIT": 18,
+          "TIME_STOP": 8
+        }
+      },
+      {
+        "decile": 9,
+        "n": 120,
+        "keyMin": 0.4125277161862529,
+        "keyMax": 0.5542280828659176,
+        "keyMean": 0.4755793731236356,
+        "takeProfitCount": 18,
+        "stopLossCount": 67,
+        "takeProfitRatePctOfAll": 15,
+        "takeProfitRatePctOfTpSl": 21.176470588235293,
+        "outcomeCounts": {
+          "STOP_LOSS": 67,
+          "TAKE_PROFIT": 18,
+          "TIME_STOP": 16,
+          "EXPIRED": 19
+        }
+      },
+      {
+        "decile": 10,
+        "n": 121,
+        "keyMin": 0.5547053103935715,
+        "keyMax": 0.9330077999097531,
+        "keyMean": 0.6728779905479043,
+        "takeProfitCount": 16,
+        "stopLossCount": 76,
+        "takeProfitRatePctOfAll": 13.223140495867769,
+        "takeProfitRatePctOfTpSl": 17.391304347826086,
+        "outcomeCounts": {
+          "STOP_LOSS": 76,
+          "TAKE_PROFIT": 16,
+          "EXPIRED": 20,
+          "TIME_STOP": 9
+        }
+      }
+    ],
+    "ALL": [
+      {
+        "decile": 1,
+        "n": 245,
+        "keyMin": -0.9439072912174288,
+        "keyMax": -0.5010202956099714,
+        "keyMean": -0.6281272126187264,
+        "takeProfitCount": 35,
+        "stopLossCount": 161,
+        "takeProfitRatePctOfAll": 14.285714285714286,
+        "takeProfitRatePctOfTpSl": 17.857142857142858,
+        "outcomeCounts": {
+          "STOP_LOSS": 161,
+          "EXPIRED": 32,
+          "TAKE_PROFIT": 35,
+          "TIME_STOP": 17
+        }
+      },
+      {
+        "decile": 2,
+        "n": 245,
+        "keyMin": -0.5005710771393427,
+        "keyMax": -0.3454820227274389,
+        "keyMean": -0.4177589446922403,
+        "takeProfitCount": 41,
+        "stopLossCount": 154,
+        "takeProfitRatePctOfAll": 16.73469387755102,
+        "takeProfitRatePctOfTpSl": 21.025641025641026,
+        "outcomeCounts": {
+          "TAKE_PROFIT": 41,
+          "STOP_LOSS": 154,
+          "TIME_STOP": 27,
+          "EXPIRED": 23
+        }
+      },
+      {
+        "decile": 3,
+        "n": 246,
+        "keyMin": -0.3449103999019101,
+        "keyMax": -0.2247714978548775,
+        "keyMean": -0.27768482427876,
+        "takeProfitCount": 41,
+        "stopLossCount": 152,
+        "takeProfitRatePctOfAll": 16.666666666666668,
+        "takeProfitRatePctOfTpSl": 21.243523316062177,
+        "outcomeCounts": {
+          "STOP_LOSS": 152,
+          "EXPIRED": 28,
+          "TIME_STOP": 25,
+          "TAKE_PROFIT": 41
+        }
+      },
+      {
+        "decile": 4,
+        "n": 245,
+        "keyMin": -0.22471596476953526,
+        "keyMax": -0.11362076852699046,
+        "keyMean": -0.16984200922411707,
+        "takeProfitCount": 38,
+        "stopLossCount": 152,
+        "takeProfitRatePctOfAll": 15.510204081632653,
+        "takeProfitRatePctOfTpSl": 20,
+        "outcomeCounts": {
+          "STOP_LOSS": 152,
+          "TAKE_PROFIT": 38,
+          "EXPIRED": 29,
+          "TIME_STOP": 26
+        }
+      },
+      {
+        "decile": 5,
+        "n": 246,
+        "keyMin": -0.11227216337436847,
+        "keyMax": -0.007745149411755189,
+        "keyMean": -0.05880221017469911,
+        "takeProfitCount": 34,
+        "stopLossCount": 167,
+        "takeProfitRatePctOfAll": 13.821138211382113,
+        "takeProfitRatePctOfTpSl": 16.915422885572138,
+        "outcomeCounts": {
+          "STOP_LOSS": 167,
+          "EXPIRED": 29,
+          "TAKE_PROFIT": 34,
+          "TIME_STOP": 16
+        }
+      },
+      {
+        "decile": 6,
+        "n": 245,
+        "keyMin": -0.007654088894856862,
+        "keyMax": 0.09202291604994114,
+        "keyMean": 0.042041837020749664,
+        "takeProfitCount": 48,
+        "stopLossCount": 150,
+        "takeProfitRatePctOfAll": 19.591836734693878,
+        "takeProfitRatePctOfTpSl": 24.242424242424242,
+        "outcomeCounts": {
+          "STOP_LOSS": 150,
+          "TAKE_PROFIT": 48,
+          "TIME_STOP": 23,
+          "EXPIRED": 24
+        }
+      },
+      {
+        "decile": 7,
+        "n": 245,
+        "keyMin": 0.09235205496185407,
+        "keyMax": 0.20284291839563237,
+        "keyMean": 0.1487312455233354,
+        "takeProfitCount": 42,
+        "stopLossCount": 159,
+        "takeProfitRatePctOfAll": 17.142857142857142,
+        "takeProfitRatePctOfTpSl": 20.895522388059703,
+        "outcomeCounts": {
+          "STOP_LOSS": 159,
+          "TAKE_PROFIT": 42,
+          "EXPIRED": 22,
+          "TIME_STOP": 22
+        }
+      },
+      {
+        "decile": 8,
+        "n": 246,
+        "keyMin": 0.2033687698467484,
+        "keyMax": 0.3364451786724017,
+        "keyMean": 0.263197691743774,
+        "takeProfitCount": 45,
+        "stopLossCount": 151,
+        "takeProfitRatePctOfAll": 18.29268292682927,
+        "takeProfitRatePctOfTpSl": 22.959183673469386,
+        "outcomeCounts": {
+          "EXPIRED": 34,
+          "STOP_LOSS": 151,
+          "TAKE_PROFIT": 45,
+          "TIME_STOP": 16
+        }
+      },
+      {
+        "decile": 9,
+        "n": 245,
+        "keyMin": 0.3364813309150038,
+        "keyMax": 0.483049763336319,
+        "keyMean": 0.4050403642879593,
+        "takeProfitCount": 37,
+        "stopLossCount": 156,
+        "takeProfitRatePctOfAll": 15.10204081632653,
+        "takeProfitRatePctOfTpSl": 19.17098445595855,
+        "outcomeCounts": {
+          "EXPIRED": 30,
+          "TAKE_PROFIT": 37,
+          "STOP_LOSS": 156,
+          "TIME_STOP": 22
+        }
+      },
+      {
+        "decile": 10,
+        "n": 246,
+        "keyMin": 0.48431413428725184,
+        "keyMax": 0.9330077999097531,
+        "keyMean": 0.6202557941066955,
+        "takeProfitCount": 37,
+        "stopLossCount": 152,
+        "takeProfitRatePctOfAll": 15.040650406504065,
+        "takeProfitRatePctOfTpSl": 19.576719576719576,
+        "outcomeCounts": {
+          "STOP_LOSS": 152,
+          "EXPIRED": 35,
+          "TIME_STOP": 22,
+          "TAKE_PROFIT": 37
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,129 @@
+{
+  "warning": "TICKET-04X-Z Step 0: 12-week expanded set for aggTrades order-flow, H1 regime, 3 periods x 4 ADX quantiles (lowest/p33/p67/highest). Locked before fetching; not changed after seeing results. Selection is honest (no forcing to match the 3 already-fetched TICKET-04X-Q/X weeks) -- see naturalOverlapWithPriorWeeks for how many actually coincided.",
+  "generatedAt": "2026-09-07T13:52:52.565Z",
+  "weekMs": 604800000,
+  "naturalOverlapWithPriorWeeks": 1,
+  "weeksNeedingFreshFetch": 11,
+  "weeks": [
+    {
+      "periodLabel": "2023",
+      "selectionReason": "LOWEST_AVG_ADX",
+      "weekStartUtc": "2023-12-18T00:00:00.000Z",
+      "weekEndUtcExclusive": "2023-12-25T00:00:00.000Z",
+      "weekStartTimestamp": 1702857600000,
+      "weekEndTimestampExclusive": 1703462400000,
+      "avgAdx": 21.108822602495678,
+      "alreadyFetched": true
+    },
+    {
+      "periodLabel": "2023",
+      "selectionReason": "P33_AVG_ADX",
+      "weekStartUtc": "2023-10-09T00:00:00.000Z",
+      "weekEndUtcExclusive": "2023-10-16T00:00:00.000Z",
+      "weekStartTimestamp": 1696809600000,
+      "weekEndTimestampExclusive": 1697414400000,
+      "avgAdx": 25.200788644011542,
+      "alreadyFetched": false
+    },
+    {
+      "periodLabel": "2023",
+      "selectionReason": "P67_AVG_ADX",
+      "weekStartUtc": "2023-11-27T00:00:00.000Z",
+      "weekEndUtcExclusive": "2023-12-04T00:00:00.000Z",
+      "weekStartTimestamp": 1701043200000,
+      "weekEndTimestampExclusive": 1701648000000,
+      "avgAdx": 31.19861780719877,
+      "alreadyFetched": false
+    },
+    {
+      "periodLabel": "2023",
+      "selectionReason": "HIGHEST_AVG_ADX",
+      "weekStartUtc": "2023-10-16T00:00:00.000Z",
+      "weekEndUtcExclusive": "2023-10-23T00:00:00.000Z",
+      "weekStartTimestamp": 1697414400000,
+      "weekEndTimestampExclusive": 1698019200000,
+      "avgAdx": 39.867493086669434,
+      "alreadyFetched": false
+    },
+    {
+      "periodLabel": "2024",
+      "selectionReason": "LOWEST_AVG_ADX",
+      "weekStartUtc": "2024-05-27T00:00:00.000Z",
+      "weekEndUtcExclusive": "2024-06-03T00:00:00.000Z",
+      "weekStartTimestamp": 1716768000000,
+      "weekEndTimestampExclusive": 1717372800000,
+      "avgAdx": 16.83145835383528,
+      "alreadyFetched": false
+    },
+    {
+      "periodLabel": "2024",
+      "selectionReason": "P33_AVG_ADX",
+      "weekStartUtc": "2024-08-12T00:00:00.000Z",
+      "weekEndUtcExclusive": "2024-08-19T00:00:00.000Z",
+      "weekStartTimestamp": 1723420800000,
+      "weekEndTimestampExclusive": 1724025600000,
+      "avgAdx": 24.959931540356873,
+      "alreadyFetched": false
+    },
+    {
+      "periodLabel": "2024",
+      "selectionReason": "P67_AVG_ADX",
+      "weekStartUtc": "2024-09-30T00:00:00.000Z",
+      "weekEndUtcExclusive": "2024-10-07T00:00:00.000Z",
+      "weekStartTimestamp": 1727654400000,
+      "weekEndTimestampExclusive": 1728259200000,
+      "avgAdx": 30.11615757732258,
+      "alreadyFetched": false
+    },
+    {
+      "periodLabel": "2024",
+      "selectionReason": "HIGHEST_AVG_ADX",
+      "weekStartUtc": "2024-10-28T00:00:00.000Z",
+      "weekEndUtcExclusive": "2024-11-04T00:00:00.000Z",
+      "weekStartTimestamp": 1730073600000,
+      "weekEndTimestampExclusive": 1730678400000,
+      "avgAdx": 38.615398807877135,
+      "alreadyFetched": false
+    },
+    {
+      "periodLabel": "2025-2026",
+      "selectionReason": "LOWEST_AVG_ADX",
+      "weekStartUtc": "2025-02-10T00:00:00.000Z",
+      "weekEndUtcExclusive": "2025-02-17T00:00:00.000Z",
+      "weekStartTimestamp": 1739145600000,
+      "weekEndTimestampExclusive": 1739750400000,
+      "avgAdx": 17.183865330635633,
+      "alreadyFetched": false
+    },
+    {
+      "periodLabel": "2025-2026",
+      "selectionReason": "P33_AVG_ADX",
+      "weekStartUtc": "2026-05-25T00:00:00.000Z",
+      "weekEndUtcExclusive": "2026-06-01T00:00:00.000Z",
+      "weekStartTimestamp": 1779667200000,
+      "weekEndTimestampExclusive": 1780272000000,
+      "avgAdx": 24.52866584515413,
+      "alreadyFetched": false
+    },
+    {
+      "periodLabel": "2025-2026",
+      "selectionReason": "P67_AVG_ADX",
+      "weekStartUtc": "2026-02-23T00:00:00.000Z",
+      "weekEndUtcExclusive": "2026-03-02T00:00:00.000Z",
+      "weekStartTimestamp": 1771804800000,
+      "weekEndTimestampExclusive": 1772409600000,
+      "avgAdx": 29.556785165282918,
+      "alreadyFetched": false
+    },
+    {
+      "periodLabel": "2025-2026",
+      "selectionReason": "HIGHEST_AVG_ADX",
+      "weekStartUtc": "2026-06-01T00:00:00.000Z",
+      "weekEndUtcExclusive": "2026-06-08T00:00:00.000Z",
+      "weekStartTimestamp": 1780272000000,
+      "weekEndTimestampExclusive": 1780876800000,
+      "avgAdx": 45.73737184054848,
+      "alreadyFetched": false
+    }
+  ]
+}
