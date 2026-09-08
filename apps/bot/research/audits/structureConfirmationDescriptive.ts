@@ -239,7 +239,8 @@ function computeContinuation(
       ];
     }),
   );
-  return { n: obs.length, perHorizon };
+  // TICKET-04X-AB reuses this raw list (touchIndex + openTime) as its own input, no logic change.
+  return { n: obs.length, perHorizon, touchEvents: obs.map((o) => ({ touchIndex: o.touchIndex, openTime: candles[o.touchIndex].openTime })) };
 }
 
 interface BreakRetestObs {
