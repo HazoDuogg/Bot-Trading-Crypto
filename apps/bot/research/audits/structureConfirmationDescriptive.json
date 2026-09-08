@@ -1,0 +1,881 @@
+{
+  "warning": "TICKET-04X-AA: cau truc thi truong THUAN MO TA (swing + ADX regime), KHONG PnL/Sharpe. Nguong ADX (25/20, Wilder 1978) khoa TRUOC khi chay va khong doi sau khi thay so lieu.",
+  "generatedAt": "2026-09-08T06:26:01.817Z",
+  "adxThresholds": {
+    "trend": 25,
+    "transition": 20
+  },
+  "riskDefinition": "R = 1 x ATR(15)",
+  "favorableR": 2.6666666666666665,
+  "adverseR": 1,
+  "horizonsM15Candles": [
+    5,
+    10,
+    20
+  ],
+  "maxTouchScanCandles": 10000,
+  "minGroupN": 30,
+  "totalCandles": 105120,
+  "totalSwings": 28590,
+  "totalTouches": 55545,
+  "part1_holdingRetraceContinuation_UP": {
+    "n": 7160,
+    "perHorizon": {
+      "h5": {
+        "pureDirection": {
+          "overall": {
+            "n": 7160,
+            "trueCount": 3870,
+            "pct": 54.05027932960894
+          },
+          "bySession": {
+            "ASIA": {
+              "n": 1750,
+              "trueCount": 929,
+              "pct": 53.08571428571429
+            },
+            "EUROPE": {
+              "n": 2772,
+              "trueCount": 1514,
+              "pct": 54.61760461760462
+            },
+            "US": {
+              "n": 2638,
+              "trueCount": 1427,
+              "pct": 54.09401061410159
+            }
+          },
+          "byDepth": {
+            "SHALLOW": {
+              "n": 223,
+              "trueCount": 111,
+              "pct": 49.775784753363226
+            },
+            "MID": {
+              "n": 785,
+              "trueCount": 425,
+              "pct": 54.140127388535035
+            },
+            "DEEP": {
+              "n": 3551,
+              "trueCount": 1946,
+              "pct": 54.80146437623205
+            }
+          }
+        },
+        "profitableEnough": {
+          "overall": {
+            "n": 7160,
+            "trueCount": 527,
+            "pct": 7.360335195530726
+          },
+          "bySession": {
+            "ASIA": {
+              "n": 1750,
+              "trueCount": 81,
+              "pct": 4.628571428571429
+            },
+            "EUROPE": {
+              "n": 2772,
+              "trueCount": 294,
+              "pct": 10.606060606060606
+            },
+            "US": {
+              "n": 2638,
+              "trueCount": 152,
+              "pct": 5.761940864291129
+            }
+          },
+          "byDepth": {
+            "SHALLOW": {
+              "n": 223,
+              "trueCount": 18,
+              "pct": 8.071748878923767
+            },
+            "MID": {
+              "n": 785,
+              "trueCount": 48,
+              "pct": 6.114649681528663
+            },
+            "DEEP": {
+              "n": 3551,
+              "trueCount": 267,
+              "pct": 7.51900872993523
+            }
+          }
+        }
+      },
+      "h10": {
+        "pureDirection": {
+          "overall": {
+            "n": 7160,
+            "trueCount": 3903,
+            "pct": 54.51117318435754
+          },
+          "bySession": {
+            "ASIA": {
+              "n": 1750,
+              "trueCount": 956,
+              "pct": 54.628571428571426
+            },
+            "EUROPE": {
+              "n": 2772,
+              "trueCount": 1469,
+              "pct": 52.99422799422799
+            },
+            "US": {
+              "n": 2638,
+              "trueCount": 1478,
+              "pct": 56.02729340409401
+            }
+          },
+          "byDepth": {
+            "SHALLOW": {
+              "n": 223,
+              "trueCount": 113,
+              "pct": 50.672645739910315
+            },
+            "MID": {
+              "n": 785,
+              "trueCount": 454,
+              "pct": 57.8343949044586
+            },
+            "DEEP": {
+              "n": 3551,
+              "trueCount": 1914,
+              "pct": 53.90030977189524
+            }
+          }
+        },
+        "profitableEnough": {
+          "overall": {
+            "n": 7160,
+            "trueCount": 990,
+            "pct": 13.8268156424581
+          },
+          "bySession": {
+            "ASIA": {
+              "n": 1750,
+              "trueCount": 191,
+              "pct": 10.914285714285715
+            },
+            "EUROPE": {
+              "n": 2772,
+              "trueCount": 491,
+              "pct": 17.71284271284271
+            },
+            "US": {
+              "n": 2638,
+              "trueCount": 308,
+              "pct": 11.675511751326763
+            }
+          },
+          "byDepth": {
+            "SHALLOW": {
+              "n": 223,
+              "trueCount": 24,
+              "pct": 10.762331838565023
+            },
+            "MID": {
+              "n": 785,
+              "trueCount": 113,
+              "pct": 14.394904458598726
+            },
+            "DEEP": {
+              "n": 3551,
+              "trueCount": 504,
+              "pct": 14.193185018304703
+            }
+          }
+        }
+      },
+      "h20": {
+        "pureDirection": {
+          "overall": {
+            "n": 7160,
+            "trueCount": 3904,
+            "pct": 54.52513966480447
+          },
+          "bySession": {
+            "ASIA": {
+              "n": 1750,
+              "trueCount": 921,
+              "pct": 52.628571428571426
+            },
+            "EUROPE": {
+              "n": 2772,
+              "trueCount": 1468,
+              "pct": 52.95815295815296
+            },
+            "US": {
+              "n": 2638,
+              "trueCount": 1515,
+              "pct": 57.42987111448067
+            }
+          },
+          "byDepth": {
+            "SHALLOW": {
+              "n": 223,
+              "trueCount": 109,
+              "pct": 48.87892376681614
+            },
+            "MID": {
+              "n": 785,
+              "trueCount": 454,
+              "pct": 57.8343949044586
+            },
+            "DEEP": {
+              "n": 3551,
+              "trueCount": 1936,
+              "pct": 54.519853562376795
+            }
+          }
+        },
+        "profitableEnough": {
+          "overall": {
+            "n": 7160,
+            "trueCount": 1443,
+            "pct": 20.1536312849162
+          },
+          "bySession": {
+            "ASIA": {
+              "n": 1750,
+              "trueCount": 306,
+              "pct": 17.485714285714284
+            },
+            "EUROPE": {
+              "n": 2772,
+              "trueCount": 658,
+              "pct": 23.737373737373737
+            },
+            "US": {
+              "n": 2638,
+              "trueCount": 479,
+              "pct": 18.157695223654283
+            }
+          },
+          "byDepth": {
+            "SHALLOW": {
+              "n": 223,
+              "trueCount": 36,
+              "pct": 16.143497757847534
+            },
+            "MID": {
+              "n": 785,
+              "trueCount": 166,
+              "pct": 21.146496815286625
+            },
+            "DEEP": {
+              "n": 3551,
+              "trueCount": 729,
+              "pct": 20.529428330047875
+            }
+          }
+        }
+      }
+    }
+  },
+  "part2_breakAndRetest_UP": {
+    "totalBreaks": 6336,
+    "noRetestFoundCount": 42,
+    "held": {
+      "overall": {
+        "n": 6294,
+        "trueCount": 3099,
+        "pct": 49.2373689227836
+      },
+      "bySession": {
+        "ASIA": {
+          "n": 1698,
+          "trueCount": 847,
+          "pct": 49.88221436984688
+        },
+        "EUROPE": {
+          "n": 2341,
+          "trueCount": 1167,
+          "pct": 49.85049124305852
+        },
+        "US": {
+          "n": 2255,
+          "trueCount": 1085,
+          "pct": 48.11529933481153
+        }
+      },
+      "byDepth": {
+        "SHALLOW": {
+          "n": 196,
+          "trueCount": 103,
+          "pct": 52.55102040816327
+        },
+        "MID": {
+          "n": 678,
+          "trueCount": 326,
+          "pct": 48.08259587020649
+        },
+        "DEEP": {
+          "n": 3095,
+          "trueCount": 1507,
+          "pct": 48.69143780290791
+        }
+      }
+    }
+  },
+  "part3_symmetric_DOWN": {
+    "continuation": {
+      "n": 6072,
+      "perHorizon": {
+        "h5": {
+          "pureDirection": {
+            "overall": {
+              "n": 6072,
+              "trueCount": 3150,
+              "pct": 51.87747035573123
+            },
+            "bySession": {
+              "ASIA": {
+                "n": 1465,
+                "trueCount": 811,
+                "pct": 55.358361774744026
+              },
+              "EUROPE": {
+                "n": 2395,
+                "trueCount": 1186,
+                "pct": 49.51983298538622
+              },
+              "US": {
+                "n": 2212,
+                "trueCount": 1153,
+                "pct": 52.124773960217
+              }
+            },
+            "byDepth": {
+              "SHALLOW": {
+                "n": 195,
+                "trueCount": 95,
+                "pct": 48.717948717948715
+              },
+              "MID": {
+                "n": 681,
+                "trueCount": 343,
+                "pct": 50.36710719530103
+              },
+              "DEEP": {
+                "n": 2949,
+                "trueCount": 1523,
+                "pct": 51.64462529671075
+              }
+            }
+          },
+          "profitableEnough": {
+            "overall": {
+              "n": 6072,
+              "trueCount": 509,
+              "pct": 8.38274044795784
+            },
+            "bySession": {
+              "ASIA": {
+                "n": 1465,
+                "trueCount": 91,
+                "pct": 6.21160409556314
+              },
+              "EUROPE": {
+                "n": 2395,
+                "trueCount": 272,
+                "pct": 11.356993736951983
+              },
+              "US": {
+                "n": 2212,
+                "trueCount": 146,
+                "pct": 6.600361663652803
+              }
+            },
+            "byDepth": {
+              "SHALLOW": {
+                "n": 195,
+                "trueCount": 18,
+                "pct": 9.23076923076923
+              },
+              "MID": {
+                "n": 681,
+                "trueCount": 66,
+                "pct": 9.691629955947137
+              },
+              "DEEP": {
+                "n": 2949,
+                "trueCount": 234,
+                "pct": 7.934893184130214
+              }
+            }
+          }
+        },
+        "h10": {
+          "pureDirection": {
+            "overall": {
+              "n": 6072,
+              "trueCount": 3165,
+              "pct": 52.12450592885376
+            },
+            "bySession": {
+              "ASIA": {
+                "n": 1465,
+                "trueCount": 791,
+                "pct": 53.99317406143345
+              },
+              "EUROPE": {
+                "n": 2395,
+                "trueCount": 1190,
+                "pct": 49.68684759916493
+              },
+              "US": {
+                "n": 2212,
+                "trueCount": 1184,
+                "pct": 53.52622061482821
+              }
+            },
+            "byDepth": {
+              "SHALLOW": {
+                "n": 195,
+                "trueCount": 95,
+                "pct": 48.717948717948715
+              },
+              "MID": {
+                "n": 681,
+                "trueCount": 350,
+                "pct": 51.395007342143906
+              },
+              "DEEP": {
+                "n": 2949,
+                "trueCount": 1532,
+                "pct": 51.949813496100376
+              }
+            }
+          },
+          "profitableEnough": {
+            "overall": {
+              "n": 6072,
+              "trueCount": 887,
+              "pct": 14.608036890645586
+            },
+            "bySession": {
+              "ASIA": {
+                "n": 1465,
+                "trueCount": 195,
+                "pct": 13.310580204778157
+              },
+              "EUROPE": {
+                "n": 2395,
+                "trueCount": 408,
+                "pct": 17.035490605427974
+              },
+              "US": {
+                "n": 2212,
+                "trueCount": 284,
+                "pct": 12.839059674502712
+              }
+            },
+            "byDepth": {
+              "SHALLOW": {
+                "n": 195,
+                "trueCount": 26,
+                "pct": 13.333333333333334
+              },
+              "MID": {
+                "n": 681,
+                "trueCount": 109,
+                "pct": 16.005873715124817
+              },
+              "DEEP": {
+                "n": 2949,
+                "trueCount": 428,
+                "pct": 14.513394370973211
+              }
+            }
+          }
+        },
+        "h20": {
+          "pureDirection": {
+            "overall": {
+              "n": 6072,
+              "trueCount": 3114,
+              "pct": 51.284584980237156
+            },
+            "bySession": {
+              "ASIA": {
+                "n": 1465,
+                "trueCount": 817,
+                "pct": 55.767918088737204
+              },
+              "EUROPE": {
+                "n": 2395,
+                "trueCount": 1133,
+                "pct": 47.306889352818374
+              },
+              "US": {
+                "n": 2212,
+                "trueCount": 1164,
+                "pct": 52.622061482820975
+              }
+            },
+            "byDepth": {
+              "SHALLOW": {
+                "n": 195,
+                "trueCount": 95,
+                "pct": 48.717948717948715
+              },
+              "MID": {
+                "n": 681,
+                "trueCount": 342,
+                "pct": 50.220264317180614
+              },
+              "DEEP": {
+                "n": 2949,
+                "trueCount": 1514,
+                "pct": 51.339437097321124
+              }
+            }
+          },
+          "profitableEnough": {
+            "overall": {
+              "n": 6072,
+              "trueCount": 1250,
+              "pct": 20.586297760210805
+            },
+            "bySession": {
+              "ASIA": {
+                "n": 1465,
+                "trueCount": 294,
+                "pct": 20.068259385665527
+              },
+              "EUROPE": {
+                "n": 2395,
+                "trueCount": 528,
+                "pct": 22.045929018789145
+              },
+              "US": {
+                "n": 2212,
+                "trueCount": 428,
+                "pct": 19.349005424954793
+              }
+            },
+            "byDepth": {
+              "SHALLOW": {
+                "n": 195,
+                "trueCount": 37,
+                "pct": 18.974358974358974
+              },
+              "MID": {
+                "n": 681,
+                "trueCount": 146,
+                "pct": 21.43906020558003
+              },
+              "DEEP": {
+                "n": 2949,
+                "trueCount": 612,
+                "pct": 20.752797558494404
+              }
+            }
+          }
+        }
+      }
+    },
+    "breakRetest": {
+      "totalBreaks": 6156,
+      "noRetestFoundCount": 137,
+      "held": {
+        "overall": {
+          "n": 6019,
+          "trueCount": 3103,
+          "pct": 51.55341418840339
+        },
+        "bySession": {
+          "ASIA": {
+            "n": 1515,
+            "trueCount": 772,
+            "pct": 50.95709570957096
+          },
+          "EUROPE": {
+            "n": 2487,
+            "trueCount": 1303,
+            "pct": 52.3924406915963
+          },
+          "US": {
+            "n": 2017,
+            "trueCount": 1028,
+            "pct": 50.966782350024786
+          }
+        },
+        "byDepth": {
+          "SHALLOW": {
+            "n": 164,
+            "trueCount": 76,
+            "pct": 46.34146341463415
+          },
+          "MID": {
+            "n": 604,
+            "trueCount": 288,
+            "pct": 47.682119205298015
+          },
+          "DEEP": {
+            "n": 3082,
+            "trueCount": 1632,
+            "pct": 52.95262816353018
+          }
+        }
+      }
+    }
+  },
+  "part4_sidewayBoundaryBounce": {
+    "n": 18840,
+    "overall": {
+      "n": 18840,
+      "trueCount": 9321,
+      "pct": 49.47452229299363
+    },
+    "bySession": {
+      "ASIA": {
+        "n": 6469,
+        "trueCount": 3129,
+        "pct": 48.36914515381048
+      },
+      "EUROPE": {
+        "n": 7247,
+        "trueCount": 3632,
+        "pct": 50.117289913067474
+      },
+      "US": {
+        "n": 5124,
+        "trueCount": 2560,
+        "pct": 49.96096799375488
+      }
+    },
+    "byDepth": {
+      "SHALLOW": {
+        "n": 570,
+        "trueCount": 293,
+        "pct": 51.40350877192982
+      },
+      "MID": {
+        "n": 2083,
+        "trueCount": 1050,
+        "pct": 50.40806529044647
+      },
+      "DEEP": {
+        "n": 9662,
+        "trueCount": 4707,
+        "pct": 48.7166218174291
+      }
+    }
+  },
+  "part5_consecutiveFailureStreak": {
+    "UP": [
+      {
+        "k": 1,
+        "n": 6973,
+        "breakCount": 3336,
+        "breakPct": 47.84167503226732
+      },
+      {
+        "k": 2,
+        "n": 3563,
+        "breakCount": 1684,
+        "breakPct": 47.26354195902329
+      },
+      {
+        "k": 3,
+        "n": 1836,
+        "breakCount": 882,
+        "breakPct": 48.03921568627451
+      },
+      {
+        "k": 4,
+        "n": 931,
+        "breakCount": 470,
+        "breakPct": 50.483351235230934
+      },
+      {
+        "k": 5,
+        "n": 441,
+        "breakCount": 201,
+        "breakPct": 45.57823129251701
+      },
+      {
+        "k": 6,
+        "n": 239,
+        "breakCount": 113,
+        "breakPct": 47.28033472803347
+      },
+      {
+        "k": 7,
+        "n": 122,
+        "breakCount": 53,
+        "breakPct": 43.442622950819676
+      },
+      {
+        "k": 8,
+        "n": 65,
+        "breakCount": 28,
+        "breakPct": 43.07692307692308
+      },
+      {
+        "k": 9,
+        "n": 35,
+        "breakCount": 14,
+        "breakPct": 40
+      }
+    ],
+    "DOWN": [
+      {
+        "k": 1,
+        "n": 6794,
+        "breakCount": 3469,
+        "breakPct": 51.05975861053871
+      },
+      {
+        "k": 2,
+        "n": 3283,
+        "breakCount": 1668,
+        "breakPct": 50.80718854706061
+      },
+      {
+        "k": 3,
+        "n": 1595,
+        "breakCount": 847,
+        "breakPct": 53.10344827586207
+      },
+      {
+        "k": 4,
+        "n": 739,
+        "breakCount": 350,
+        "breakPct": 47.36129905277402
+      },
+      {
+        "k": 5,
+        "n": 379,
+        "breakCount": 182,
+        "breakPct": 48.02110817941953
+      },
+      {
+        "k": 6,
+        "n": 195,
+        "breakCount": 85,
+        "breakPct": 43.58974358974359
+      },
+      {
+        "k": 7,
+        "n": 110,
+        "breakCount": 50,
+        "breakPct": 45.45454545454545
+      },
+      {
+        "k": 8,
+        "n": 58,
+        "breakCount": 26,
+        "breakPct": 44.827586206896555
+      },
+      {
+        "k": 9,
+        "n": 32,
+        "breakCount": 17,
+        "breakPct": 53.125
+      }
+    ]
+  },
+  "part6_touchSequenceBreakTable": {
+    "ALL": [
+      {
+        "kLabel": "1",
+        "n": 28077,
+        "breakCount": 14093,
+        "breakPct": 50.19410905723546
+      },
+      {
+        "kLabel": "2",
+        "n": 13767,
+        "breakCount": 6805,
+        "breakPct": 49.429795888719404
+      },
+      {
+        "kLabel": "3",
+        "n": 6846,
+        "breakCount": 3352,
+        "breakPct": 48.96289804265265
+      },
+      {
+        "kLabel": "4",
+        "n": 3431,
+        "breakCount": 1729,
+        "breakPct": 50.39347129116876
+      },
+      {
+        "kLabel": "5+",
+        "n": 3424,
+        "breakCount": 1621,
+        "breakPct": 47.342289719626166
+      }
+    ],
+    "UP": [
+      {
+        "kLabel": "1",
+        "n": 13850,
+        "breakCount": 6739,
+        "breakPct": 48.65703971119134
+      },
+      {
+        "kLabel": "2",
+        "n": 6973,
+        "breakCount": 3336,
+        "breakPct": 47.84167503226732
+      },
+      {
+        "kLabel": "3",
+        "n": 3563,
+        "breakCount": 1684,
+        "breakPct": 47.26354195902329
+      },
+      {
+        "kLabel": "4",
+        "n": 1836,
+        "breakCount": 882,
+        "breakPct": 48.03921568627451
+      },
+      {
+        "kLabel": "5+",
+        "n": 1874,
+        "breakCount": 896,
+        "breakPct": 47.81216648879403
+      }
+    ],
+    "DOWN": [
+      {
+        "kLabel": "1",
+        "n": 14227,
+        "breakCount": 7354,
+        "breakPct": 51.69044774021227
+      },
+      {
+        "kLabel": "2",
+        "n": 6794,
+        "breakCount": 3469,
+        "breakPct": 51.05975861053871
+      },
+      {
+        "kLabel": "3",
+        "n": 3283,
+        "breakCount": 1668,
+        "breakPct": 50.80718854706061
+      },
+      {
+        "kLabel": "4",
+        "n": 1595,
+        "breakCount": 847,
+        "breakPct": 53.10344827586207
+      },
+      {
+        "kLabel": "5+",
+        "n": 1550,
+        "breakCount": 725,
+        "breakPct": 46.774193548387096
+      }
+    ]
+  }
+}
