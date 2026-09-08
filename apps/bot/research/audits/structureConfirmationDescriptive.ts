@@ -18,6 +18,7 @@ const MAX_TOUCH_SCAN_CANDLES = 10_000; // practical cap (~104 days) bounding per
 const MIN_GROUP_N = 30;
 const K_MAX = 10;
 const DAY_MS = 86_400_000;
+const SYMBOL = process.argv[2] ?? 'BTCUSDT'; // TICKET-04X-AC: multi-coin, all other params untouched
 
 type Regime = 'TREND' | 'TRANSITION' | 'SIDEWAY';
 type Session = 'ASIA' | 'EUROPE' | 'US';
@@ -327,8 +328,8 @@ async function main(): Promise<void> {
   const dataDirectory = fileURLToPath(new URL('../../data/', import.meta.url));
   const auditsDirectory = fileURLToPath(new URL('./', import.meta.url));
 
-  console.info('Loading M15 CSV...');
-  const candles = await loadCsv(resolve(dataDirectory, 'BTCUSDT_15m_3y.csv'));
+  console.info(`Loading M15 CSV for ${SYMBOL}...`);
+  const candles = await loadCsv(resolve(dataDirectory, `${SYMBOL}_15m_3y.csv`));
   console.info(`  M15=${candles.length}`);
 
   const adxSeries = computeAdxSeries(candles);
@@ -367,8 +368,9 @@ async function main(): Promise<void> {
 
   const output = {
     warning:
-      'TICKET-04X-AA: cau truc thi truong THUAN MO TA (swing + ADX regime), KHONG PnL/Sharpe. Nguong ADX (25/20, Wilder 1978) ' +
+      'TICKET-04X-AA/AC: cau truc thi truong THUAN MO TA (swing + ADX regime), KHONG PnL/Sharpe. Nguong ADX (25/20, Wilder 1978) ' +
       'khoa TRUOC khi chay va khong doi sau khi thay so lieu.',
+    symbol: SYMBOL,
     generatedAt: new Date().toISOString(),
     adxThresholds: { trend: ADX_TREND_THRESHOLD, transition: ADX_TRANSITION_THRESHOLD },
     riskDefinition: `R = 1 x ATR(${ATR_PERIOD})`,
@@ -388,7 +390,7 @@ async function main(): Promise<void> {
     part6_touchSequenceBreakTable: part6,
   };
 
-  const outputPath = resolve(auditsDirectory, 'structureConfirmationDescriptive.json');
+  const outputPath = resolve(auditsDirectory, `structureConfirmationDescriptive-${SYMBOL}.json`);
   await writeFile(outputPath, `${JSON.stringify(output, null, 2)}\n`, 'utf8');
   console.info(`\nOutput: ${outputPath}`);
 }

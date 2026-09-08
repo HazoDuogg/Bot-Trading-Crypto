@@ -99,7 +99,7 @@ function checkNoGaps(klines: Kline[], intervalMs: number): { gaps: { afterIndex:
 }
 
 async function main() {
-  const symbols = ['BTCUSDT']; // TICKET-04X-K: scope reduced to BTC-only
+  const symbols = ['ETHUSDT', 'SOLUSDT', 'DOGEUSDT']; // TICKET-04X-AC: multi-coin survey, BTC already fetched
   const intervals: ('1h' | '15m')[] = ['1h', '15m'];
   const dataDir = path.resolve(process.cwd(), 'apps/bot/data');
   await mkdir(dataDir, { recursive: true });
