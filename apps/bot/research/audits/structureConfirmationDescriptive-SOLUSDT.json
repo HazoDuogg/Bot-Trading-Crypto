@@ -1,7 +1,7 @@
 {
   "warning": "TICKET-04X-AA/AC: cau truc thi truong THUAN MO TA (swing + ADX regime), KHONG PnL/Sharpe. Nguong ADX (25/20, Wilder 1978) khoa TRUOC khi chay va khong doi sau khi thay so lieu.",
   "symbol": "SOLUSDT",
-  "generatedAt": "2026-09-08T07:18:20.377Z",
+  "generatedAt": "2026-09-08T07:25:18.756Z",
   "adxThresholds": {
     "trend": 25,
     "transition": 20
@@ -56328,6 +56328,95 @@
         "n": 10067,
         "trueCount": 5235,
         "pct": 52.001589351345984
+      }
+    },
+    "profitableEnough": {
+      "h5": {
+        "ALL": {
+          "n": 9924,
+          "profitCount": 799,
+          "profitableEnoughPct": 8.051189036678759,
+          "ci95": {
+            "lower": 7.53196513321489,
+            "upper": 8.602876115675132
+          }
+        },
+        "low": {
+          "n": 4855,
+          "profitCount": 400,
+          "profitableEnoughPct": 8.2389289392379,
+          "ci95": {
+            "lower": 7.498122067827926,
+            "upper": 9.045769426365874
+          }
+        },
+        "high": {
+          "n": 5069,
+          "profitCount": 399,
+          "profitableEnoughPct": 7.871375024659696,
+          "ci95": {
+            "lower": 7.161545164192028,
+            "upper": 8.645009511944442
+          }
+        }
+      },
+      "h10": {
+        "ALL": {
+          "n": 9924,
+          "profitCount": 1578,
+          "profitableEnoughPct": 15.900846432889963,
+          "ci95": {
+            "lower": 15.194592283963317,
+            "upper": 16.633489096349876
+          }
+        },
+        "low": {
+          "n": 4855,
+          "profitCount": 788,
+          "profitableEnoughPct": 16.230690010298662,
+          "ci95": {
+            "lower": 15.22025023061777,
+            "upper": 17.294526639779633
+          }
+        },
+        "high": {
+          "n": 5069,
+          "profitCount": 790,
+          "profitableEnoughPct": 15.584927993687117,
+          "ci95": {
+            "lower": 14.612524177478832,
+            "upper": 16.609454109816916
+          }
+        }
+      },
+      "h20": {
+        "ALL": {
+          "n": 9921,
+          "profitCount": 2305,
+          "profitableEnoughPct": 23.233545005543796,
+          "ci95": {
+            "lower": 22.41297680662234,
+            "upper": 24.07483338122819
+          }
+        },
+        "low": {
+          "n": 4854,
+          "profitCount": 1143,
+          "profitableEnoughPct": 23.54758961681088,
+          "ci95": {
+            "lower": 22.37517362654681,
+            "upper": 24.761841408471156
+          }
+        },
+        "high": {
+          "n": 5067,
+          "profitCount": 1162,
+          "profitableEnoughPct": 22.932701795934477,
+          "ci95": {
+            "lower": 21.79592555742014,
+            "upper": 24.110488155680777
+          }
+        }
       }
     }
   },

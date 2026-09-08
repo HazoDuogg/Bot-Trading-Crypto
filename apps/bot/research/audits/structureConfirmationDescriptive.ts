@@ -275,15 +275,51 @@ function computeBreakRetest(type: 'low' | 'high', levels: readonly Level[], cand
   };
 }
 
-// Part 4: touches occurring while regime=SIDEWAY -> % NO_BREAK ("bật lại" off the boundary).
-function computePart4(touchRecords: readonly TouchRecord[], candles: readonly Candle[], adxSeries: Array<number | null>) {
+// Wilson score interval, 95% (copied verbatim from TICKET-04X-AB's structureConfirmationH4Bias.ts
+// -- two independent audit scripts, no cross-import between them).
+function wilson95(successCount: number, n: number): { lower: number; upper: number } | null {
+  if (n === 0) return null;
+  const z = 1.959963985;
+  const phat = successCount / n;
+  const z2 = z * z;
+  const denom = 1 + z2 / n;
+  const center = phat + z2 / (2 * n);
+  const margin = z * Math.sqrt((phat * (1 - phat)) / n + z2 / (4 * n * n));
+  return { lower: (100 * Math.max(0, center - margin)) / denom, upper: (100 * Math.min(1, center + margin)) / denom };
+}
+
+// Part 4: touches occurring while regime=SIDEWAY -> % NO_BREAK ("bật lại" off the boundary),
+// plus profitableEnough on the NO_BREAK subset, split by boundary type and pooled (ALL).
+function computePart4(touchRecords: readonly TouchRecord[], candles: readonly Candle[], adxSeries: Array<number | null>, atrSeries: readonly number[]) {
   const obs = touchRecords.filter((t) => regimeAt(adxSeries, t.index) === 'SIDEWAY');
   const bounceFn = (t: TouchRecord) => t.kind === 'NO_BREAK';
+  const bounceObs = obs.filter((t) => t.kind === 'NO_BREAK');
+  const direction = (t: TouchRecord): 'up' | 'down' => (t.level.type === 'low' ? 'up' : 'down');
+
+  const profitableEnough = Object.fromEntries(
+    HORIZONS.map((h) => {
+      const profitFn = (t: TouchRecord) => {
+        const atrIdx = t.index - ATR_PERIOD;
+        if (atrIdx < 0 || atrIdx >= atrSeries.length) return null;
+        const riskPerUnit = atrSeries[atrIdx];
+        const result = classifyFirstTouchR(candles, t.index + 1, h, candles[t.index].close, riskPerUnit, direction(t));
+        return result === 'INSUFFICIENT_DATA' ? null : result === 'PROFIT';
+      };
+      const byGroup = (['ALL', 'low', 'high'] as const).map((g) => {
+        const subset = g === 'ALL' ? bounceObs : bounceObs.filter((t) => t.level.type === g);
+        const r = pctBreakdown(subset, profitFn);
+        return [g, { n: r.n, profitCount: r.trueCount, profitableEnoughPct: r.pct, ci95: wilson95(r.trueCount, r.n) }];
+      });
+      return [`h${h}`, Object.fromEntries(byGroup)];
+    }),
+  );
+
   return {
     n: obs.length,
     overall: pctBreakdown(obs, bounceFn),
     bySession: groupBySession(obs, (t) => sessionOf(candles[t.index].openTime), bounceFn),
     byDepth: groupByDepth(obs, (t) => t.level.depthBucket, bounceFn),
+    profitableEnough,
   };
 }
 
@@ -351,7 +387,7 @@ async function main(): Promise<void> {
     continuation: computeContinuation('high', touchRecords, candles, adxSeries, atrSeries),
     breakRetest: computeBreakRetest('high', levels, candles, adxSeries),
   };
-  const part4 = computePart4(touchRecords, candles, adxSeries);
+  const part4 = computePart4(touchRecords, candles, adxSeries, atrSeries);
   const part5 = {
     UP: computePart5(levels, 'low'),
     DOWN: computePart5(levels, 'high'),
