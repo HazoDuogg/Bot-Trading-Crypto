@@ -1,15 +1,19 @@
 /**
- * TICKET-05X-B step 3: three independent checks on the walk-forward labels
- * produced by scripts/hmmWalkForwardBtc.ts. None of these feed back into
- * the fit — a mismatch here is a finding to report, not a reason to retune
- * the labeling convention or fit parameters.
+ * TICKET-05X-B/B2/B3/B4 diagnostic — kept for reference, not part of the
+ * production pipeline. Verdict:
+ *   UPTREND/DOWNTREND -> fixed ADX>=25 + DI direction (HMM failed: max 57.4%
+ *     DI-pure even at 90-100% confidence, needs >=65%)
+ *   SIDEWAY           -> HMM (passed: 68.9% ADX<25 agreement, needs >=65%)
+ *   DANGER_ZONE       -> fixed true range > 3xATR14 (HMM failed: 0.75%
+ *     precision, 28.8% recall, needs >=50%/50%)
+ * Re-run only if re-evaluating whether HMM should replace a fixed rule.
  *
- * Run: tsx scripts/hmmWalkForwardVerify.ts
+ * Run: tsx scripts/research/hmmWalkForwardVerify.ts
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { Candle, RegimeState } from "../src/core/types.js";
-import { compareLabelsToAdxDi, computeAdxDi, calculateTR, type RegimeLabel } from "../src/regime/adxDiCompare.js";
+import type { Candle, RegimeState } from "../../src/core/types.js";
+import { compareLabelsToAdxDi, computeAdxDi, calculateTR, type RegimeLabel } from "../../src/regime/adxDiCompare.js";
 
 const DATA_PATH = resolve("data/ohlcv-BTCUSDT-15m.json");
 const LABELS_PATH = resolve("data/ticket05x-hmm-regime-labels.json");
