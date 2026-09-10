@@ -12,13 +12,7 @@ export interface Candle {
   volume: number;
 }
 
-export type RegimeState =
-  | "DANGER_ZONE"
-  | "TREND_RIDER"
-  | "COMPRESSION"
-  | "VOLATILE_CHOP"
-  | "SIDEWAY_SCALPER"
-  | "NEUTRAL_TRANSITION";
+export type RegimeState = "UPTREND" | "DOWNTREND" | "SIDEWAY" | "DANGER_ZONE";
 
 export interface RegimeSnapshot {
   state: RegimeState;
