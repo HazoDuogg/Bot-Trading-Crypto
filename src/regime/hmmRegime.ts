@@ -481,3 +481,75 @@ export function sequenceLogLikelihood(observations: number[], params: GaussianHm
   const { logLikelihood } = forwardBackward(B, obs.length, params.numStates, transitionFlat, params.initial);
   return logLikelihood;
 }
+
+/** Stationary distribution of a transition matrix via power iteration. */
+export function stationaryDistribution(transition: number[][], iterations = 500): number[] {
+  const K = transition.length;
+  let dist = new Array(K).fill(1 / K);
+  for (let iter = 0; iter < iterations; iter++) {
+    const next = new Array(K).fill(0);
+    for (let i = 0; i < K; i++) {
+      for (let j = 0; j < K; j++) next[j] += dist[i] * transition[i][j];
+    }
+    dist = next;
+  }
+  return dist;
+}
+
+/**
+ * Causal filtering: most-likely state at each t using only observations
+ * 1..t (Rabiner forward algorithm), unlike `viterbi`, which backtracks
+ * using the whole sequence and is therefore not usable walk-forward.
+ * `initial` overrides params.initial — useful when filtering a segment
+ * that doesn't start at the fitted model's own training window (e.g. pass
+ * the transition matrix's stationary distribution as a neutral prior).
+ */
+export function causalFilterStates(
+  observations: number[],
+  params: GaussianHmmParams,
+  initial: number[] = params.initial,
+): number[] {
+  const obs = Float64Array.from(observations);
+  const T = obs.length;
+  const K = params.numStates;
+  const B = emissionProbMatrix(obs, params.means, params.stds);
+  const transitionFlat = Float64Array.from(params.transition.flat());
+
+  const states = new Array(T);
+  let alpha = new Float64Array(K);
+  let sum0 = 0;
+  for (let k = 0; k < K; k++) {
+    alpha[k] = initial[k] * B[k];
+    sum0 += alpha[k];
+  }
+  if (sum0 > 0) for (let k = 0; k < K; k++) alpha[k] /= sum0;
+  states[0] = argmax(alpha);
+
+  for (let t = 1; t < T; t++) {
+    const base = t * K;
+    const nextAlpha = new Float64Array(K);
+    let sum = 0;
+    for (let j = 0; j < K; j++) {
+      let s = 0;
+      for (let i = 0; i < K; i++) s += alpha[i] * transitionFlat[i * K + j];
+      nextAlpha[j] = s * B[base + j];
+      sum += nextAlpha[j];
+    }
+    if (sum > 0) for (let j = 0; j < K; j++) nextAlpha[j] /= sum;
+    alpha = nextAlpha;
+    states[t] = argmax(alpha);
+  }
+  return states;
+}
+
+function argmax(values: Float64Array): number {
+  let bestI = 0;
+  let bestV = -Infinity;
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] > bestV) {
+      bestV = values[i];
+      bestI = i;
+    }
+  }
+  return bestI;
+}
