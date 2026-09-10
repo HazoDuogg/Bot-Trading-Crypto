@@ -9,7 +9,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Candle, RegimeState } from "../src/core/types.js";
-import { compareLabelsToAdxDi, type RegimeLabel } from "../src/regime/adxDiCompare.js";
+import { compareLabelsToAdxDi, computeAdxDi, calculateTR, type RegimeLabel } from "../src/regime/adxDiCompare.js";
 
 const DATA_PATH = resolve("data/ohlcv-BTCUSDT-15m.json");
 const LABELS_PATH = resolve("data/ticket05x-hmm-regime-labels.json");
@@ -38,6 +38,18 @@ const CONFIDENCE_BUCKETS: [number, number][] = [
 ];
 const GATE_DI_PURE_THRESHOLD = 65;
 const GATE_MIN_SHARE_PCT = 10;
+const ATR_ANOMALY_MULTIPLE = 3; // "true anomaly" bar: true range > 3xATR14
+const DZ_PRECISION_RECALL_THRESHOLD = 50;
+const SIDEWAY_ADX_THRESHOLD = 65;
+
+/** True range per bar, padded like computeAdxDi's own arrays (1 leading zero). */
+function computeTrueRangeSeries(candles: Candle[]): number[] {
+  const tr: number[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    tr.push(calculateTR(candles[i].high, candles[i].low, candles[i - 1].close));
+  }
+  return [0, ...tr];
+}
 
 function loadJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, "utf-8")) as T;
@@ -157,6 +169,42 @@ function main() {
     console.log(`  ${r.start} -> ${r.end}  (${r.bars} bars, ~${r.durationHours.toFixed(1)}h)`);
   }
 
+  console.log("\n=== TICKET-05X-B4 Part 1: DANGER_ZONE precision/recall vs true-range anomaly ===");
+  const { atr } = computeAdxDi(alignedCandles);
+  const trueRange = computeTrueRangeSeries(alignedCandles);
+  let dzTotal = 0, dzTruePositive = 0, anomalyTotal = 0, anomalyRecalled = 0;
+  for (let i = 0; i < labels.length; i++) {
+    const isAnomaly = trueRange[i] > ATR_ANOMALY_MULTIPLE * atr[i];
+    const isDangerZone = labels[i].state === "DANGER_ZONE";
+    if (isDangerZone) { dzTotal++; if (isAnomaly) dzTruePositive++; }
+    if (isAnomaly) { anomalyTotal++; if (isDangerZone) anomalyRecalled++; }
+  }
+  const dzPrecisionPct = dzTotal > 0 ? (dzTruePositive / dzTotal) * 100 : 0;
+  const dzRecallPct = anomalyTotal > 0 ? (anomalyRecalled / anomalyTotal) * 100 : 0;
+  console.log(`Precision: ${dzTruePositive}/${dzTotal} DANGER_ZONE bars are true-range > ${ATR_ANOMALY_MULTIPLE}xATR14 (${dzPrecisionPct.toFixed(1)}%)`);
+  console.log(`Recall: ${anomalyRecalled}/${anomalyTotal} true anomaly bars were labeled DANGER_ZONE (${dzRecallPct.toFixed(1)}%)`);
+  const dzViable = dzPrecisionPct >= DZ_PRECISION_RECALL_THRESHOLD && dzRecallPct >= DZ_PRECISION_RECALL_THRESHOLD;
+  console.log(
+    dzViable
+      ? `  => both >= ${DZ_PRECISION_RECALL_THRESHOLD}%: keep HMM for DANGER_ZONE.`
+      : `  => not both >= ${DZ_PRECISION_RECALL_THRESHOLD}%: fall back to the fixed rule (true range > ${ATR_ANOMALY_MULTIPLE}xATR14) for DANGER_ZONE.`,
+  );
+
+  console.log("\n=== TICKET-05X-B4 Part 2: SIDEWAY vs ADX<25 ===");
+  const { adx } = computeAdxDi(alignedCandles);
+  let sidewayTotal = 0, sidewayAdxUnder25 = 0;
+  for (let i = 0; i < labels.length; i++) {
+    if (labels[i].state === "SIDEWAY") { sidewayTotal++; if (adx[i] < 25) sidewayAdxUnder25++; }
+  }
+  const sidewayAdxUnder25Pct = sidewayTotal > 0 ? (sidewayAdxUnder25 / sidewayTotal) * 100 : 0;
+  console.log(`${sidewayAdxUnder25}/${sidewayTotal} SIDEWAY-labeled bars have ADX<25 (${sidewayAdxUnder25Pct.toFixed(1)}%)`);
+  const sidewayViable = sidewayAdxUnder25Pct >= SIDEWAY_ADX_THRESHOLD;
+  console.log(
+    sidewayViable
+      ? `  => >= ${SIDEWAY_ADX_THRESHOLD}%: keep HMM for SIDEWAY.`
+      : `  => < ${SIDEWAY_ADX_THRESHOLD}%: fall back to SIDEWAY = complement of the fixed ADX+DI rule (ADX<25 / not UPTREND or DOWNTREND).`,
+  );
+
   const report = {
     generatedAt: new Date().toISOString(),
     adxDiComparison: adxResult,
@@ -183,6 +231,24 @@ function main() {
       lowestStateCounts,
     },
     longestDangerZonePeriods: longestDangerZone,
+    dangerZonePrecisionRecall: {
+      atrAnomalyMultiple: ATR_ANOMALY_MULTIPLE,
+      thresholdPct: DZ_PRECISION_RECALL_THRESHOLD,
+      precisionPct: dzPrecisionPct,
+      recallPct: dzRecallPct,
+      dzTotal,
+      dzTruePositive,
+      anomalyTotal,
+      anomalyRecalled,
+      verdict: dzViable ? "KEEP_HMM_FOR_DANGER_ZONE" : "FALLBACK_FIXED_ATR_RULE",
+    },
+    sidewayAdxCheck: {
+      thresholdPct: SIDEWAY_ADX_THRESHOLD,
+      pct: sidewayAdxUnder25Pct,
+      sidewayTotal,
+      sidewayAdxUnder25,
+      verdict: sidewayViable ? "KEEP_HMM_FOR_SIDEWAY" : "FALLBACK_ADX_DI_COMPLEMENT",
+    },
   };
   writeFileSync(REPORT_OUT_PATH, JSON.stringify(report, null, 2));
   console.log(`\nSaved report to ${REPORT_OUT_PATH}`);

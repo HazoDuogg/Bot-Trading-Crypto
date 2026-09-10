@@ -10,9 +10,10 @@ export interface AdxDiSeries {
   adx: number[];
   plusDI: number[];
   minusDI: number[];
+  atr: number[];
 }
 
-function calculateTR(high: number, low: number, prevClose: number): number {
+export function calculateTR(high: number, low: number, prevClose: number): number {
   return Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
 }
 
@@ -65,6 +66,7 @@ export function computeAdxDi(candles: Candle[], period = 14): AdxDiSeries {
     adx: [...Array(pad).fill(0), ...adx],
     plusDI: [...Array(pad).fill(0), ...plusDI],
     minusDI: [...Array(pad).fill(0), ...minusDI],
+    atr: [...Array(pad).fill(0), ...trSmooth], // ATR14 = Wilder-smoothed true range, already computed above
   };
 }
 
