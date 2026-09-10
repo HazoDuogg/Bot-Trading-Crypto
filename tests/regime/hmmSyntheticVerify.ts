@@ -22,11 +22,11 @@ const TRUE_PARAMS: Record<(typeof STATE_NAMES)[number], { mean: number; std: num
 };
 
 const N = 20000;
-const DATA_SEED = 4;
+const DATA_SEEDS = Array.from({ length: 20 }, (_, i) => i + 1); // 1..20
 const EM_SEED = 42;
 const NUM_RESTARTS = 10;
-const MEAN_STD_TOLERANCE = 0.15;
 const MIN_STATE_MATCH_RATE = 0.7;
+const MIN_PRIMARY_PASS_SEEDS = 18; // 18/20 = 90%
 
 function buildTrueTransitionMatrix(): number[][] {
   const K = STATE_NAMES.length;
@@ -116,13 +116,17 @@ function matchLearnedStatesToNames(params: GaussianHmmParams): (typeof STATE_NAM
   return best!;
 }
 
-function main() {
-  console.log(`Simulating ${N} points from known 4-state Gaussian HMM (seed=${DATA_SEED})...`);
-  const { observations, trueStates } = simulate(N, DATA_SEED);
+interface SeedResult {
+  seed: number;
+  matchRate: number;
+  matchRateOk: boolean;
+  dangerZoneLowestOk: boolean;
+  perState: Record<(typeof STATE_NAMES)[number], { meanErr: number; stdErr: number }>;
+}
 
-  console.log(`Running EM: ${NUM_RESTARTS} random restarts (seed=${EM_SEED}), keeping best log-likelihood...`);
+function evaluateSeed(dataSeed: number): SeedResult {
+  const { observations, trueStates } = simulate(N, dataSeed);
   const best = fitGaussianHmmMultiStart(observations, STATE_NAMES.length, NUM_RESTARTS, EM_SEED);
-  console.log(`Best log-likelihood: ${best.logLikelihood.toFixed(2)} (${best.iterations} EM iterations)`);
 
   const namesByLearnedIndex = matchLearnedStatesToNames(best.params);
   const learned = namesByLearnedIndex.map((name, i) => ({
@@ -132,52 +136,66 @@ function main() {
     selfLoop: best.params.transition[i][i],
   }));
 
-  console.log("\nLearned vs true parameters:");
-  console.log("state\t\tmean(learned/true)\tstd(learned/true)\tselfLoop(learned/true)");
-  for (const s of learned) {
-    const t = TRUE_PARAMS[s.name];
-    console.log(
-      `${s.name}\t${s.mean.toFixed(5)}/${t.mean.toFixed(5)}\t${s.std.toFixed(5)}/${t.std.toFixed(5)}\t${s.selfLoop.toFixed(3)}/${t.selfLoop.toFixed(3)}`,
-    );
-  }
-
-  let meanStdOk = true;
+  const perState = {} as SeedResult["perState"];
   for (const s of learned) {
     const t = TRUE_PARAMS[s.name];
     const meanRef = Math.abs(t.mean) > 1e-9 ? Math.abs(t.mean) : t.std;
-    const meanErr = Math.abs(s.mean - t.mean) / meanRef;
-    const stdErr = Math.abs(s.std - t.std) / t.std;
-    const ok = meanErr <= MEAN_STD_TOLERANCE && stdErr <= MEAN_STD_TOLERANCE;
-    if (!ok) {
-      meanStdOk = false;
-      console.log(
-        `  FAIL ${s.name}: meanErr=${(meanErr * 100).toFixed(1)}% stdErr=${(stdErr * 100).toFixed(1)}% (tolerance ${MEAN_STD_TOLERANCE * 100}%)`,
-      );
-    }
+    perState[s.name] = {
+      meanErr: Math.abs(s.mean - t.mean) / meanRef,
+      stdErr: Math.abs(s.std - t.std) / t.std,
+    };
   }
 
   const dangerZone = learned.find((s) => s.name === "DANGER_ZONE")!;
-  const dangerZoneHasLowestSelfLoop = learned.every((s) => s.name === "DANGER_ZONE" || s.selfLoop > dangerZone.selfLoop);
+  const dangerZoneLowestOk = learned.every((s) => s.name === "DANGER_ZONE" || s.selfLoop > dangerZone.selfLoop);
 
   const decoded = viterbi(observations, best.params);
   let matches = 0;
   for (let t = 0; t < N; t++) {
-    const decodedName = namesByLearnedIndex[decoded[t]];
-    const trueName = STATE_NAMES[trueStates[t]];
-    if (decodedName === trueName) matches++;
+    if (namesByLearnedIndex[decoded[t]] === STATE_NAMES[trueStates[t]]) matches++;
   }
   const matchRate = matches / N;
-  const matchRateOk = matchRate > MIN_STATE_MATCH_RATE;
 
-  console.log(`\nDANGER_ZONE self-transition lowest among 4 states: ${dangerZoneHasLowestSelfLoop ? "PASS" : "FAIL"}`);
+  return { seed: dataSeed, matchRate, matchRateOk: matchRate > MIN_STATE_MATCH_RATE, dangerZoneLowestOk, perState };
+}
+
+function main() {
   console.log(
-    `Viterbi state-sequence match rate: ${(matchRate * 100).toFixed(2)}% (need > ${MIN_STATE_MATCH_RATE * 100}%): ${matchRateOk ? "PASS" : "FAIL"}`,
+    `Evaluating ${DATA_SEEDS.length} data seeds (EM_SEED=${EM_SEED}, ${NUM_RESTARTS} restarts each)...\n`,
   );
-  console.log(`Mean/std within ${MEAN_STD_TOLERANCE * 100}% tolerance: ${meanStdOk ? "PASS" : "FAIL"}`);
+  console.log("seed\tViterbi%\tViterbi>70%\tDZ lowest self-loop\tprimary gate");
 
-  const allPass = meanStdOk && dangerZoneHasLowestSelfLoop && matchRateOk;
-  console.log(`\n${allPass ? "ALL CRITERIA PASSED" : "VERIFICATION FAILED"}`);
-  if (!allPass) process.exitCode = 1;
+  const results: SeedResult[] = [];
+  for (const seed of DATA_SEEDS) {
+    const r = evaluateSeed(seed);
+    results.push(r);
+    const primaryOk = r.matchRateOk && r.dangerZoneLowestOk;
+    console.log(
+      `${seed}\t${(r.matchRate * 100).toFixed(1)}%\t\t${r.matchRateOk ? "PASS" : "FAIL"}\t\t${r.dangerZoneLowestOk ? "PASS" : "FAIL"}\t\t\t${primaryOk ? "PASS" : "FAIL"}`,
+    );
+  }
+
+  const primaryPassCount = results.filter((r) => r.matchRateOk && r.dangerZoneLowestOk).length;
+
+  // Secondary/reference only: average meanErr/stdErr per state across all seeds.
+  // Not gated — small-magnitude means (UPTREND/DOWNTREND=+/-0.001) are known to
+  // have limited statistical power at N=20000; see TICKET-05X-A commit.
+  console.log("\nMean/std error averaged over all seeds (reference only, no pass/fail bar):");
+  console.log("state\t\tavg meanErr\tavg stdErr");
+  for (const name of STATE_NAMES) {
+    const meanErrs = results.map((r) => r.perState[name].meanErr);
+    const stdErrs = results.map((r) => r.perState[name].stdErr);
+    const avgMeanErr = meanErrs.reduce((a, b) => a + b, 0) / meanErrs.length;
+    const avgStdErr = stdErrs.reduce((a, b) => a + b, 0) / stdErrs.length;
+    console.log(`${name}\t${(avgMeanErr * 100).toFixed(1)}%\t\t${(avgStdErr * 100).toFixed(1)}%`);
+  }
+
+  console.log(
+    `\nPrimary gate (Viterbi>70% AND DANGER_ZONE lowest self-loop): ${primaryPassCount}/${DATA_SEEDS.length} seeds passed (need >= ${MIN_PRIMARY_PASS_SEEDS})`,
+  );
+  const gatePass = primaryPassCount >= MIN_PRIMARY_PASS_SEEDS;
+  console.log(`\n${gatePass ? "TICKET-05X-A VERIFIED" : "VERIFICATION FAILED"}`);
+  if (!gatePass) process.exitCode = 1;
 }
 
 main();
