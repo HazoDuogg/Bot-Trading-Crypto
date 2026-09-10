@@ -1,9 +1,0 @@
-{
-  "extends": "../../tsconfig.json",
-  "compilerOptions": {
-    "outDir": "dist",
-    "rootDir": "."
-  },
-  "include": ["core/**/*.ts", "backtest/**/*.ts"],
-  "exclude": ["core/**/*.test.ts", "backtest/**/*.test.ts"]
-}

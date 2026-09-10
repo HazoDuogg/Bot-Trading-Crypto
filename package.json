@@ -2,26 +2,31 @@
   "name": "vicion-bot",
   "private": true,
   "version": "0.0.1",
+  "type": "module",
   "engines": {
     "node": ">=20.0.0"
   },
-  "workspaces": [
-    "apps/bot"
-  ],
   "scripts": {
-    "test": "npm test --workspace apps/bot",
-    "build": "npm run build --workspace apps/bot",
-    "typecheck": "npm run typecheck --workspace apps/bot",
-    "build:scripts": "tsc -p apps/bot/scripts/tsconfig.json",
-    "backtest:casper": "npm run build:scripts && node apps/bot/scripts-dist/scripts/runCasperBacktest.js",
-    "audit:casper-reality": "npm run build:scripts && node apps/bot/scripts-dist/scripts/auditCasperReality.js",
-    "fetch-ohlcv": "npm run build:scripts && node apps/bot/scripts-dist/scripts/fetchOhlcv.js"
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "fetch-ohlcv": "tsx scripts/fetchOhlcv.ts",
+    "fetch-cvd": "tsx scripts/fetchOrderflowCvd.ts",
+    "fetch-cvd-6m": "tsx scripts/fetchOrderflowCvd.ts --days 180 --suffix 6m",
+    "backtest": "tsx scripts/runBacktest.ts"
   },
   "dependencies": {
+    "adm-zip": "^0.6.0",
     "dotenv": "^17.4.2"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
     "@types/node": "^26.1.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3",
     "vitest": "^4.1.11"
   }
 }

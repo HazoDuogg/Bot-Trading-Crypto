@@ -3,90 +3,9 @@ dist/
 scripts-dist/
 build/
 *.log
-apps/ml-training/.venv/
-apps/ml-training/__pycache__/
 .env
 .env.*
 !.env.example
-
-# data files are test fixtures/research outputs the trader drops in locally, not committed by default.
-# TICKET-160A: narrow allowlist for minimum reproducibility evidence only (small manifests/summaries/
-# reports). Never allowlist raw OHLCV, live telemetry, or whole archive directories here.
-data/*
-!data/README.md
-data/live-telemetry/
-
-!data/archive/
-data/archive/*
-
-!data/archive/ticket153b/
-data/archive/ticket153b/*
-!data/archive/ticket153b/ticket153b-run-manifest.json
-!data/archive/ticket153b/ticket153b-central-summary.json
-!data/archive/ticket153b/ticket153b-scenario-summary.csv
-
-!data/archive/ticket158/
-data/archive/ticket158/*
-!data/archive/ticket158/ticket158-run-manifest.json
-!data/archive/ticket158/ticket158-scenario-portfolio-comparison.csv
-
-!data/archive/ticket159/
-data/archive/ticket159/*
-!data/archive/ticket159/ticket159-run-manifest.json
-!data/archive/ticket159/ticket159-parity-leakage-report.md
-!data/archive/ticket159/ticket159-scenario-portfolio-comparison.csv
-
-!data/ticket160-before-after-summary.md
-!data/ticket160-regression-parity-report.md
-!data/ticket160-reference-integrity-report.md
-!data/ticket160a-evidence-allowlist.csv
-!data/ticket160a-reference-integrity-report.md
-!data/ticket160a-parity-report.md
-!data/ticket160a-final-summary.md
-
-coverage/
-.DS_Store
-Thumbs.db
-
-# Local editor, OS and temporary files (safe to regenerate).
-.idea/
-*.swp
-*.swo
-*~
-*.tmp
-*.temp
-*.bak
-*.orig
-*.pid
-*.pid.lock
-
-# Tool and compiler caches.
-.cache/
-.eslintcache
-.stylelintcache
-.turbo/
-.nx/
-.vite/
-*.tsbuildinfo
-
-# Python environments and caches outside the ML workspace-specific paths above.
-.venv/
-**/__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# Explicit local scratch areas. Canonical research evidence belongs under data/
-# and remains governed by the narrow allowlist above.
-scratch/
-tmp/
-temp/
-
-# TICKET-RT-068: operational JSONL event logs written by apps/bot/scripts/liveRunner.ts
-# (apps/bot/logs/live-events-YYYY-MM-DD.jsonl) — accumulates daily on the VPS, not source-controlled.
-apps/bot/logs/
-
 .agents
 .claude
 .codegraph
@@ -94,5 +13,6 @@ apps/bot/logs/
 skills-lock.json
 README.md
 
-apps/bot/reports/
-apps/bot/data/*.csv
+data/*
+!data/.gitkeep
+
