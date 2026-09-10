@@ -15,7 +15,7 @@ import { resolve } from "node:path";
 import type { Candle, RegimeState } from "../src/core/types.js";
 import {
   fitGaussianHmmMultiStart,
-  causalFilterStates,
+  causalFilterStatesWithConfidence,
   stationaryDistribution,
   type GaussianHmmParams,
 } from "../src/regime/hmmRegime.js";
@@ -92,7 +92,7 @@ function main() {
   const dataStart = candles[0].openTime;
   const dataEnd = candles[candles.length - 1].openTime;
 
-  const labels: { openTime: number; closeTime: number; state: RegimeState }[] = [];
+  const labels: { openTime: number; closeTime: number; state: RegimeState; confidence: number }[] = [];
   const monthlyFits: MonthlyFit[] = [];
 
   let windowStart = dataStart;
@@ -132,10 +132,10 @@ function main() {
     }
     if (testCandleIdx.length > 0) {
       const testReturns = testCandleIdx.map((i) => logReturns[i - 1]);
-      const decoded = causalFilterStates(testReturns, fit.params, stationary);
+      const { states: decoded, confidence } = causalFilterStatesWithConfidence(testReturns, fit.params, stationary);
       for (let k = 0; k < testCandleIdx.length; k++) {
         const c = candles[testCandleIdx[k]];
-        labels.push({ openTime: c.openTime, closeTime: c.closeTime, state: names[decoded[k]] });
+        labels.push({ openTime: c.openTime, closeTime: c.closeTime, state: names[decoded[k]], confidence: confidence[k] });
       }
     }
 

@@ -542,6 +542,53 @@ export function causalFilterStates(
   return states;
 }
 
+/**
+ * Same causal forward-filtering as causalFilterStates, plus the winning
+ * state's normalized posterior probability at each t (its confidence) -
+ * added as a separate function so existing callers of causalFilterStates
+ * are unaffected.
+ */
+export function causalFilterStatesWithConfidence(
+  observations: number[],
+  params: GaussianHmmParams,
+  initial: number[] = params.initial,
+): { states: number[]; confidence: number[] } {
+  const obs = Float64Array.from(observations);
+  const T = obs.length;
+  const K = params.numStates;
+  const B = emissionProbMatrix(obs, params.means, params.stds);
+  const transitionFlat = Float64Array.from(params.transition.flat());
+
+  const states = new Array(T);
+  const confidence = new Array(T);
+  let alpha = new Float64Array(K);
+  let sum0 = 0;
+  for (let k = 0; k < K; k++) {
+    alpha[k] = initial[k] * B[k];
+    sum0 += alpha[k];
+  }
+  if (sum0 > 0) for (let k = 0; k < K; k++) alpha[k] /= sum0;
+  states[0] = argmax(alpha);
+  confidence[0] = alpha[states[0]];
+
+  for (let t = 1; t < T; t++) {
+    const base = t * K;
+    const nextAlpha = new Float64Array(K);
+    let sum = 0;
+    for (let j = 0; j < K; j++) {
+      let s = 0;
+      for (let i = 0; i < K; i++) s += alpha[i] * transitionFlat[i * K + j];
+      nextAlpha[j] = s * B[base + j];
+      sum += nextAlpha[j];
+    }
+    if (sum > 0) for (let j = 0; j < K; j++) nextAlpha[j] /= sum;
+    alpha = nextAlpha;
+    states[t] = argmax(alpha);
+    confidence[t] = alpha[states[t]];
+  }
+  return { states, confidence };
+}
+
 function argmax(values: Float64Array): number {
   let bestI = 0;
   let bestV = -Infinity;

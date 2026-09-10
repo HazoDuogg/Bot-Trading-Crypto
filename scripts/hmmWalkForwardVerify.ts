@@ -23,6 +23,22 @@ interface MonthlyFit {
   dangerZoneHasLowestSelfLoop: boolean;
 }
 
+interface LabelWithConfidence extends RegimeLabel {
+  closeTime: number;
+  confidence: number;
+}
+
+// Locked confidence buckets (%), not to be re-chosen after seeing results.
+const CONFIDENCE_BUCKETS: [number, number][] = [
+  [50, 60],
+  [60, 70],
+  [70, 80],
+  [80, 90],
+  [90, 100],
+];
+const GATE_DI_PURE_THRESHOLD = 65;
+const GATE_MIN_SHARE_PCT = 10;
+
 function loadJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, "utf-8")) as T;
 }
@@ -63,7 +79,7 @@ function longestRuns(labels: RegimeLabel[], state: RegimeState, top: number) {
 
 function main() {
   const candles = loadJson<Candle[]>(DATA_PATH);
-  const labels = loadJson<RegimeLabel[]>(LABELS_PATH);
+  const labels = loadJson<LabelWithConfidence[]>(LABELS_PATH);
   const monthlyFits = loadJson<MonthlyFit[]>(FITS_PATH);
 
   const candleByTime = new Map(candles.map((c) => [c.openTime, c]));
@@ -87,6 +103,32 @@ function main() {
       ? `  => >= ${DI_PURE_DECISION_THRESHOLD}%: low 23.7% attributed to the ADX>=25 filter, not wrong HMM direction. Continue developing HMM for the trend axis.`
       : `  => < ${DI_PURE_DECISION_THRESHOLD}%: HMM does not track real price direction reliably. Fall back to fixed ADX+DI for the UPTREND/DOWNTREND axis; keep HMM code as reference only.`,
   );
+
+  console.log("\n=== Confidence-stratified ADX/DI (TICKET-05X-B3) ===");
+  console.log("bucket\tUPTREND n\tUPTREND DI-pure%\tDOWNTREND n\tDOWNTREND DI-pure%\tcombined n\tcombined DI-pure%");
+  const bucketResults = CONFIDENCE_BUCKETS.map(([lo, hi]) => {
+    const inBucket = labels.filter((l) => {
+      const c = l.confidence * 100;
+      return hi === 100 ? c >= lo && c <= hi : c >= lo && c < hi;
+    });
+    const bucketCandles = inBucket.map((l) => candleByTime.get(l.openTime)!);
+    const r = compareLabelsToAdxDi(bucketCandles, inBucket);
+    console.log(
+      `[${lo},${hi}${hi === 100 ? "]" : ")"}\t${r.uptrend.total}\t${r.uptrend.diCorrectPure.pct.toFixed(1)}%\t${r.downtrend.total}\t${r.downtrend.diCorrectPure.pct.toFixed(1)}%\t${r.overall.total}\t${r.overall.diCorrectPure.pct.toFixed(1)}%`,
+    );
+    return { lo, hi, result: r };
+  });
+
+  const highBuckets = bucketResults.slice(3); // [80,90) and [90,100]
+  const bothHighBucketsPass = highBuckets.every((b) => b.result.overall.diCorrectPure.pct >= GATE_DI_PURE_THRESHOLD);
+  const highBucketsN = highBuckets.reduce((sum, b) => sum + b.result.overall.total, 0);
+  const highBucketsSharePct = (highBucketsN / adxResult.overall.total) * 100;
+  const shareOk = highBucketsSharePct >= GATE_MIN_SHARE_PCT;
+  const confidenceGateVerdict = bothHighBucketsPass && shareOk ? "HMM_CONFIDENCE_GATED_VIABLE" : "CONFIRMED_FALLBACK_ADX_DI";
+  console.log(
+    `\n[80,90)+[90,100] DI-pure>=${GATE_DI_PURE_THRESHOLD}%: ${bothHighBucketsPass}; combined n=${highBucketsN} (${highBucketsSharePct.toFixed(1)}% of all UP/DOWN labels, need >=${GATE_MIN_SHARE_PCT}%): ${shareOk}`,
+  );
+  console.log(`=> ${confidenceGateVerdict}`);
 
   console.log("\n=== Check 2: DANGER_ZONE lowest self-transition across monthly refits ===");
   const dzPassCount = monthlyFits.filter((f) => f.dangerZoneHasLowestSelfLoop).length;
@@ -122,6 +164,17 @@ function main() {
       diPureDecisionThresholdPct: DI_PURE_DECISION_THRESHOLD,
       overallDiPurePct: adxResult.overall.diCorrectPure.pct,
       verdict: diPureVerdict ? "KEEP_HMM_FOR_TREND_AXIS" : "FALL_BACK_TO_FIXED_ADX_DI",
+    },
+    confidenceStratified: {
+      buckets: bucketResults.map((b) => ({ range: [b.lo, b.hi], result: b.result })),
+      gate: {
+        diPureThresholdPct: GATE_DI_PURE_THRESHOLD,
+        minSharePct: GATE_MIN_SHARE_PCT,
+        highBucketsBothPass: bothHighBucketsPass,
+        highBucketsN,
+        highBucketsSharePct,
+        verdict: confidenceGateVerdict,
+      },
     },
     dangerZoneSelfLoopCheck: {
       totalMonthlyFits: monthlyFits.length,
