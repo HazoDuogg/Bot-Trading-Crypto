@@ -73,16 +73,39 @@ export interface RegimeLabel {
   state: RegimeState;
 }
 
+interface DirectionBreakdown {
+  total: number;
+  bothMatch: { count: number; pct: number }; // ADX>=threshold AND DI direction agrees (original 23.7% metric)
+  adxOver25: { count: number; pct: number }; // ADX>=threshold, regardless of DI direction
+  diCorrectGivenAdxOver25: { count: number; pct: number }; // of the adxOver25 group, DI direction agrees
+  diCorrectPure: { count: number; pct: number }; // DI direction agrees, ADX ignored entirely (decision metric)
+}
+
 export interface AdxDiComparisonResult {
-  uptrend: { total: number; matches: number; pct: number };
-  downtrend: { total: number; matches: number; pct: number };
-  overall: { total: number; matches: number; pct: number };
+  uptrend: DirectionBreakdown;
+  downtrend: DirectionBreakdown;
+  overall: { total: number; bothMatch: { count: number; pct: number }; diCorrectPure: { count: number; pct: number } };
+}
+
+function pct(count: number, total: number): number {
+  return total > 0 ? (count / total) * 100 : 0;
+}
+
+function makeBreakdown(total: number, bothMatch: number, adxOver25: number, diCorrectOverAdxOver25: number, diCorrectPure: number): DirectionBreakdown {
+  return {
+    total,
+    bothMatch: { count: bothMatch, pct: pct(bothMatch, total) },
+    adxOver25: { count: adxOver25, pct: pct(adxOver25, total) },
+    diCorrectGivenAdxOver25: { count: diCorrectOverAdxOver25, pct: pct(diCorrectOverAdxOver25, adxOver25) },
+    diCorrectPure: { count: diCorrectPure, pct: pct(diCorrectPure, total) },
+  };
 }
 
 /**
  * % of UPTREND/DOWNTREND-labeled bars where ADX>=threshold and +DI/-DI
- * agree with the label's direction. candles and labels must align 1:1 by
- * index (same openTime), as produced by the walk-forward script.
+ * agree with the label's direction, split into components so a low
+ * bothMatch rate can be attributed to the ADX filter vs. wrong DI
+ * direction. candles and labels must align 1:1 by index (same openTime).
  */
 export function compareLabelsToAdxDi(
   candles: Candle[],
@@ -91,10 +114,8 @@ export function compareLabelsToAdxDi(
 ): AdxDiComparisonResult {
   const { adx, plusDI, minusDI } = computeAdxDi(candles);
 
-  let upTotal = 0;
-  let upMatch = 0;
-  let downTotal = 0;
-  let downMatch = 0;
+  let upTotal = 0, upBoth = 0, upAdxOver = 0, upDiGivenAdxOver = 0, upDiPure = 0;
+  let downTotal = 0, downBoth = 0, downAdxOver = 0, downDiGivenAdxOver = 0, downDiPure = 0;
 
   for (let i = 0; i < labels.length; i++) {
     if (candles[i].openTime !== labels[i].openTime) {
@@ -103,19 +124,34 @@ export function compareLabelsToAdxDi(
     const state = labels[i].state;
     if (state === "UPTREND") {
       upTotal++;
-      if (adx[i] >= adxThreshold && plusDI[i] > minusDI[i]) upMatch++;
+      const adxOver = adx[i] >= adxThreshold;
+      const diCorrect = plusDI[i] > minusDI[i];
+      if (adxOver) upAdxOver++;
+      if (adxOver && diCorrect) { upBoth++; upDiGivenAdxOver++; }
+      if (diCorrect) upDiPure++;
     } else if (state === "DOWNTREND") {
       downTotal++;
-      if (adx[i] >= adxThreshold && minusDI[i] > plusDI[i]) downMatch++;
+      const adxOver = adx[i] >= adxThreshold;
+      const diCorrect = minusDI[i] > plusDI[i];
+      if (adxOver) downAdxOver++;
+      if (adxOver && diCorrect) { downBoth++; downDiGivenAdxOver++; }
+      if (diCorrect) downDiPure++;
     }
   }
 
-  const overall = { total: upTotal + downTotal, matches: upMatch + downMatch, pct: 0 };
-  overall.pct = overall.total > 0 ? (overall.matches / overall.total) * 100 : 0;
+  const uptrend = makeBreakdown(upTotal, upBoth, upAdxOver, upDiGivenAdxOver, upDiPure);
+  const downtrend = makeBreakdown(downTotal, downBoth, downAdxOver, downDiGivenAdxOver, downDiPure);
+  const overallTotal = upTotal + downTotal;
+  const overallBoth = upBoth + downBoth;
+  const overallDiPure = upDiPure + downDiPure;
 
   return {
-    uptrend: { total: upTotal, matches: upMatch, pct: upTotal > 0 ? (upMatch / upTotal) * 100 : 0 },
-    downtrend: { total: downTotal, matches: downMatch, pct: downTotal > 0 ? (downMatch / downTotal) * 100 : 0 },
-    overall,
+    uptrend,
+    downtrend,
+    overall: {
+      total: overallTotal,
+      bothMatch: { count: overallBoth, pct: pct(overallBoth, overallTotal) },
+      diCorrectPure: { count: overallDiPure, pct: pct(overallDiPure, overallTotal) },
+    },
   };
 }

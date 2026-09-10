@@ -70,25 +70,43 @@ function main() {
   const alignedCandles = labels.map((l) => candleByTime.get(l.openTime)!);
   if (alignedCandles.some((c) => !c)) throw new Error("label/candle alignment failed");
 
-  console.log("=== Check 1: ADX/DI cross-check on UPTREND/DOWNTREND labels ===");
+  console.log("=== Check 1: ADX/DI breakdown on UPTREND/DOWNTREND labels ===");
   const adxResult = compareLabelsToAdxDi(alignedCandles, labels);
+  const DI_PURE_DECISION_THRESHOLD = 65;
+  for (const [name, b] of [["UPTREND", adxResult.uptrend], ["DOWNTREND", adxResult.downtrend]] as const) {
+    console.log(`${name} (n=${b.total}):`);
+    console.log(`  ADX>=25 (regardless of DI direction): ${b.adxOver25.count}/${b.total} (${b.adxOver25.pct.toFixed(1)}%)`);
+    console.log(`  DI direction correct, given ADX>=25:  ${b.diCorrectGivenAdxOver25.count}/${b.adxOver25.count} (${b.diCorrectGivenAdxOver25.pct.toFixed(1)}%)`);
+    console.log(`  Both (original metric):               ${b.bothMatch.count}/${b.total} (${b.bothMatch.pct.toFixed(1)}%)`);
+    console.log(`  DI direction correct, ADX ignored (DECISION METRIC): ${b.diCorrectPure.count}/${b.total} (${b.diCorrectPure.pct.toFixed(1)}%)`);
+  }
+  console.log(`Overall DI-pure (decision metric, both directions): ${adxResult.overall.diCorrectPure.count}/${adxResult.overall.total} (${adxResult.overall.diCorrectPure.pct.toFixed(1)}%)`);
+  const diPureVerdict = adxResult.overall.diCorrectPure.pct >= DI_PURE_DECISION_THRESHOLD;
   console.log(
-    `UPTREND: ${adxResult.uptrend.matches}/${adxResult.uptrend.total} (${adxResult.uptrend.pct.toFixed(1)}%)`,
-  );
-  console.log(
-    `DOWNTREND: ${adxResult.downtrend.matches}/${adxResult.downtrend.total} (${adxResult.downtrend.pct.toFixed(1)}%)`,
-  );
-  console.log(
-    `Overall: ${adxResult.overall.matches}/${adxResult.overall.total} (${adxResult.overall.pct.toFixed(1)}%)`,
+    diPureVerdict
+      ? `  => >= ${DI_PURE_DECISION_THRESHOLD}%: low 23.7% attributed to the ADX>=25 filter, not wrong HMM direction. Continue developing HMM for the trend axis.`
+      : `  => < ${DI_PURE_DECISION_THRESHOLD}%: HMM does not track real price direction reliably. Fall back to fixed ADX+DI for the UPTREND/DOWNTREND axis; keep HMM code as reference only.`,
   );
 
   console.log("\n=== Check 2: DANGER_ZONE lowest self-transition across monthly refits ===");
   const dzPassCount = monthlyFits.filter((f) => f.dangerZoneHasLowestSelfLoop).length;
   console.log(`${dzPassCount}/${monthlyFits.length} monthly fits have DANGER_ZONE as the lowest self-loop state`);
+  console.log("\nSelf-loop of all 4 states per month (lowest marked *):");
+  console.log("trainStart\tUPTREND\tDOWNTREND\tSIDEWAY\tDANGER_ZONE\tlowest state");
+  const lowestStateCounts: Record<RegimeState, number> = { UPTREND: 0, DOWNTREND: 0, SIDEWAY: 0, DANGER_ZONE: 0 };
   for (const f of monthlyFits) {
-    if (!f.dangerZoneHasLowestSelfLoop) {
-      console.log(`  MISMATCH: ${f.trainStart} .. ${f.trainEnd}`);
-    }
+    const names: RegimeState[] = ["UPTREND", "DOWNTREND", "SIDEWAY", "DANGER_ZONE"];
+    const selfLoops = names.map((n) => f.states[n].selfLoop);
+    const minIdx = selfLoops.indexOf(Math.min(...selfLoops));
+    const lowestState = names[minIdx];
+    lowestStateCounts[lowestState]++;
+    console.log(
+      `${f.trainStart.slice(0, 7)}\t${selfLoops.map((v, i) => `${v.toFixed(3)}${i === minIdx ? "*" : ""}`).join("\t")}\t${lowestState}`,
+    );
+  }
+  console.log("\nWhich state most often has the lowest self-loop (across 31 months):");
+  for (const [name, count] of Object.entries(lowestStateCounts)) {
+    console.log(`  ${name}: ${count}/${monthlyFits.length} (${((count / monthlyFits.length) * 100).toFixed(1)}%)`);
   }
 
   console.log("\n=== Check 3: 10 longest DANGER_ZONE periods (for manual review) ===");
@@ -100,10 +118,16 @@ function main() {
   const report = {
     generatedAt: new Date().toISOString(),
     adxDiComparison: adxResult,
+    trendAxisDecision: {
+      diPureDecisionThresholdPct: DI_PURE_DECISION_THRESHOLD,
+      overallDiPurePct: adxResult.overall.diCorrectPure.pct,
+      verdict: diPureVerdict ? "KEEP_HMM_FOR_TREND_AXIS" : "FALL_BACK_TO_FIXED_ADX_DI",
+    },
     dangerZoneSelfLoopCheck: {
       totalMonthlyFits: monthlyFits.length,
       passCount: dzPassCount,
       pct: (dzPassCount / monthlyFits.length) * 100,
+      lowestStateCounts,
     },
     longestDangerZonePeriods: longestDangerZone,
   };
