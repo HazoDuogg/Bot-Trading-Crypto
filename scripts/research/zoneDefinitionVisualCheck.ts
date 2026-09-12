@@ -45,6 +45,12 @@ interface ZoneCandidate {
   low: number;
 }
 
+// Raw candidate before merge: carries the displacement's start time (grouping key) and base length (tie-break).
+interface RawZoneCandidate extends ZoneCandidate {
+  displacementOpenTime: number;
+  baseLen: number;
+}
+
 interface EqualPoint {
   type: "equal-high" | "equal-low";
   aIndex: number;
@@ -121,8 +127,8 @@ function checkDisplacement(
   return { valid: false };
 }
 
-function findZoneCandidates(candles: Candle[], atr: number[], segStart: number, segEnd: number): ZoneCandidate[] {
-  const candidates: ZoneCandidate[] = [];
+function findZoneCandidates(candles: Candle[], atr: number[], segStart: number, segEnd: number): RawZoneCandidate[] {
+  const candidates: RawZoneCandidate[] = [];
   for (let i = segStart; i < segEnd; i++) {
     for (let baseLen = 1; baseLen <= BASE_MAX_LEN; baseLen++) {
       const baseStart = i - baseLen + 1;
@@ -145,10 +151,24 @@ function findZoneCandidates(candles: Candle[], atr: number[], segStart: number, 
         closeTime: candles[i].closeTime,
         high: baseHigh,
         low: baseLow,
+        displacementOpenTime: candles[i + 1].openTime,
+        baseLen,
       });
     }
   }
   return candidates;
+}
+
+// TICKET-06X-A2: candidates sharing the same displacement are the same real event — keep only the longest base.
+function mergeZoneCandidates(candidates: RawZoneCandidate[]): ZoneCandidate[] {
+  const byDisplacement = new Map<number, RawZoneCandidate>();
+  for (const c of candidates) {
+    const existing = byDisplacement.get(c.displacementOpenTime);
+    if (!existing || c.baseLen > existing.baseLen) byDisplacement.set(c.displacementOpenTime, c);
+  }
+  return [...byDisplacement.values()]
+    .sort((a, b) => a.openTime - b.openTime)
+    .map(({ type, openTime, closeTime, high, low }) => ({ type, openTime, closeTime, high, low }));
 }
 
 function findEqualPoints(swings: SwingPoint[], atr: number[]): EqualPoint[] {
@@ -179,7 +199,7 @@ function main() {
   const segments = pickSegments(candles.length);
 
   const results = segments.map((seg, segIdx) => {
-    const zoneCandidates = findZoneCandidates(candles, atr, seg.start, seg.end);
+    const zoneCandidates = mergeZoneCandidates(findZoneCandidates(candles, atr, seg.start, seg.end));
     const segSwings = swings.filter((s) => s.index >= seg.start && s.index < seg.end);
     const equalPoints = findEqualPoints(segSwings, atr).map((e) => ({
       type: e.type,
