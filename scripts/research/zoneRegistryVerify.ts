@@ -21,7 +21,17 @@ function check(name: string, actual: unknown, expected: unknown) {
 }
 
 function runDemand(name: string, candles: Candle[], expectState: Zone["state"], expectTouches: number) {
-  const zoneSeed: Zone = { id: "z", type: "demand", high: 110, low: 100, createdAtIndex: 0, state: "VALID", touchCount: 0 };
+  const zoneSeed: Zone = {
+    id: "z",
+    type: "demand",
+    high: 110,
+    low: 100,
+    createdAtIndex: 0,
+    state: "VALID",
+    touchCount: 0,
+    imbalance: null,
+    imbalanceMitigated: false,
+  };
   const atr = Array(candles.length).fill(FLAT_ATR);
   let zones: Zone[] = [zoneSeed];
   for (let i = 1; i < candles.length; i++) zones = advanceRegistry(zones, candles, atr, i);
@@ -54,7 +64,17 @@ runDemand(
 
 // Bonus: supply is the mirror of demand — close above the zone's high invalidates it permanently.
 {
-  const zoneSeed: Zone = { id: "s", type: "supply", high: 110, low: 100, createdAtIndex: 0, state: "VALID", touchCount: 0 };
+  const zoneSeed: Zone = {
+    id: "s",
+    type: "supply",
+    high: 110,
+    low: 100,
+    createdAtIndex: 0,
+    state: "VALID",
+    touchCount: 0,
+    imbalance: null,
+    imbalanceMitigated: false,
+  };
   const candles = [candle(0, 50, 55, 45, 50), candle(1, 112, 120, 108, 115), candle(2, 105, 118, 95, 104)];
   const atr = Array(candles.length).fill(FLAT_ATR);
   let zones: Zone[] = [zoneSeed];
