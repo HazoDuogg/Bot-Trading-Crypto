@@ -3,7 +3,7 @@ import type { Candle } from "./types.js";
 export interface OrchestratorDeps {
   detectRegime: (candles: Candle[]) => unknown;
   detectDirection: (candles: Candle[]) => unknown;
-  detectEntry: (candles: Candle[]) => unknown;
+  detectEntry: (dailyCandles: Candle[], m15Candles: Candle[], m5Candles: Candle[]) => unknown;
   sizePosition: (signal: unknown) => unknown;
   manageExit: (position: unknown, candle: Candle) => unknown;
 }
