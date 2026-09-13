@@ -13,14 +13,18 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Candle } from "../../src/core/types.js";
 import { computeAdxDi } from "../../src/regime/adxDiCompare.js";
+import {
+  findZoneCandidates,
+  mergeZoneCandidates,
+  BASE_MAX_LEN,
+  BASE_RANGE_ATR_MULT,
+  DISPLACEMENT_MAX_CANDLES,
+  DISPLACEMENT_ATR_MULT,
+} from "../../src/entry/zoneDetection.js";
 
 const DATA_PATH = resolve("data/ohlcv-BTCUSDT-15m-2021-2024.json");
 const REPORT_OUT_PATH = resolve("data/ticket06x-zone-definition-visual-check.json");
 
-const BASE_MAX_LEN = 6;
-const BASE_RANGE_ATR_MULT = 1.5;
-const DISPLACEMENT_MAX_CANDLES = 3;
-const DISPLACEMENT_ATR_MULT = 2;
 const EQUAL_ATR_MULT = 0.1;
 
 const SEGMENT_COUNT = 15;
@@ -35,20 +39,6 @@ interface SwingPoint {
   index: number;
   type: "high" | "low";
   price: number;
-}
-
-interface ZoneCandidate {
-  type: "demand" | "supply";
-  openTime: number;
-  closeTime: number;
-  high: number;
-  low: number;
-}
-
-// Raw candidate before merge: carries the displacement's start time (grouping key) and base length (tie-break).
-interface RawZoneCandidate extends ZoneCandidate {
-  displacementOpenTime: number;
-  baseLen: number;
 }
 
 interface EqualPoint {
@@ -104,73 +94,6 @@ function pickSegments(candleCount: number): { start: number; end: number }[] {
   return segments;
 }
 
-/** Displacement check on up to 3 candles right after a valid base, using ATR at the base's last candle. */
-function checkDisplacement(
-  candles: Candle[],
-  atrAtBaseEnd: number,
-  from: number,
-  maxExclusive: number,
-): { valid: boolean; direction?: "up" | "down"; endIdx?: number } {
-  const lastAvailable = Math.min(from + DISPLACEMENT_MAX_CANDLES - 1, maxExclusive - 1);
-  for (let end = from; end <= lastAvailable; end++) {
-    const netMove = candles[end].close - candles[from - 1].close;
-    if (Math.abs(netMove) >= DISPLACEMENT_ATR_MULT * atrAtBaseEnd) {
-      return { valid: true, direction: netMove > 0 ? "up" : "down", endIdx: end };
-    }
-    for (let k = from; k <= end; k++) {
-      const range = candles[k].high - candles[k].low;
-      if (range >= DISPLACEMENT_ATR_MULT * atrAtBaseEnd) {
-        return { valid: true, direction: candles[k].close >= candles[k].open ? "up" : "down", endIdx: end };
-      }
-    }
-  }
-  return { valid: false };
-}
-
-function findZoneCandidates(candles: Candle[], atr: number[], segStart: number, segEnd: number): RawZoneCandidate[] {
-  const candidates: RawZoneCandidate[] = [];
-  for (let i = segStart; i < segEnd; i++) {
-    for (let baseLen = 1; baseLen <= BASE_MAX_LEN; baseLen++) {
-      const baseStart = i - baseLen + 1;
-      if (baseStart < segStart) continue;
-
-      let baseHigh = -Infinity;
-      let baseLow = Infinity;
-      for (let k = baseStart; k <= i; k++) {
-        baseHigh = Math.max(baseHigh, candles[k].high);
-        baseLow = Math.min(baseLow, candles[k].low);
-      }
-      if (baseHigh - baseLow > BASE_RANGE_ATR_MULT * atr[i]) continue;
-
-      const displacement = checkDisplacement(candles, atr[i], i + 1, segEnd);
-      if (!displacement.valid) continue;
-
-      candidates.push({
-        type: displacement.direction === "up" ? "demand" : "supply",
-        openTime: candles[baseStart].openTime,
-        closeTime: candles[i].closeTime,
-        high: baseHigh,
-        low: baseLow,
-        displacementOpenTime: candles[i + 1].openTime,
-        baseLen,
-      });
-    }
-  }
-  return candidates;
-}
-
-// TICKET-06X-A2: candidates sharing the same displacement are the same real event — keep only the longest base.
-function mergeZoneCandidates(candidates: RawZoneCandidate[]): ZoneCandidate[] {
-  const byDisplacement = new Map<number, RawZoneCandidate>();
-  for (const c of candidates) {
-    const existing = byDisplacement.get(c.displacementOpenTime);
-    if (!existing || c.baseLen > existing.baseLen) byDisplacement.set(c.displacementOpenTime, c);
-  }
-  return [...byDisplacement.values()]
-    .sort((a, b) => a.openTime - b.openTime)
-    .map(({ type, openTime, closeTime, high, low }) => ({ type, openTime, closeTime, high, low }));
-}
-
 function findEqualPoints(swings: SwingPoint[], atr: number[]): EqualPoint[] {
   const equals: EqualPoint[] = [];
   for (const kind of ["high", "low"] as const) {
@@ -199,7 +122,9 @@ function main() {
   const segments = pickSegments(candles.length);
 
   const results = segments.map((seg, segIdx) => {
-    const zoneCandidates = mergeZoneCandidates(findZoneCandidates(candles, atr, seg.start, seg.end));
+    const zoneCandidates = mergeZoneCandidates(findZoneCandidates(candles, atr, seg.start, seg.end)).map(
+      ({ type, openTime, closeTime, high, low }) => ({ type, openTime, closeTime, high, low }),
+    );
     const segSwings = swings.filter((s) => s.index >= seg.start && s.index < seg.end);
     const equalPoints = findEqualPoints(segSwings, atr).map((e) => ({
       type: e.type,
