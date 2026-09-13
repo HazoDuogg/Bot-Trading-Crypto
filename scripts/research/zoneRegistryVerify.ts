@@ -31,6 +31,7 @@ function runDemand(name: string, candles: Candle[], expectState: Zone["state"], 
     touchCount: 0,
     imbalance: null,
     imbalanceMitigated: false,
+    hasNearbyLiquidity: false,
   };
   const atr = Array(candles.length).fill(FLAT_ATR);
   let zones: Zone[] = [zoneSeed];
@@ -74,6 +75,7 @@ runDemand(
     touchCount: 0,
     imbalance: null,
     imbalanceMitigated: false,
+    hasNearbyLiquidity: false,
   };
   const candles = [candle(0, 50, 55, 45, 50), candle(1, 112, 120, 108, 115), candle(2, 105, 118, 95, 104)];
   const atr = Array(candles.length).fill(FLAT_ATR);

@@ -5,6 +5,7 @@
 import type { Candle } from "../core/types.js";
 import { findZoneCandidates, mergeZoneCandidates, DISPLACEMENT_MAX_CANDLES, type ZoneCandidate } from "./zoneDetection.js";
 import { findFvgInRange, type Imbalance } from "./imbalance.js";
+import { detectSwingPoints, findEqualPoints, EQUAL_ATR_MULT } from "./liquidity.js";
 
 export type ZoneState = "VALID" | "TESTED" | "INVALIDATED";
 
@@ -18,9 +19,20 @@ export interface Zone {
   touchCount: number;
   imbalance: Imbalance | null;
   imbalanceMitigated: boolean;
+  hasNearbyLiquidity: boolean;
 }
 
-function toZone(c: ZoneCandidate, candles: Candle[]): Zone {
+// Demand zones sit near resting buy-side liquidity (equal lows); supply zones near equal highs — same 0.1x ATR tolerance as findEqualPoints.
+function computeHasNearbyLiquidity(candles: Candle[], atr: number[], upToIndex: number, c: ZoneCandidate): boolean {
+  const swings = detectSwingPoints(candles.slice(0, upToIndex + 1));
+  const equalPoints = findEqualPoints(swings, atr);
+  const wantKind = c.type === "demand" ? "equal-low" : "equal-high";
+  const boundary = c.type === "demand" ? c.low : c.high;
+  const tolerance = EQUAL_ATR_MULT * atr[upToIndex];
+  return equalPoints.some((e) => e.type === wantKind && Math.abs(e.priceB - boundary) <= tolerance);
+}
+
+function toZone(c: ZoneCandidate, candles: Candle[], atr: number[]): Zone {
   return {
     id: `${c.type}-${c.confirmedIndex}`, // confirmedIndex is the merge key, so it's unique per merged candidate
     type: c.type,
@@ -31,12 +43,13 @@ function toZone(c: ZoneCandidate, candles: Candle[]): Zone {
     touchCount: 0,
     imbalance: findFvgInRange(candles, c.baseEndIndex, c.confirmedIndex, c.type),
     imbalanceMitigated: false,
+    hasNearbyLiquidity: computeHasNearbyLiquidity(candles, atr, c.confirmedIndex, c),
   };
 }
 
 /** One-time full-history scan — every base+displacement pair found becomes a VALID zone. */
 export function buildInitialRegistry(candles: Candle[], atr: number[]): Zone[] {
-  return mergeZoneCandidates(findZoneCandidates(candles, atr, 0, candles.length)).map((c) => toZone(c, candles));
+  return mergeZoneCandidates(findZoneCandidates(candles, atr, 0, candles.length)).map((c) => toZone(c, candles, atr));
 }
 
 /** Demand/supply are symmetric: close through the far side invalidates permanently, a wick-only touch marks TESTED. */
@@ -68,7 +81,7 @@ export function advanceRegistry(zones: Zone[], candles: Candle[], atr: number[],
   const minBaseStart = Math.max(0, newIndex - DISPLACEMENT_MAX_CANDLES);
   const newZones = mergeZoneCandidates(findZoneCandidates(candles, atr, minBaseStart, newIndex + 1))
     .filter((c) => c.confirmedIndex === newIndex)
-    .map((c) => toZone(c, candles));
+    .map((c) => toZone(c, candles, atr));
 
   return [...updated, ...newZones];
 }

@@ -38,7 +38,7 @@ function runMitigation(name: string, imbalance: { high: number; low: number } | 
   const allCandles = [seed, ...followUps];
   const atr = Array(allCandles.length).fill(FLAT_ATR);
   let zones: Zone[] = [
-    { id: "z", type: "demand", high: 10000, low: 9900, createdAtIndex: 0, state: "VALID", touchCount: 0, imbalance, imbalanceMitigated: false },
+    { id: "z", type: "demand", high: 10000, low: 9900, createdAtIndex: 0, state: "VALID", touchCount: 0, imbalance, imbalanceMitigated: false, hasNearbyLiquidity: false },
   ];
   const observed: boolean[] = [];
   for (let i = 1; i < allCandles.length; i++) {
