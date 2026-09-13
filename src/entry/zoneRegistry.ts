@@ -19,7 +19,7 @@ export interface Zone {
 
 function toZone(c: ZoneCandidate): Zone {
   return {
-    id: `${c.type}-${c.baseEndIndex}`, // baseEndIndex is unique per merged candidate (1:1 with displacementOpenTime)
+    id: `${c.type}-${c.confirmedIndex}`, // confirmedIndex is the merge key, so it's unique per merged candidate
     type: c.type,
     high: c.high,
     low: c.low,

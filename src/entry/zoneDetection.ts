@@ -84,14 +84,14 @@ export function findZoneCandidates(candles: Candle[], atr: number[], minBaseStar
   return candidates;
 }
 
-/** Candidates sharing the same displacement are the same real event — keep only the longest base. */
+/** Candidates whose displacement resolves at the same candle are the same real event — keep only the longest base. */
 export function mergeZoneCandidates(candidates: RawZoneCandidate[]): ZoneCandidate[] {
-  const byDisplacement = new Map<number, RawZoneCandidate>();
+  const byConfirmedIndex = new Map<number, RawZoneCandidate>();
   for (const c of candidates) {
-    const existing = byDisplacement.get(c.displacementOpenTime);
-    if (!existing || c.baseLen > existing.baseLen) byDisplacement.set(c.displacementOpenTime, c);
+    const existing = byConfirmedIndex.get(c.confirmedIndex);
+    if (!existing || c.baseLen > existing.baseLen) byConfirmedIndex.set(c.confirmedIndex, c);
   }
-  return [...byDisplacement.values()]
+  return [...byConfirmedIndex.values()]
     .sort((a, b) => a.openTime - b.openTime)
     .map(({ type, baseStartIndex, baseEndIndex, confirmedIndex, openTime, closeTime, high, low }) => ({
       type,
