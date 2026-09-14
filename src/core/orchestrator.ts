@@ -5,7 +5,7 @@ export interface OrchestratorDeps {
   detectDirection: (candles: Candle[]) => unknown;
   detectEntry: (dailyCandles: Candle[], m15Candles: Candle[], m5Candles: Candle[]) => unknown;
   sizePosition: (signal: unknown) => unknown;
-  manageExit: (position: unknown, candle: Candle) => unknown;
+  manageExit: (position: unknown, direction: "UP" | "DOWN", candle: Candle) => unknown;
 }
 
 export function createOrchestrator(deps: OrchestratorDeps) {
