@@ -1,9 +1,16 @@
 import type { Candle } from "./types.js";
+import type { ClosedTrade } from "../risk/dailyThrottle.js";
 
 export interface OrchestratorDeps {
   detectRegime: (candles: Candle[]) => unknown;
   detectDirection: (candles: Candle[]) => unknown;
-  detectEntry: (dailyCandles: Candle[], m15Candles: Candle[], m5Candles: Candle[]) => unknown;
+  detectEntry: (
+    dailyCandles: Candle[],
+    m15Candles: Candle[],
+    m5Candles: Candle[],
+    closedTrades: ClosedTrade[],
+    startOfDayEquity: number,
+  ) => unknown;
   sizePosition: (signal: unknown) => unknown;
   manageExit: (position: unknown, direction: "UP" | "DOWN", candle: Candle) => unknown;
 }

@@ -5,6 +5,7 @@ import { detectDirectionBias } from "../direction/directionFilter.js";
 import { buildInitialRegistry, type Zone } from "./zoneRegistry.js";
 import { computeConfluenceScore } from "./confluenceScore.js";
 import { detectSwingPoints } from "./liquidity.js";
+import { isDailyThrottled, isEntryAllowedGivenThrottle, type ClosedTrade } from "../risk/dailyThrottle.js";
 
 export interface EntrySetup {
   zone: Zone;
@@ -42,7 +43,13 @@ function findM5Confirmation(m5Candles: Candle[], zone: Zone, direction: "UP" | "
   return null;
 }
 
-export function detectEntry(dailyCandles: Candle[], m15Candles: Candle[], m5Candles: Candle[]): EntrySetup | null {
+export function detectEntry(
+  dailyCandles: Candle[],
+  m15Candles: Candle[],
+  m5Candles: Candle[],
+  closedTrades: ClosedTrade[],
+  startOfDayEquity: number,
+): EntrySetup | null {
   const bias = detectDirectionBias(dailyCandles);
   if (bias === "NONE") return null;
 
@@ -53,6 +60,12 @@ export function detectEntry(dailyCandles: Candle[], m15Candles: Candle[], m5Cand
 
   const confirmedAtIndex = findM5Confirmation(m5Candles, zone, bias);
   if (confirmedAtIndex === null) return null;
+
+  // Only check the throttle right before confirming an entry — not earlier, since
+  // confluenceScore only matters for comparison once this is known to be a real setup.
+  const now = m5Candles[confirmedAtIndex].closeTime;
+  const throttled = isDailyThrottled(closedTrades, startOfDayEquity, now);
+  if (!isEntryAllowedGivenThrottle(computeConfluenceScore(zone), throttled)) return null;
 
   return { zone, direction: bias, confirmedAtIndex };
 }
