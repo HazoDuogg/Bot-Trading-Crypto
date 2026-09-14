@@ -13,9 +13,24 @@ export interface EntrySetup {
   confirmedAtIndex: number; // index into m5Candles of the structure-break candle
 }
 
-/** Highest confluenceScore among live (VALID/TESTED) zones matching bias direction; ties go to the most recent zone. */
-function pickBestZone(registry: Zone[], wantType: "demand" | "supply"): Zone | null {
-  const candidates = registry.filter((z) => (z.state === "VALID" || z.state === "TESTED") && z.type === wantType);
+// TICKET-13X-A — rough stand-in for a real H1/M30 "today's trading range" (video 1), not derived from those timeframes.
+export const MAX_ZONE_DISTANCE_ATR_MULT = 10;
+
+/** Distance from currentPrice to the zone's nearest edge; 0 if price is already inside [low, high]. */
+function distanceToZone(currentPrice: number, zone: Zone): number {
+  if (currentPrice > zone.high) return currentPrice - zone.high;
+  if (currentPrice < zone.low) return zone.low - currentPrice;
+  return 0;
+}
+
+/** Highest confluenceScore among live (VALID/TESTED), in-range zones matching bias direction; ties go to the most recent zone. */
+function pickBestZone(registry: Zone[], wantType: "demand" | "supply", currentPrice: number, atrAtNow: number): Zone | null {
+  const candidates = registry.filter(
+    (z) =>
+      (z.state === "VALID" || z.state === "TESTED") &&
+      z.type === wantType &&
+      distanceToZone(currentPrice, z) <= MAX_ZONE_DISTANCE_ATR_MULT * atrAtNow,
+  );
   if (candidates.length === 0) return null;
   return candidates.reduce((best, z) => {
     const score = computeConfluenceScore(z);
@@ -55,7 +70,9 @@ export function detectEntry(
 
   const { atr: atr15 } = computeAdxDi(m15Candles);
   const registry = buildInitialRegistry(m15Candles, atr15);
-  const zone = pickBestZone(registry, bias === "UP" ? "demand" : "supply");
+  const currentPrice = m15Candles[m15Candles.length - 1].close;
+  const atrAtNow = atr15[atr15.length - 1];
+  const zone = pickBestZone(registry, bias === "UP" ? "demand" : "supply", currentPrice, atrAtNow);
   if (!zone) return null;
 
   const confirmedAtIndex = findM5Confirmation(m5Candles, zone, bias);

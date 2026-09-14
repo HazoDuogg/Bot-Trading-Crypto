@@ -75,6 +75,57 @@ function m15WithScore2DemandZone(): Candle[] {
   return candles;
 }
 
+// Segment shared by the TICKET-13X-A cases: a score-2 demand zone F at [97,103] (confirmed at index 22),
+// then a slow ramp + settle that carries price far away and lets ATR shrink back down.
+function farZoneSegment(): Candle[] {
+  const candles = m15WithScore2DemandZone();
+  let price = candles[candles.length - 1].close; // 140
+  for (let i = 0; i < 80; i++) {
+    const close = price + 2;
+    candles.push(mk(M15_MS, candles.length, price, close + 0.5, price - 0.5, close));
+    price = close;
+  }
+  for (let i = 0; i < 30; i++) {
+    candles.push(mk(M15_MS, candles.length, price, price + 1, price - 1, price));
+  }
+  return candles;
+}
+
+// TICKET-13X-A case 1: only the far zone F exists -> too far from current price (>10x ATR15), must be filtered out.
+function m15WithOnlyFarZone(): Candle[] {
+  return farZoneSegment();
+}
+
+// TICKET-13X-A case 2: same far zone F, plus a fresh plain (score 0) zone N right near current price.
+function m15WithFarAndNearZone(): Candle[] {
+  const candles = farZoneSegment();
+  const price = candles[candles.length - 1].close; // 300
+  candles.push(mk(M15_MS, candles.length, price, price + 1, price - 1, price)); // base
+  candles.push(mk(M15_MS, candles.length, price, price + 35, price, price + 30)); // displacement -> zone N [299,301]
+  return candles;
+}
+
+// M5 retest of zone N [299,301]: swing high (460) at index 2, price drops to retest at index 11, then rallies back up.
+function m5UpToNearZone(lastIndex: number): Candle[] {
+  const all = [
+    mk(M5_MS, 0, 450, 452, 449, 451),
+    mk(M5_MS, 1, 451, 456, 450, 455),
+    mk(M5_MS, 2, 455, 460, 454, 458), // swing high, price 460
+    mk(M5_MS, 3, 456, 457, 452, 453),
+    mk(M5_MS, 4, 453, 454, 440, 442),
+    mk(M5_MS, 5, 442, 443, 420, 422),
+    mk(M5_MS, 6, 422, 423, 400, 401),
+    mk(M5_MS, 7, 401, 402, 380, 381),
+    mk(M5_MS, 8, 381, 382, 360, 361),
+    mk(M5_MS, 9, 361, 362, 340, 341),
+    mk(M5_MS, 10, 341, 342, 320, 321),
+    mk(M5_MS, 11, 321, 322, 300, 301), // touches zone [299,301]
+    mk(M5_MS, 12, 301, 340, 300, 335), // rallying but close still < 460
+    mk(M5_MS, 13, 335, 465, 334, 462), // closes above the 460 structure level
+  ];
+  return all.slice(0, lastIndex + 1);
+}
+
 // M5: swing high (160) at index 2, price drops to retest the [99,101] zone at index 6, then rallies back up.
 function m5UpTo(lastIndex: number): Candle[] {
   const all = [
@@ -141,6 +192,20 @@ const throttlingTrades: ClosedTrade[] = [{ closeTime: now, realizedPnl: 0.05 * e
 {
   const result = detectEntry(strongUptrendD1(40), m15WithScore2DemandZone(), m5Confirmed, throttlingTrades, equity);
   check("throttled + score=2 -> still allowed", result !== null, true);
+}
+
+// TICKET-13X-A: zone-distance cap.
+
+// 7. Only a far zone (>10x ATR15 away) exists, still VALID -> filtered out, no entry.
+{
+  const result = detectEntry(strongUptrendD1(40), m15WithOnlyFarZone(), m5UpToNearZone(13), [], equity);
+  check("only far zone -> filtered out, no entry", result, null);
+}
+
+// 8. Near zone (lower score) beats the far zone (higher score) once the far one is filtered -> near zone chosen.
+{
+  const result = detectEntry(strongUptrendD1(40), m15WithFarAndNearZone(), m5UpToNearZone(13), [], equity);
+  check("near zone (in range) chosen over far zone (out of range)", result?.zone.low, 299);
 }
 
 if (failures > 0) {
