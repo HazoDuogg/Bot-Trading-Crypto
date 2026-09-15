@@ -20,6 +20,10 @@ export interface EntrySetup {
 // TICKET-13X-A — rough stand-in for a real H1/M30 "today's trading range" (video 1), not derived from those timeframes.
 export const MAX_ZONE_DISTANCE_ATR_MULT = 10;
 
+// TICKET-19X-A — one-shot experiment: real backtest showed DOWN, score<2 trades lose (PF 0.819)
+// while DOWN, score=2 trades are on par with UP (PF 1.234). UP stays unfiltered.
+export const MIN_CONFLUENCE_SCORE_DOWN = 1;
+
 /** Distance from currentPrice to the zone's nearest edge; 0 if price is already inside [low, high]. */
 function distanceToZone(currentPrice: number, zone: Zone): number {
   if (currentPrice > zone.high) return currentPrice - zone.high;
@@ -28,12 +32,14 @@ function distanceToZone(currentPrice: number, zone: Zone): number {
 }
 
 /** Highest confluenceScore among live (VALID/TESTED), in-range zones matching bias direction; ties go to the most recent zone. */
-function pickBestZone(registry: Zone[], wantType: "demand" | "supply", currentPrice: number, atrAtNow: number): Zone | null {
+function pickBestZone(registry: Zone[], bias: "UP" | "DOWN", currentPrice: number, atrAtNow: number): Zone | null {
+  const wantType = bias === "UP" ? "demand" : "supply";
   const candidates = registry.filter(
     (z) =>
       (z.state === "VALID" || z.state === "TESTED") &&
       z.type === wantType &&
-      distanceToZone(currentPrice, z) <= MAX_ZONE_DISTANCE_ATR_MULT * atrAtNow,
+      distanceToZone(currentPrice, z) <= MAX_ZONE_DISTANCE_ATR_MULT * atrAtNow &&
+      (bias === "UP" || computeConfluenceScore(z) >= MIN_CONFLUENCE_SCORE_DOWN),
   );
   if (candidates.length === 0) return null;
   return candidates.reduce((best, z) => {
@@ -75,7 +81,7 @@ export function detectEntry(
   if (bias === "NONE") return null;
 
   const atrAtNow = atr15[atr15.length - 1];
-  const zone = pickBestZone(registry, bias === "UP" ? "demand" : "supply", currentPrice, atrAtNow);
+  const zone = pickBestZone(registry, bias, currentPrice, atrAtNow);
   if (!zone) return null;
 
   const confirmedAtIndex = findM5Confirmation(m5Candles, zone, bias);

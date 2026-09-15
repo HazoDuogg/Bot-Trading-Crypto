@@ -41,6 +41,17 @@ function strongUptrendD1(n: number): Candle[] {
   }
   return candles;
 }
+// Mirror of strongUptrendD1 -> bias DOWN.
+function strongDowntrendD1(n: number): Candle[] {
+  const candles: Candle[] = [];
+  let price = 200;
+  for (let i = 0; i < n; i++) {
+    const close = price - 2;
+    candles.push(mk(D1_MS, i, price, price + 0.5, close - 0.5, close));
+    price = close;
+  }
+  return candles;
+}
 function flatSidewayD1(n: number): Candle[] {
   const candles: Candle[] = [];
   let price = 100;
@@ -59,6 +70,16 @@ function m15WithDemandZone(): Candle[] {
   for (let i = 0; i < 20; i++) candles.push(mk(M15_MS, i, price, price + 1, price - 1, price));
   candles.push(mk(M15_MS, 20, 100, 101, 99, 100));
   candles.push(mk(M15_MS, 21, 100, 135, 100, 130));
+  return candles;
+}
+
+// M15 base+displacement down: 20 flat candles then a base and a big down displacement -> one supply zone [199,201], score 0.
+function m15WithSupplyZone(): Candle[] {
+  const candles: Candle[] = [];
+  let price = 200;
+  for (let i = 0; i < 20; i++) candles.push(mk(M15_MS, i, price, price + 1, price - 1, price));
+  candles.push(mk(M15_MS, 20, 200, 201, 199, 200));
+  candles.push(mk(M15_MS, 21, 200, 201, 165, 170));
   return candles;
 }
 
@@ -159,6 +180,23 @@ function m5UpTo(lastIndex: number): Candle[] {
   return all.slice(0, lastIndex + 1);
 }
 
+// Mirror of m5UpTo around x'=300-x (and H/L swapped) -> touches supply zone [199,201] at index 6,
+// swing low at index 2 (price 140), closes below it at index 8 -> confirms DOWN.
+function m5DownTo(lastIndex: number): Candle[] {
+  const all = [
+    mk(M5_MS, 0, 150, 151, 148, 149),
+    mk(M5_MS, 1, 149, 150, 144, 145),
+    mk(M5_MS, 2, 145, 146, 140, 142), // swing low, price 140
+    mk(M5_MS, 3, 144, 148, 143, 147),
+    mk(M5_MS, 4, 147, 160, 146, 158),
+    mk(M5_MS, 5, 158, 180, 157, 178),
+    mk(M5_MS, 6, 178, 200, 177, 199), // touches zone [199,201]
+    mk(M5_MS, 7, 199, 200, 160, 165), // dropping but close still > 140
+    mk(M5_MS, 8, 165, 166, 135, 138), // closes below the 140 structure level
+  ];
+  return all.slice(0, lastIndex + 1);
+}
+
 let failures = 0;
 function check(name: string, actual: unknown, expected: unknown) {
   const pass = JSON.stringify(actual) === JSON.stringify(expected);
@@ -223,6 +261,20 @@ const throttlingTrades: ClosedTrade[] = [{ closeTime: now, realizedPnl: 0.05 * e
 {
   const result = detectEntryFromM15(strongUptrendD1(40), m15WithFarAndNearZone(), m5UpToNearZone(13), [], equity);
   check("near zone (in range) chosen over far zone (out of range)", result?.zone.low, 299);
+}
+
+// TICKET-19X-A: DOWN needs confluenceScore >= MIN_CONFLUENCE_SCORE_DOWN, UP is unfiltered.
+
+// 9. DOWN + score-0 supply zone (would have been picked before this ticket) -> now excluded, no entry.
+{
+  const result = detectEntryFromM15(strongDowntrendD1(40), m15WithSupplyZone(), m5DownTo(8), [], equity);
+  check("DOWN + score-0 zone -> excluded, no entry", result, null);
+}
+
+// 10. UP + score-0 demand zone -> still picked as before (UP branch unaffected).
+{
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), m5UpTo(8), [], equity);
+  check("UP + score-0 zone -> still picked, entry unaffected", result !== null, true);
 }
 
 if (failures > 0) {
