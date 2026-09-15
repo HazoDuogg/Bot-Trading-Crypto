@@ -5,6 +5,23 @@
 import type { Candle } from "../../src/core/types.js";
 import { detectEntry } from "../../src/entry/entryRouter.js";
 import type { ClosedTrade } from "../../src/risk/dailyThrottle.js";
+import { computeAdxDi } from "../../src/regime/adxDiCompare.js";
+import { buildInitialRegistry } from "../../src/entry/zoneRegistry.js";
+
+// TICKET-15X-A: detectEntry now takes a pre-built registry/atr15/currentPrice instead of raw m15Candles.
+// This reproduces exactly what it used to do internally, once, at the top of each test.
+function detectEntryFromM15(
+  dailyCandles: Candle[],
+  m15Candles: Candle[],
+  m5Candles: Candle[],
+  closedTrades: ClosedTrade[],
+  startOfDayEquity: number,
+) {
+  const { atr: atr15 } = computeAdxDi(m15Candles);
+  const registry = buildInitialRegistry(m15Candles, atr15);
+  const currentPrice = m15Candles[m15Candles.length - 1].close;
+  return detectEntry(dailyCandles, registry, atr15, currentPrice, m5Candles, closedTrades, startOfDayEquity);
+}
 
 function mk(barMs: number, i: number, open: number, high: number, low: number, close: number): Candle {
   return { openTime: i * barMs, closeTime: i * barMs + barMs - 1, open, high, low, close, volume: 1 };
@@ -151,7 +168,7 @@ function check(name: string, actual: unknown, expected: unknown) {
 
 // 1. Clear UP bias + valid demand zone + M5 already confirmed -> entry.
 {
-  const result = detectEntry(strongUptrendD1(40), m15WithDemandZone(), m5UpTo(8), [], 10_000);
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), m5UpTo(8), [], 10_000);
   check("bias + zone + M5 confirmed -> entry", result && { direction: result.direction, confirmedAtIndex: result.confirmedAtIndex }, {
     direction: "UP",
     confirmedAtIndex: 8,
@@ -160,13 +177,13 @@ function check(name: string, actual: unknown, expected: unknown) {
 
 // 2. Clear UP bias + valid demand zone, but M5 hasn't broken structure yet -> no entry.
 {
-  const result = detectEntry(strongUptrendD1(40), m15WithDemandZone(), m5UpTo(7), [], 10_000);
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), m5UpTo(7), [], 10_000);
   check("bias + zone, M5 not confirmed -> no entry", result, null);
 }
 
 // 3. Bias NONE -> no entry even with the same otherwise-good zone and confirmed M5.
 {
-  const result = detectEntry(flatSidewayD1(40), m15WithDemandZone(), m5UpTo(8), [], 10_000);
+  const result = detectEntryFromM15(flatSidewayD1(40), m15WithDemandZone(), m5UpTo(8), [], 10_000);
   check("bias NONE -> no entry", result, null);
 }
 
@@ -178,19 +195,19 @@ const throttlingTrades: ClosedTrade[] = [{ closeTime: now, realizedPnl: 0.05 * e
 
 // 4. Good setup, under the 5%/day threshold -> entry unaffected.
 {
-  const result = detectEntry(strongUptrendD1(40), m15WithDemandZone(), m5Confirmed, [], equity);
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), m5Confirmed, [], equity);
   check("under 5%/day -> entry unaffected", result !== null, true);
 }
 
 // 5. Good setup but low-score zone (<2), throttled -> blocked.
 {
-  const result = detectEntry(strongUptrendD1(40), m15WithDemandZone(), m5Confirmed, throttlingTrades, equity);
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), m5Confirmed, throttlingTrades, equity);
   check("throttled + low score -> blocked", result, null);
 }
 
 // 6. Same throttle, but max-score zone (=2) -> still allowed through.
 {
-  const result = detectEntry(strongUptrendD1(40), m15WithScore2DemandZone(), m5Confirmed, throttlingTrades, equity);
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithScore2DemandZone(), m5Confirmed, throttlingTrades, equity);
   check("throttled + score=2 -> still allowed", result !== null, true);
 }
 
@@ -198,13 +215,13 @@ const throttlingTrades: ClosedTrade[] = [{ closeTime: now, realizedPnl: 0.05 * e
 
 // 7. Only a far zone (>10x ATR15 away) exists, still VALID -> filtered out, no entry.
 {
-  const result = detectEntry(strongUptrendD1(40), m15WithOnlyFarZone(), m5UpToNearZone(13), [], equity);
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithOnlyFarZone(), m5UpToNearZone(13), [], equity);
   check("only far zone -> filtered out, no entry", result, null);
 }
 
 // 8. Near zone (lower score) beats the far zone (higher score) once the far one is filtered -> near zone chosen.
 {
-  const result = detectEntry(strongUptrendD1(40), m15WithFarAndNearZone(), m5UpToNearZone(13), [], equity);
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithFarAndNearZone(), m5UpToNearZone(13), [], equity);
   check("near zone (in range) chosen over far zone (out of range)", result?.zone.low, 299);
 }
 

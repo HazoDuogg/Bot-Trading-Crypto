@@ -64,13 +64,15 @@ function confirmationM5(dayOffsetSteps: number): Candle[] {
 const orchestrator = createOrchestrator(10_000);
 
 // --- Trade 1, day 0 ---
+// TICKET-15X-A: onCandle's 2nd arg is now only the NEWLY-closed M15 candles — ingest the whole
+// snapshot once, on the first call, then pass [] since m15Candles doesn't change for the rest of this test.
 const trade1M5 = confirmationM5(0);
 for (let k = 1; k < 9; k++) {
-  const result = orchestrator.onCandle(dailyCandles, m15Candles, trade1M5.slice(0, k));
+  const result = orchestrator.onCandle(dailyCandles, k === 1 ? m15Candles : [], trade1M5.slice(0, k));
   check(`no setup yet at M5 step ${k}`, result.action, "NONE");
 }
 {
-  const result = orchestrator.onCandle(dailyCandles, m15Candles, trade1M5.slice(0, 9));
+  const result = orchestrator.onCandle(dailyCandles, [], trade1M5.slice(0, 9));
   check("setup confirmed -> entry opened", result.action, "ENTRY_OPENED");
 }
 
@@ -82,7 +84,7 @@ check("take profit = nearTarget edge (219)", order1.takeProfit, 219);
 
 // Price runs straight to TP (219) without touching SL first.
 const tpCandle = mk(M5_MS, 9, 162, 225, 160, 220);
-const closeResult = orchestrator.onCandle(dailyCandles, m15Candles, [...trade1M5, tpCandle]);
+const closeResult = orchestrator.onCandle(dailyCandles, [], [...trade1M5, tpCandle]);
 check("price runs to TP -> order closed", closeResult.action, "ORDER_CLOSED");
 
 const afterClose = orchestrator.getState();
@@ -94,9 +96,9 @@ check("equity updated by the realized PnL", afterClose.equity, 10_000 + expected
 // --- Trade 2, day 1: same recipe, day-shifted M5 timestamps -> a fresh entry with the updated equity. ---
 const trade2M5 = confirmationM5(DAY_IN_M5_STEPS);
 for (let k = 1; k < 9; k++) {
-  orchestrator.onCandle(dailyCandles, m15Candles, trade2M5.slice(0, k));
+  orchestrator.onCandle(dailyCandles, [], trade2M5.slice(0, k));
 }
-const trade2Result = orchestrator.onCandle(dailyCandles, m15Candles, trade2M5.slice(0, 9));
+const trade2Result = orchestrator.onCandle(dailyCandles, [], trade2M5.slice(0, 9));
 check("day 1: fresh entry opens", trade2Result.action, "ENTRY_OPENED");
 
 const afterTrade2Entry = orchestrator.getState();
@@ -106,6 +108,55 @@ check("day 1 order sized off the updated equity (bigger than trade 1's)", order2
 // The exact startOfDayEquity trade 2 should have seen: initial balance + trade 1's realized PnL (closed the day before).
 const expectedStartOfDayEquity2 = equityAtStartOfDay(10_000, afterClose.closedTrades, trade2M5[8].closeTime);
 check("startOfDayEquity for day 1 includes trade 1's PnL", expectedStartOfDayEquity2, 10_000 + expectedPnl1);
+
+// --- TICKET-15X-A perf check: a few thousand M15 candles fed one at a time (as a backtest would),
+// confirming per-candle cost stays roughly flat instead of growing with total history length. ---
+{
+  const PERF_CANDLES = 4000;
+  const BATCH = 1000;
+
+  // Deterministic pseudo-random walk with occasional bigger moves — realistic zone density, not adversarial.
+  function mulberry32(seed: number) {
+    let a = seed;
+    return () => {
+      a |= 0;
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const rand = mulberry32(0x515151);
+  const perfM15: Candle[] = [];
+  let price = 1000;
+  for (let i = 0; i < PERF_CANDLES; i++) {
+    const spike = rand() < 0.03; // occasional bigger candle, so some zones actually form
+    const move = (rand() - 0.5) * (spike ? 40 : 4);
+    const close = price + move;
+    const high = Math.max(price, close) + rand() * (spike ? 10 : 1);
+    const low = Math.min(price, close) - rand() * (spike ? 10 : 1);
+    perfM15.push(mk(M15_MS, i, price, high, low, close));
+    price = close;
+  }
+  const trivialM5 = [mk(M5_MS, 0, price, price + 0.1, price - 0.1, price)];
+
+  const perfOrchestrator = createOrchestrator(10_000);
+  const batchTimes: number[] = [];
+  for (let start = 0; start < PERF_CANDLES; start += BATCH) {
+    const t0 = performance.now();
+    for (let i = start; i < start + BATCH; i++) {
+      perfOrchestrator.onCandle(dailyCandles, [perfM15[i]], trivialM5);
+    }
+    batchTimes.push(performance.now() - t0);
+  }
+
+  console.log(`\nperf: ${PERF_CANDLES} M15 candles, ${BATCH}-candle batch times (ms): ${batchTimes.map((t) => t.toFixed(1)).join(", ")}`);
+  const firstBatch = batchTimes[0];
+  const lastBatch = batchTimes[batchTimes.length - 1];
+  const ratio = lastBatch / Math.max(firstBatch, 1); // avoid divide-by-near-zero on a very fast first batch
+  console.log(`registry size at end: ${perfOrchestrator.getState().m15CandleCount} candles processed, last/first batch ratio: ${ratio.toFixed(2)}x`);
+  check("last batch isn't drastically slower than the first (roughly linear, not quadratic)", ratio < 5, true);
+}
 
 if (failures > 0) {
   console.log(`\n${failures} check(s) FAILED`);

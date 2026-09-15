@@ -1,8 +1,12 @@
-/** TICKET-07X-B v1 — structure confirmation only, no pre-limit (that's a later ticket). */
+/**
+ * TICKET-07X-B v1 — structure confirmation only, no pre-limit (that's a later ticket).
+ * TICKET-15X-A — takes a pre-built registry/atr15 instead of rebuilding one from
+ * raw M15 candles, so a caller maintaining its own registry (orchestrator.ts,
+ * via advanceRegistry) isn't forced to pay for a full rescan on every call.
+ */
 import type { Candle } from "../core/types.js";
-import { computeAdxDi } from "../regime/adxDiCompare.js";
 import { detectDirectionBias } from "../direction/directionFilter.js";
-import { buildInitialRegistry, type Zone } from "./zoneRegistry.js";
+import type { Zone } from "./zoneRegistry.js";
 import { computeConfluenceScore } from "./confluenceScore.js";
 import { detectSwingPoints } from "./liquidity.js";
 import { isDailyThrottled, isEntryAllowedGivenThrottle, type ClosedTrade } from "../risk/dailyThrottle.js";
@@ -60,7 +64,9 @@ function findM5Confirmation(m5Candles: Candle[], zone: Zone, direction: "UP" | "
 
 export function detectEntry(
   dailyCandles: Candle[],
-  m15Candles: Candle[],
+  registry: Zone[],
+  atr15: number[],
+  currentPrice: number,
   m5Candles: Candle[],
   closedTrades: ClosedTrade[],
   startOfDayEquity: number,
@@ -68,9 +74,6 @@ export function detectEntry(
   const bias = detectDirectionBias(dailyCandles);
   if (bias === "NONE") return null;
 
-  const { atr: atr15 } = computeAdxDi(m15Candles);
-  const registry = buildInitialRegistry(m15Candles, atr15);
-  const currentPrice = m15Candles[m15Candles.length - 1].close;
   const atrAtNow = atr15[atr15.length - 1];
   const zone = pickBestZone(registry, bias === "UP" ? "demand" : "supply", currentPrice, atrAtNow);
   if (!zone) return null;
