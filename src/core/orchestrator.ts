@@ -4,6 +4,11 @@
  * via advanceRegistry as new M15 candles arrive, instead of rebuilt from scratch
  * on every call. detectEntry/checkExit/computeOrderSizes are unchanged as the
  * verified core; only how the registry/atr15 reach detectEntry changed.
+ * TICKET-16X-B — M5 history is now a bounded rolling window (M5_WINDOW_SIZE)
+ * instead of an unboundedly growing array, so a very long backtest doesn't
+ * make every onCandle call scan a bigger and bigger M5 array. Trade-off: a
+ * retest that happens more than M5_WINDOW_SIZE candles after its zone formed
+ * falls outside the window and gets missed — acceptable per the ticket.
  */
 import type { Candle } from "./types.js";
 import { detectEntry } from "../entry/entryRouter.js";
@@ -15,6 +20,10 @@ import { calculateTR } from "../regime/adxDiCompare.js";
 import { startOfUtcDay, type ClosedTrade } from "../risk/dailyThrottle.js";
 
 const ATR_PERIOD = 14; // matches computeAdxDi's default period — kept in lockstep for numeric parity
+
+// ~10.4 days of M5 — working default, not yet verified. Revisit if a backtest shows setups
+// missed because a real retest took longer than this to arrive.
+export const M5_WINDOW_SIZE = 3000;
 
 export interface OpenOrder extends OrderSize {
   closed: boolean;
@@ -30,6 +39,7 @@ export interface OrchestratorState {
   closedTrades: ClosedTrade[];
   equity: number;
   m15CandleCount: number;
+  m5WindowCount: number;
 }
 
 export type OnCandleResult = { action: "NONE" | "ORDER_CLOSED" | "ENTRY_OPENED" };
@@ -69,6 +79,7 @@ export function createOrchestrator(initialEquity: number) {
   const atr15: number[] = [];
   const trSum = { sum: 0, count: 0 };
   let registry: Zone[] = [];
+  const m5History: Candle[] = []; // rolling window, capped at M5_WINDOW_SIZE
 
   function currentEquity(): number {
     return closedTrades.reduce((sum, t) => sum + t.realizedPnl, initialEquity);
@@ -83,19 +94,32 @@ export function createOrchestrator(initialEquity: number) {
     }
   }
 
+  function ingestM5(newM5Candles: Candle[]): void {
+    for (const candle of newM5Candles) m5History.push(candle);
+    if (m5History.length > M5_WINDOW_SIZE) m5History.splice(0, m5History.length - M5_WINDOW_SIZE);
+  }
+
   return {
     getState(): OrchestratorState {
-      return { openPosition, closedTrades: [...closedTrades], equity: currentEquity(), m15CandleCount: m15History.length };
+      return {
+        openPosition,
+        closedTrades: [...closedTrades],
+        equity: currentEquity(),
+        m15CandleCount: m15History.length,
+        m5WindowCount: m5History.length,
+      };
     },
 
     /**
-     * One call per newly-closed M5 candle. `newM15Candles` carries any M15 candle(s) that
-     * just closed alongside it (usually empty — only non-empty on the M15-closing tick).
+     * One call per newly-closed M5 candle. `newM15Candles`/`newM5Candles` carry only the
+     * candle(s) that just closed (M15 usually empty — only non-empty on the M15-closing tick).
      * Exactly one of manage-open-position / look-for-entry runs, per TICKET-14X-A's design.
      */
-    onCandle(dailyCandles: Candle[], newM15Candles: Candle[], m5Candles: Candle[]): OnCandleResult {
+    onCandle(dailyCandles: Candle[], newM15Candles: Candle[], newM5Candles: Candle[]): OnCandleResult {
       ingestM15(newM15Candles);
-      const latestM5 = m5Candles[m5Candles.length - 1];
+      ingestM5(newM5Candles);
+      if (m5History.length === 0) return { action: "NONE" };
+      const latestM5 = m5History[m5History.length - 1];
 
       if (openPosition) {
         let anyClosed = false;
@@ -115,7 +139,7 @@ export function createOrchestrator(initialEquity: number) {
 
       const startOfDayEquity = equityAtStartOfDay(initialEquity, closedTrades, latestM5.closeTime);
       const currentPrice = m15History[m15History.length - 1].close;
-      const setup = detectEntry(dailyCandles, registry, atr15, currentPrice, m5Candles, closedTrades, startOfDayEquity);
+      const setup = detectEntry(dailyCandles, registry, atr15, currentPrice, m5History, closedTrades, startOfDayEquity);
       if (!setup) return { action: "NONE" };
 
       const atrAtEntry = atr15[atr15.length - 1];
