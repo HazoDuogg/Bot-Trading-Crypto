@@ -10,6 +10,7 @@ import { createOrchestrator, type TradeRecord } from "../src/core/orchestrator.j
 import { detectRegime, MIN_CANDLES } from "../src/regime/regimeDetector.js";
 
 const DAILY_PATH = resolve("data/ohlcv-BTCUSDT-1d.json");
+const H1_PATH = resolve("data/ohlcv-BTCUSDT-1h.json");
 const M15_PATH = resolve("data/ohlcv-BTCUSDT-15m.json");
 const M5_PATH = resolve("data/ohlcv-BTCUSDT-5m.json");
 const REPORT_PATH = resolve("data/backtest-report.json");
@@ -21,12 +22,14 @@ function loadJson<T>(path: string): T {
 }
 
 function runBacktest(dailyAll: Candle[]) {
+  const h1All = loadJson<Candle[]>(H1_PATH);
   const m15All = loadJson<Candle[]>(M15_PATH);
   const m5All = loadJson<Candle[]>(M5_PATH);
 
   const orchestrator = createOrchestrator(INITIAL_EQUITY);
 
   let d1Index = 0;
+  let h1Index = 0;
   let m15Index = 0;
   let cachedDaily: Candle[] = [];
   let lastD1Index = -1;
@@ -42,13 +45,19 @@ function runBacktest(dailyAll: Candle[]) {
       lastD1Index = d1Index;
     }
 
+    const newH1: Candle[] = [];
+    while (h1Index < h1All.length && h1All[h1Index].closeTime <= now) {
+      newH1.push(h1All[h1Index]);
+      h1Index++;
+    }
+
     const newM15: Candle[] = [];
     while (m15Index < m15All.length && m15All[m15Index].closeTime <= now) {
       newM15.push(m15All[m15Index]);
       m15Index++;
     }
 
-    orchestrator.onCandle(cachedDaily, newM15, [m5Candle]);
+    orchestrator.onCandle(cachedDaily, newH1, newM15, [m5Candle]);
 
     if (i % 50_000 === 0) {
       console.log(`progress: ${i}/${m5All.length} M5 candles, ${((Date.now() - startedAt) / 1000).toFixed(1)}s elapsed`);

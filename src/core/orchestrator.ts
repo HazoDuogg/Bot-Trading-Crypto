@@ -13,6 +13,9 @@
  * "directionCorrect" at 15/30/60 M5 candles after entry — tracked completely
  * independently of checkExit/SL/TP (same horizons as TICKET-04X-AA, converted
  * from M15 to M5 units), to separate "bias was right" from "trade actually won".
+ * TICKET-21X-A — H1 history tracked the same shape as M15 (grows, no window),
+ * but with no registry/ATR of its own — detectSwingPoints (via detectEntry's
+ * own computeH1TradingRange call) is cheap enough not to need one.
  */
 import type { Candle } from "./types.js";
 import { detectEntry } from "../entry/entryRouter.js";
@@ -65,6 +68,7 @@ export interface OrchestratorState {
   tradeLog: TradeRecord[];
   equity: number;
   m15CandleCount: number;
+  h1CandleCount: number;
   m5WindowCount: number;
 }
 
@@ -108,6 +112,7 @@ export function createOrchestrator(initialEquity: number) {
   const atr15: number[] = [];
   const trSum = { sum: 0, count: 0 };
   let registry: Zone[] = [];
+  const h1History: Candle[] = []; // grows unbounded, same as m15History — no registry/ATR needed for it
   const m5History: Candle[] = []; // rolling window, capped at M5_WINDOW_SIZE
 
   function currentEquity(): number {
@@ -121,6 +126,10 @@ export function createOrchestrator(initialEquity: number) {
       extendAtr(atr15, trSum, prevCandle, candle);
       registry = advanceRegistry(registry, m15History, atr15, m15History.length - 1);
     }
+  }
+
+  function ingestH1(newH1Candles: Candle[]): void {
+    for (const candle of newH1Candles) h1History.push(candle);
   }
 
   function ingestM5(newM5Candles: Candle[]): void {
@@ -152,16 +161,18 @@ export function createOrchestrator(initialEquity: number) {
         tradeLog: [...tradeLog],
         equity: currentEquity(),
         m15CandleCount: m15History.length,
+        h1CandleCount: h1History.length,
         m5WindowCount: m5History.length,
       };
     },
 
     /**
-     * One call per newly-closed M5 candle. `newM15Candles`/`newM5Candles` carry only the
-     * candle(s) that just closed (M15 usually empty — only non-empty on the M15-closing tick).
+     * One call per newly-closed M5 candle. `newH1Candles`/`newM15Candles`/`newM5Candles` carry only
+     * the candle(s) that just closed (H1/M15 usually empty — only non-empty on their own closing tick).
      * Exactly one of manage-open-position / look-for-entry runs, per TICKET-14X-A's design.
      */
-    onCandle(dailyCandles: Candle[], newM15Candles: Candle[], newM5Candles: Candle[]): OnCandleResult {
+    onCandle(dailyCandles: Candle[], newH1Candles: Candle[], newM15Candles: Candle[], newM5Candles: Candle[]): OnCandleResult {
+      ingestH1(newH1Candles);
       ingestM15(newM15Candles);
       ingestM5(newM5Candles);
       if (m5History.length === 0) return { action: "NONE" };
@@ -190,8 +201,7 @@ export function createOrchestrator(initialEquity: number) {
       if (m15History.length === 0 || dailyCandles.length < MIN_DAILY_CANDLES) return { action: "NONE" };
 
       const startOfDayEquity = equityAtStartOfDay(initialEquity, closedTrades, latestM5.closeTime);
-      const currentPrice = m15History[m15History.length - 1].close;
-      const setup = detectEntry(dailyCandles, registry, atr15, currentPrice, m5History, closedTrades, startOfDayEquity);
+      const setup = detectEntry(dailyCandles, registry, h1History, m5History, closedTrades, startOfDayEquity);
       if (!setup) return { action: "NONE" };
 
       const atrAtEntry = atr15[atr15.length - 1];

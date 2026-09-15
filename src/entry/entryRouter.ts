@@ -1,14 +1,17 @@
 /**
  * TICKET-07X-B v1 — structure confirmation only, no pre-limit (that's a later ticket).
- * TICKET-15X-A — takes a pre-built registry/atr15 instead of rebuilding one from
- * raw M15 candles, so a caller maintaining its own registry (orchestrator.ts,
- * via advanceRegistry) isn't forced to pay for a full rescan on every call.
+ * TICKET-15X-A — takes a pre-built registry instead of rebuilding one from raw
+ * M15 candles, so a caller maintaining its own registry (orchestrator.ts, via
+ * advanceRegistry) isn't forced to pay for a full rescan on every call.
+ * TICKET-21X-A — zone-distance filter replaced by the real H1 trading range
+ * (video 1), so atr15/currentPrice are no longer needed here at all.
  */
 import type { Candle } from "../core/types.js";
 import { detectDirectionBias } from "../direction/directionFilter.js";
 import type { Zone } from "./zoneRegistry.js";
 import { computeConfluenceScore } from "./confluenceScore.js";
 import { detectSwingPoints } from "./liquidity.js";
+import { computeH1TradingRange } from "./tradingRange.js";
 import { isDailyThrottled, isEntryAllowedGivenThrottle, type ClosedTrade } from "../risk/dailyThrottle.js";
 
 export interface EntrySetup {
@@ -17,23 +20,10 @@ export interface EntrySetup {
   confirmedAtIndex: number; // index into m5Candles of the structure-break candle
 }
 
-// TICKET-13X-A — rough stand-in for a real H1/M30 "today's trading range" (video 1), not derived from those timeframes.
-export const MAX_ZONE_DISTANCE_ATR_MULT = 10;
-
-/** Distance from currentPrice to the zone's nearest edge; 0 if price is already inside [low, high]. */
-function distanceToZone(currentPrice: number, zone: Zone): number {
-  if (currentPrice > zone.high) return currentPrice - zone.high;
-  if (currentPrice < zone.low) return zone.low - currentPrice;
-  return 0;
-}
-
-/** Highest confluenceScore among live (VALID/TESTED), in-range zones matching bias direction; ties go to the most recent zone. */
-function pickBestZone(registry: Zone[], wantType: "demand" | "supply", currentPrice: number, atrAtNow: number): Zone | null {
+/** Highest confluenceScore among live (VALID/TESTED) zones matching bias direction, overlapping the H1 trading range; ties go to the most recent zone. */
+function pickBestZone(registry: Zone[], wantType: "demand" | "supply", h1Range: { low: number; high: number }): Zone | null {
   const candidates = registry.filter(
-    (z) =>
-      (z.state === "VALID" || z.state === "TESTED") &&
-      z.type === wantType &&
-      distanceToZone(currentPrice, z) <= MAX_ZONE_DISTANCE_ATR_MULT * atrAtNow,
+    (z) => (z.state === "VALID" || z.state === "TESTED") && z.type === wantType && z.low <= h1Range.high && z.high >= h1Range.low,
   );
   if (candidates.length === 0) return null;
   return candidates.reduce((best, z) => {
@@ -65,8 +55,7 @@ function findM5Confirmation(m5Candles: Candle[], zone: Zone, direction: "UP" | "
 export function detectEntry(
   dailyCandles: Candle[],
   registry: Zone[],
-  atr15: number[],
-  currentPrice: number,
+  h1Candles: Candle[],
   m5Candles: Candle[],
   closedTrades: ClosedTrade[],
   startOfDayEquity: number,
@@ -74,8 +63,10 @@ export function detectEntry(
   const bias = detectDirectionBias(dailyCandles);
   if (bias === "NONE") return null;
 
-  const atrAtNow = atr15[atr15.length - 1];
-  const zone = pickBestZone(registry, bias === "UP" ? "demand" : "supply", currentPrice, atrAtNow);
+  const h1Range = computeH1TradingRange(h1Candles);
+  if (!h1Range) return null;
+
+  const zone = pickBestZone(registry, bias === "UP" ? "demand" : "supply", h1Range);
   if (!zone) return null;
 
   const confirmedAtIndex = findM5Confirmation(m5Candles, zone, bias);

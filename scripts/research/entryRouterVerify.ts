@@ -8,27 +8,41 @@ import type { ClosedTrade } from "../../src/risk/dailyThrottle.js";
 import { computeAdxDi } from "../../src/regime/adxDiCompare.js";
 import { buildInitialRegistry } from "../../src/entry/zoneRegistry.js";
 
-// TICKET-15X-A: detectEntry now takes a pre-built registry/atr15/currentPrice instead of raw m15Candles.
-// This reproduces exactly what it used to do internally, once, at the top of each test.
+// TICKET-15X-A/21X-A: detectEntry now takes a pre-built registry plus raw h1Candles instead of
+// atr15/currentPrice. This reproduces exactly what it used to do internally, once, per test.
 function detectEntryFromM15(
   dailyCandles: Candle[],
   m15Candles: Candle[],
+  h1Candles: Candle[],
   m5Candles: Candle[],
   closedTrades: ClosedTrade[],
   startOfDayEquity: number,
 ) {
   const { atr: atr15 } = computeAdxDi(m15Candles);
   const registry = buildInitialRegistry(m15Candles, atr15);
-  const currentPrice = m15Candles[m15Candles.length - 1].close;
-  return detectEntry(dailyCandles, registry, atr15, currentPrice, m5Candles, closedTrades, startOfDayEquity);
+  return detectEntry(dailyCandles, registry, h1Candles, m5Candles, closedTrades, startOfDayEquity);
 }
 
 function mk(barMs: number, i: number, open: number, high: number, low: number, close: number): Candle {
   return { openTime: i * barMs, closeTime: i * barMs + barMs - 1, open, high, low, close, volume: 1 };
 }
 const D1_MS = 24 * 60 * 60 * 1000;
+const H1_MS = 60 * 60 * 1000;
 const M15_MS = 15 * 60 * 1000;
 const M5_MS = 5 * 60 * 1000;
+
+// TICKET-21X-A: builds an H1 series with exactly 2 clean swing points at `low`/`high` — flat filler
+// candles are byte-identical so they never register as a swing themselves (strict > required).
+function flatH1(i: number, r: number): Candle {
+  return mk(H1_MS, i, r, r + 1, r - 1, r);
+}
+function buildH1Range(low: number, high: number): Candle[] {
+  const r = (low + high) / 2;
+  const lowBlock = [flatH1(0, r), flatH1(1, r), mk(H1_MS, 2, low, r, low, low), flatH1(3, r), flatH1(4, r)];
+  const gap = [flatH1(5, r), flatH1(6, r), flatH1(7, r), flatH1(8, r)];
+  const highBlock = [flatH1(9, r), flatH1(10, r), mk(H1_MS, 11, high, high, r, high), flatH1(12, r), flatH1(13, r)];
+  return [...lowBlock, ...gap, ...highBlock];
+}
 
 // Same D1 uptrend generator technique as TICKET-07X-A's directionFilterVerify.ts.
 function strongUptrendD1(n: number): Candle[] {
@@ -206,7 +220,7 @@ function check(name: string, actual: unknown, expected: unknown) {
 
 // 1. Clear UP bias + valid demand zone + M5 already confirmed -> entry.
 {
-  const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), m5UpTo(8), [], 10_000);
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), buildH1Range(90, 110), m5UpTo(8), [], 10_000);
   check("bias + zone + M5 confirmed -> entry", result && { direction: result.direction, confirmedAtIndex: result.confirmedAtIndex }, {
     direction: "UP",
     confirmedAtIndex: 8,
@@ -215,13 +229,13 @@ function check(name: string, actual: unknown, expected: unknown) {
 
 // 2. Clear UP bias + valid demand zone, but M5 hasn't broken structure yet -> no entry.
 {
-  const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), m5UpTo(7), [], 10_000);
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), buildH1Range(90, 110), m5UpTo(7), [], 10_000);
   check("bias + zone, M5 not confirmed -> no entry", result, null);
 }
 
 // 3. Bias NONE -> no entry even with the same otherwise-good zone and confirmed M5.
 {
-  const result = detectEntryFromM15(flatSidewayD1(40), m15WithDemandZone(), m5UpTo(8), [], 10_000);
+  const result = detectEntryFromM15(flatSidewayD1(40), m15WithDemandZone(), buildH1Range(90, 110), m5UpTo(8), [], 10_000);
   check("bias NONE -> no entry", result, null);
 }
 
@@ -233,47 +247,53 @@ const throttlingTrades: ClosedTrade[] = [{ closeTime: now, realizedPnl: 0.05 * e
 
 // 4. Good setup, under the 5%/day threshold -> entry unaffected.
 {
-  const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), m5Confirmed, [], equity);
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), buildH1Range(90, 110), m5Confirmed, [], equity);
   check("under 5%/day -> entry unaffected", result !== null, true);
 }
 
 // 5. Good setup but low-score zone (<2), throttled -> blocked.
 {
-  const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), m5Confirmed, throttlingTrades, equity);
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), buildH1Range(90, 110), m5Confirmed, throttlingTrades, equity);
   check("throttled + low score -> blocked", result, null);
 }
 
 // 6. Same throttle, but max-score zone (=2) -> still allowed through.
 {
-  const result = detectEntryFromM15(strongUptrendD1(40), m15WithScore2DemandZone(), m5Confirmed, throttlingTrades, equity);
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithScore2DemandZone(), buildH1Range(90, 110), m5Confirmed, throttlingTrades, equity);
   check("throttled + score=2 -> still allowed", result !== null, true);
 }
 
-// TICKET-13X-A: zone-distance cap.
+// TICKET-21X-A: H1 trading range replaces the old 10x ATR distance cap.
 
-// 7. Only a far zone (>10x ATR15 away) exists, still VALID -> filtered out, no entry.
+// 7. Zone exists but doesn't overlap the H1 trading range (even though it was within the old 10x ATR) -> excluded.
 {
-  const result = detectEntryFromM15(strongUptrendD1(40), m15WithOnlyFarZone(), m5UpToNearZone(13), [], equity);
-  check("only far zone -> filtered out, no entry", result, null);
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithOnlyFarZone(), buildH1Range(500, 600), m5UpToNearZone(13), [], equity);
+  check("zone outside H1 range -> excluded, no entry", result, null);
 }
 
-// 8. Near zone (lower score) beats the far zone (higher score) once the far one is filtered -> near zone chosen.
+// 8. Two zones exist; only the H1 range's own zone qualifies -> that one gets chosen.
 {
-  const result = detectEntryFromM15(strongUptrendD1(40), m15WithFarAndNearZone(), m5UpToNearZone(13), [], equity);
-  check("near zone (in range) chosen over far zone (out of range)", result?.zone.low, 299);
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithFarAndNearZone(), buildH1Range(290, 310), m5UpToNearZone(13), [], equity);
+  check("zone overlapping H1 range chosen over the one outside it", result?.zone.low, 299);
+}
+
+// 11. Fewer than 2 H1 swings -> no trading range yet -> no entry, even with an otherwise-good zone/M5.
+{
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), [], m5UpTo(8), [], equity);
+  check("fewer than 2 H1 swings -> no entry", result, null);
 }
 
 // TICKET-19X-B: reverted TICKET-19X-A's DOWN-only confluence filter -> UP and DOWN are fully symmetric again.
 
 // 9. DOWN + score-0 supply zone -> picked normally, same as UP (no DOWN-only filtering).
 {
-  const result = detectEntryFromM15(strongDowntrendD1(40), m15WithSupplyZone(), m5DownTo(8), [], equity);
+  const result = detectEntryFromM15(strongDowntrendD1(40), m15WithSupplyZone(), buildH1Range(190, 210), m5DownTo(8), [], equity);
   check("DOWN + score-0 zone -> picked, entry unaffected (symmetric with UP)", result !== null, true);
 }
 
 // 10. UP + score-0 demand zone -> picked normally, unchanged.
 {
-  const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), m5UpTo(8), [], equity);
+  const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), buildH1Range(90, 110), m5UpTo(8), [], equity);
   check("UP + score-0 zone -> still picked, entry unaffected", result !== null, true);
 }
 

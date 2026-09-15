@@ -8,6 +8,7 @@ import { createOrchestrator, equityAtStartOfDay, type OnCandleResult } from "../
 import { RISK_PCT_PER_TRADE } from "../../src/risk/positionSizer.js";
 
 const D1_MS = 24 * 60 * 60 * 1000;
+const H1_MS = 60 * 60 * 1000;
 const M15_MS = 15 * 60 * 1000;
 const M5_MS = 5 * 60 * 1000;
 const DAY_IN_M5_STEPS = 288; // 24h / 5min
@@ -15,6 +16,20 @@ const DAY_IN_M5_STEPS = 288; // 24h / 5min
 function mk(barMs: number, i: number, open: number, high: number, low: number, close: number): Candle {
   return { openTime: i * barMs, closeTime: i * barMs + barMs - 1, open, high, low, close, volume: 1 };
 }
+
+// TICKET-21X-A: H1 series with exactly 2 clean swing points at `low`/`high` (same technique as entryRouterVerify.ts).
+function flatH1(i: number, r: number): Candle {
+  return mk(H1_MS, i, r, r + 1, r - 1, r);
+}
+function buildH1Range(low: number, high: number): Candle[] {
+  const r = (low + high) / 2;
+  const lowBlock = [flatH1(0, r), flatH1(1, r), mk(H1_MS, 2, low, r, low, low), flatH1(3, r), flatH1(4, r)];
+  const gap = [flatH1(5, r), flatH1(6, r), flatH1(7, r), flatH1(8, r)];
+  const highBlock = [flatH1(9, r), flatH1(10, r), mk(H1_MS, 11, high, high, r, high), flatH1(12, r), flatH1(13, r)];
+  return [...lowBlock, ...gap, ...highBlock];
+}
+// Covers every zone used across trade 1 ([99,101]/[219,221]) and trade 2 ([999,1001]/[1249,1251]).
+const wideH1Range = buildH1Range(50, 1300);
 
 let failures = 0;
 function check(name: string, actual: unknown, expected: unknown) {
@@ -85,11 +100,11 @@ const orchestrator = createOrchestrator(10_000);
 // ingest the M15 snapshot once, on the first call, then feed exactly one new M5 candle per call.
 const trade1M5 = confirmationM5(0);
 for (let k = 1; k < 9; k++) {
-  const result = orchestrator.onCandle(dailyCandles, k === 1 ? m15Candles : [], [trade1M5[k - 1]]);
+  const result = orchestrator.onCandle(dailyCandles, k === 1 ? wideH1Range : [], k === 1 ? m15Candles : [], [trade1M5[k - 1]]);
   check(`no setup yet at M5 step ${k}`, result.action, "NONE");
 }
 {
-  const result = orchestrator.onCandle(dailyCandles, [], [trade1M5[8]]);
+  const result = orchestrator.onCandle(dailyCandles, [], [], [trade1M5[8]]);
   check("setup confirmed -> entry opened", result.action, "ENTRY_OPENED");
 }
 
@@ -101,7 +116,7 @@ check("take profit = nearTarget edge (219)", order1.takeProfit, 219);
 
 // Price runs straight to TP (219) without touching SL first.
 const tpCandle = mk(M5_MS, 9, 162, 225, 160, 220);
-const closeResult = orchestrator.onCandle(dailyCandles, [], [tpCandle]);
+const closeResult = orchestrator.onCandle(dailyCandles, [], [], [tpCandle]);
 check("price runs to TP -> order closed", closeResult.action, "ORDER_CLOSED");
 
 const afterClose = orchestrator.getState();
@@ -114,9 +129,9 @@ check("equity updated by the realized PnL", afterClose.equity, 10_000 + expected
 const trade2M15 = demandSupplySnippet(24, 1000); // demand [999,1001], supply [1249,1251]
 const trade2M5 = confirmationM5(DAY_IN_M5_STEPS, 1000);
 for (let k = 1; k < 9; k++) {
-  orchestrator.onCandle(dailyCandles, k === 1 ? trade2M15 : [], [trade2M5[k - 1]]);
+  orchestrator.onCandle(dailyCandles, [], k === 1 ? trade2M15 : [], [trade2M5[k - 1]]);
 }
-const trade2Result = orchestrator.onCandle(dailyCandles, [], [trade2M5[8]]);
+const trade2Result = orchestrator.onCandle(dailyCandles, [], [], [trade2M5[8]]);
 check("day 1: fresh entry opens", trade2Result.action, "ENTRY_OPENED");
 
 const afterTrade2Entry = orchestrator.getState();
@@ -166,7 +181,7 @@ check("startOfDayEquity for day 1 includes trade 1's PnL", expectedStartOfDayEqu
   for (let start = 0; start < PERF_CANDLES; start += BATCH) {
     const t0 = performance.now();
     for (let i = start; i < start + BATCH; i++) {
-      perfOrchestrator.onCandle(dailyCandles, [perfM15[i]], trivialM5);
+      perfOrchestrator.onCandle(dailyCandles, [], [perfM15[i]], trivialM5);
     }
     batchTimes.push(performance.now() - t0);
   }
@@ -210,7 +225,7 @@ check("startOfDayEquity for day 1 includes trade 1's PnL", expectedStartOfDayEqu
   for (let start = 0; start < PERF_M5_CANDLES; start += BATCH) {
     const t0 = performance.now();
     for (let i = start; i < start + BATCH; i++) {
-      perfOrchestrator.onCandle(dailyCandles, [], [perfM5[i]]);
+      perfOrchestrator.onCandle(dailyCandles, [], [], [perfM5[i]]);
     }
     batchTimes.push(performance.now() - t0);
   }
@@ -239,11 +254,11 @@ check("startOfDayEquity for day 1 includes trade 1's PnL", expectedStartOfDayEqu
   // Case A: the zone formed long ago, but a modest amount of filler precedes the retest, all within the window -> still detected.
   {
     const orch = createOrchestrator(10_000);
-    orch.onCandle(dailyCandles, windowM15, [fillerFarFromZoneAndStructure(0)]);
-    for (let i = 1; i < 50; i++) orch.onCandle(dailyCandles, [], [fillerFarFromZoneAndStructure(i)]);
+    orch.onCandle(dailyCandles, wideH1Range, windowM15, [fillerFarFromZoneAndStructure(0)]);
+    for (let i = 1; i < 50; i++) orch.onCandle(dailyCandles, [], [], [fillerFarFromZoneAndStructure(i)]);
     const retest = confirmationM5(50);
     let last: OnCandleResult = { action: "NONE" };
-    for (const c of retest) last = orch.onCandle(dailyCandles, [], [c]);
+    for (const c of retest) last = orch.onCandle(dailyCandles, [], [], [c]);
     check("retest within the M5 window -> still detected", last.action, "ENTRY_OPENED");
   }
 
@@ -251,12 +266,12 @@ check("startOfDayEquity for day 1 includes trade 1's PnL", expectedStartOfDayEqu
   // Documented trade-off, not a bug: TICKET-16X-B accepts this in exchange for bounded memory.
   {
     const orch = createOrchestrator(10_000);
-    orch.onCandle(dailyCandles, windowM15, [fillerFarFromZoneAndStructure(0)]);
+    orch.onCandle(dailyCandles, wideH1Range, windowM15, [fillerFarFromZoneAndStructure(0)]);
     const retest = confirmationM5(1);
-    for (let i = 0; i < 7; i++) orch.onCandle(dailyCandles, [], [retest[i]]); // through the touch candle (index 6)
-    for (let i = 0; i < 4000; i++) orch.onCandle(dailyCandles, [], [fillerFarFromZoneAndStructure(1000 + i)]); // pushes the touch out of the window
+    for (let i = 0; i < 7; i++) orch.onCandle(dailyCandles, [], [], [retest[i]]); // through the touch candle (index 6)
+    for (let i = 0; i < 4000; i++) orch.onCandle(dailyCandles, [], [], [fillerFarFromZoneAndStructure(1000 + i)]); // pushes the touch out of the window
     let last: OnCandleResult = { action: "NONE" };
-    for (let i = 7; i < retest.length; i++) last = orch.onCandle(dailyCandles, [], [retest[i]]); // the break candles, now touch-less
+    for (let i = 7; i < retest.length; i++) last = orch.onCandle(dailyCandles, [], [], [retest[i]]); // the break candles, now touch-less
     check("retest whose touch fell outside the M5 window -> missed (accepted trade-off)", last.action, "NONE");
   }
 }
