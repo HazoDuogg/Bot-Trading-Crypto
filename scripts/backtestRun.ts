@@ -5,8 +5,9 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { Candle } from "../src/core/types.js";
+import type { Candle, RegimeState } from "../src/core/types.js";
 import { createOrchestrator, type TradeRecord } from "../src/core/orchestrator.js";
+import { detectRegime, MIN_CANDLES } from "../src/regime/regimeDetector.js";
 
 const DAILY_PATH = resolve("data/ohlcv-BTCUSDT-1d.json");
 const M15_PATH = resolve("data/ohlcv-BTCUSDT-15m.json");
@@ -19,8 +20,7 @@ function loadJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, "utf-8")) as T;
 }
 
-function runBacktest() {
-  const dailyAll = loadJson<Candle[]>(DAILY_PATH);
+function runBacktest(dailyAll: Candle[]) {
   const m15All = loadJson<Candle[]>(M15_PATH);
   const m5All = loadJson<Candle[]>(M5_PATH);
 
@@ -98,7 +98,44 @@ function directionAccuracy(trades: TradeRecord[], horizon: "directionCorrect15" 
   };
 }
 
-function buildReport(trades: TradeRecord[], equity: number) {
+// TICKET-18X-A #3 — reuses detectRegime unchanged, causally, over the full D1 series -> % of
+// evaluated days spent in each regime state (no trading logic involved, report-only).
+function d1RegimeTimeDistribution(dailyAll: Candle[]) {
+  const counts: Record<RegimeState, number> = { UPTREND: 0, DOWNTREND: 0, SIDEWAY: 0, DANGER_ZONE: 0 };
+  for (let i = MIN_CANDLES - 1; i < dailyAll.length; i++) {
+    counts[detectRegime(dailyAll.slice(0, i + 1)).state]++;
+  }
+  const totalDaysEvaluated = Object.values(counts).reduce((a, b) => a + b, 0);
+  const pctOfDaysEvaluated = Object.fromEntries(
+    (Object.keys(counts) as RegimeState[]).map((k) => [k, totalDaysEvaluated > 0 ? (counts[k] / totalDaysEvaluated) * 100 : 0]),
+  );
+  return { totalDaysEvaluated, counts, pctOfDaysEvaluated };
+}
+
+// TICKET-18X-A #4 — average SL distance (raw + % of entry, since BTC's price level moved ~6x
+// over the 3 years) and average R-multiple actually achieved, per closed trade.
+function slAndRR(trades: TradeRecord[]) {
+  const closed = trades.filter((t) => t.exitPrice !== null);
+  if (closed.length === 0) return { sampleSize: 0, avgSlDistance: null, avgSlDistancePct: null, avgRMultiple: null };
+  let sumDist = 0;
+  let sumDistPct = 0;
+  let sumR = 0;
+  for (const t of closed) {
+    const dist = Math.abs(t.entryPrice - t.stopLoss);
+    sumDist += dist;
+    sumDistPct += (dist / t.entryPrice) * 100;
+    const sign = t.direction === "UP" ? 1 : -1;
+    sumR += dist > 0 ? (sign * ((t.exitPrice as number) - t.entryPrice)) / dist : 0;
+  }
+  return {
+    sampleSize: closed.length,
+    avgSlDistance: sumDist / closed.length,
+    avgSlDistancePct: sumDistPct / closed.length,
+    avgRMultiple: sumR / closed.length,
+  };
+}
+
+function buildReport(trades: TradeRecord[], equity: number, dailyAll: Candle[]) {
   const overall = summarize(trades);
   const score2 = trades.filter((t) => t.confluenceScoreAtEntry === 2);
   const scoreOther = trades.filter((t) => t.confluenceScoreAtEntry !== 2);
@@ -135,12 +172,30 @@ function buildReport(trades: TradeRecord[], equity: number) {
       up: summarize(up),
       down: summarize(down),
     },
+    // TICKET-18X-A #1 — 4-cell cross-tab: is confluenceScore=2 equally strong for DOWN as for UP?
+    crossTabDirectionByScore: {
+      upScore2: summarize(up.filter((t) => t.confluenceScoreAtEntry === 2)),
+      upScoreOther: summarize(up.filter((t) => t.confluenceScoreAtEntry !== 2)),
+      downScore2: summarize(down.filter((t) => t.confluenceScoreAtEntry === 2)),
+      downScoreOther: summarize(down.filter((t) => t.confluenceScoreAtEntry !== 2)),
+    },
+    // TICKET-18X-A #2 — same 15/30/60 direction-correct metric as before, split by trade direction.
+    directionCorrectByDirection: {
+      up: { at15Candles: directionAccuracy(up, "directionCorrect15"), at30Candles: directionAccuracy(up, "directionCorrect30"), at60Candles: directionAccuracy(up, "directionCorrect60") },
+      down: { at15Candles: directionAccuracy(down, "directionCorrect15"), at30Candles: directionAccuracy(down, "directionCorrect30"), at60Candles: directionAccuracy(down, "directionCorrect60") },
+    },
+    d1RegimeTimeDistribution: d1RegimeTimeDistribution(dailyAll),
+    slAndRRByDirection: {
+      up: slAndRR(up),
+      down: slAndRR(down),
+    },
   };
 }
 
 function main() {
-  const state = runBacktest();
-  const report = buildReport(state.tradeLog, state.equity);
+  const dailyAll = loadJson<Candle[]>(DAILY_PATH);
+  const state = runBacktest(dailyAll);
+  const report = buildReport(state.tradeLog, state.equity, dailyAll);
   writeFileSync(REPORT_PATH, JSON.stringify(report, null, 2));
   console.log(`Saved report to ${REPORT_PATH}`);
   console.log(JSON.stringify(report, null, 2));
