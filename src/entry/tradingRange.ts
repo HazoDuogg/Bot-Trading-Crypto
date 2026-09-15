@@ -7,10 +7,19 @@ export interface TradingRange {
   high: number;
 }
 
-/** Current trading range = span between the 2 nearest H1 swing points (video 1: "low -> pushed up -> that's the trading range"). */
+/**
+ * TICKET-23X-A — the range must be a real [low, high] pair: the most recent swing,
+ * then the most recent swing of the OTHER type before it. Two same-type swings in a
+ * row (e.g. two highs) no longer get paired together. No such opposite-type swing -> null.
+ */
 export function computeH1TradingRange(h1Candles: Candle[]): TradingRange | null {
   const swings = detectSwingPoints(h1Candles);
-  if (swings.length < 2) return null;
-  const last2 = swings.slice(-2);
-  return { low: Math.min(last2[0].price, last2[1].price), high: Math.max(last2[0].price, last2[1].price) };
+  if (swings.length === 0) return null;
+  const last = swings[swings.length - 1];
+  for (let i = swings.length - 2; i >= 0; i--) {
+    if (swings[i].type !== last.type) {
+      return { low: Math.min(last.price, swings[i].price), high: Math.max(last.price, swings[i].price) };
+    }
+  }
+  return null;
 }

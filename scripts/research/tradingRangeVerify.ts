@@ -54,6 +54,20 @@ check("only 1 swing -> null", computeH1TradingRange([flat(0, 100), flat(1, 100),
   check("more than 2 swings -> only the last 2 used", computeH1TradingRange([...oldSwing, ...gap1, ...twoRecent]), { low: 90, high: 110 });
 }
 
+// 5. TICKET-23X-A: two peaks in a row, then a bottom -> pair the bottom with the NEARER peak, skip the older same-type one.
+{
+  const r = 100;
+  const olderPeak = [flat(0, r), flat(1, r), mk(2, 150, 150, r, 150), flat(3, r), flat(4, r)]; // peak 1 (older), should be ignored
+  const gap1 = [flat(5, r), flat(6, r), flat(7, r), flat(8, r)];
+  const nearerPeak = [flat(9, r), flat(10, r), mk(11, 130, 130, r, 130), flat(12, r), flat(13, r)]; // peak 2 (nearer)
+  const gap2 = [flat(14, r), flat(15, r), flat(16, r), flat(17, r)];
+  const bottom = [flat(18, r), flat(19, r), mk(20, 90, r, 90, 90), flat(21, r), flat(22, r)];
+  check("two same-type peaks then a bottom -> pairs with the nearer peak", computeH1TradingRange([...olderPeak, ...gap1, ...nearerPeak, ...gap2, ...bottom]), {
+    low: 90,
+    high: 130,
+  });
+}
+
 if (failures > 0) {
   console.log(`\n${failures} check(s) FAILED`);
   process.exitCode = 1;
