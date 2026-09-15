@@ -263,15 +263,15 @@ const throttlingTrades: ClosedTrade[] = [{ closeTime: now, realizedPnl: 0.05 * e
   check("near zone (in range) chosen over far zone (out of range)", result?.zone.low, 299);
 }
 
-// TICKET-19X-A: DOWN needs confluenceScore >= MIN_CONFLUENCE_SCORE_DOWN, UP is unfiltered.
+// TICKET-19X-B: reverted TICKET-19X-A's DOWN-only confluence filter -> UP and DOWN are fully symmetric again.
 
-// 9. DOWN + score-0 supply zone (would have been picked before this ticket) -> now excluded, no entry.
+// 9. DOWN + score-0 supply zone -> picked normally, same as UP (no DOWN-only filtering).
 {
   const result = detectEntryFromM15(strongDowntrendD1(40), m15WithSupplyZone(), m5DownTo(8), [], equity);
-  check("DOWN + score-0 zone -> excluded, no entry", result, null);
+  check("DOWN + score-0 zone -> picked, entry unaffected (symmetric with UP)", result !== null, true);
 }
 
-// 10. UP + score-0 demand zone -> still picked as before (UP branch unaffected).
+// 10. UP + score-0 demand zone -> picked normally, unchanged.
 {
   const result = detectEntryFromM15(strongUptrendD1(40), m15WithDemandZone(), m5UpTo(8), [], equity);
   check("UP + score-0 zone -> still picked, entry unaffected", result !== null, true);
