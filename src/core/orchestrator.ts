@@ -208,6 +208,8 @@ export function createOrchestrator(initialEquity: number) {
         return { action: anyClosed ? "ORDER_CLOSED" : "NONE" };
       }
 
+      if (currentEquity() <= 0) return { action: "NONE" }; // account is blown, stop permanently
+
       if (m15History.length === 0 || dailyCandles.length < MIN_DAILY_CANDLES) return { action: "NONE" };
 
       const startOfDayEquity = equityAtStartOfDay(initialEquity, closedTrades, latestM5.closeTime);

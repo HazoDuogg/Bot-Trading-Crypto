@@ -315,6 +315,86 @@ check("startOfDayEquity for day 1 includes trade 1's PnL", expectedStartOfDayEqu
   }
 }
 
+// --- TICKET-25X-A: equity <=0 permanently blocks new entries; PnL sign invariants (grossProfit>=0,
+// grossLoss<=0) hold even after bankruptcy. Two real, consecutive losing trades (not injected equity)
+// drive the account to <=0: a mild ~29% loss, then a tight-SL/high-price trade whose fees alone finish it off. ---
+{
+  const PRICE = 50_000;
+  let idx = 0;
+  const m15: Candle[] = [];
+  let price = PRICE;
+  for (let i = 0; i < 20; i++) m15.push(mk(M15_MS, idx++, price, price + 0.06, price - 0.06, price));
+  const zone1Start = price;
+  m15.push(mk(M15_MS, idx++, price, price + 0.06, price - 0.06, price)); // zone1 base
+  m15.push(mk(M15_MS, idx++, price, price + 2, price, price + 1.6)); // zone1 displacement -> demand [~-0.06,+0.06]
+  price = price + 1.6 + 2.4; // gradual step, no gap
+  m15.push(mk(M15_MS, idx++, price, price + 0.06, price - 0.06, price)); // supply1 base (zone1's nearTarget)
+  m15.push(mk(M15_MS, idx++, price, price + 0.06, price - 2, price - 1.7)); // supply1 displacement
+  price = price - 1.7;
+  for (let i = 0; i < 5; i++) m15.push(mk(M15_MS, idx++, price, price + 0.06, price - 0.06, price)); // gradual transition
+  const zone2Start = price;
+  m15.push(mk(M15_MS, idx++, price, price + 0.01, price - 0.01, price)); // zone2 base (razor-tight)
+  m15.push(mk(M15_MS, idx++, price, price + 0.5, price, price + 0.4)); // zone2 displacement -> tiny demand zone
+  price = price + 0.4 + 0.6;
+  m15.push(mk(M15_MS, idx++, price, price + 0.01, price - 0.01, price)); // supply2 base (zone2's nearTarget)
+  m15.push(mk(M15_MS, idx++, price, price + 0.01, price - 0.3, price - 0.2)); // supply2 displacement
+  const m15Part1 = m15.slice(0, 24); // through supply1 — ingested causally, not the whole array at once
+  const m15Part2 = m15.slice(24);
+
+  function m5RetestAt(dayOffset: number, base: number, k: number): Candle[] {
+    return [
+      mk(M5_MS, dayOffset + 0, base + 0.2 * k, base + 0.22 * k, base + 0.19 * k, base + 0.21 * k),
+      mk(M5_MS, dayOffset + 1, base + 0.21 * k, base + 0.24 * k, base + 0.2 * k, base + 0.23 * k),
+      mk(M5_MS, dayOffset + 2, base + 0.23 * k, base + 0.26 * k, base + 0.22 * k, base + 0.25 * k), // swing high
+      mk(M5_MS, dayOffset + 3, base + 0.24 * k, base + 0.25 * k, base + 0.21 * k, base + 0.22 * k),
+      mk(M5_MS, dayOffset + 4, base + 0.22 * k, base + 0.23 * k, base + 0.15 * k, base + 0.16 * k),
+      mk(M5_MS, dayOffset + 5, base + 0.16 * k, base + 0.17 * k, base + 0.08 * k, base + 0.09 * k),
+      mk(M5_MS, dayOffset + 6, base + 0.09 * k, base + 0.1 * k, base - 0.01 * k, base + 0.005 * k), // touches the zone
+      mk(M5_MS, dayOffset + 7, base + 0.005 * k, base + 0.15 * k, base, base + 0.12 * k),
+      mk(M5_MS, dayOffset + 8, base + 0.12 * k, base + 0.3 * k, base + 0.11 * k, base + 0.27 * k), // closes above swing high -> entry
+    ];
+  }
+
+  const orch = createOrchestrator(1_000);
+  const h1Range = buildH1Range(PRICE - 100, PRICE + 100);
+
+  // Trade A: a mild, ordinary SL loss (~29% of equity).
+  const m5A = m5RetestAt(0, zone1Start, 6);
+  for (let k = 1; k < 9; k++) orch.onCandle(dailyCandles, k === 1 ? h1Range : [], k === 1 ? m15Part1 : [], [m5A[k - 1]]);
+  orch.onCandle(dailyCandles, [], [], [m5A[8]]);
+  const orderA = orch.getState().openPosition!.orders[0];
+  orch.onCandle(dailyCandles, [], [], [mk(M5_MS, DAY_IN_M5_STEPS - 1, orderA.entryPrice, orderA.entryPrice, orderA.stopLoss - 0.01, orderA.stopLoss - 0.01)]);
+  check("trade A: mild SL loss, equity still positive", orch.getState().equity > 0, true);
+
+  // Trade B: a real (not injected) tight-SL/high-price loss whose fees alone finish the account off.
+  const m5B = m5RetestAt(DAY_IN_M5_STEPS, zone2Start, 1);
+  orch.onCandle(dailyCandles, [], m15Part2, [m5B[0]]);
+  for (let k = 1; k < 9; k++) orch.onCandle(dailyCandles, [], [], [m5B[k]]);
+  const orderB = orch.getState().openPosition!.orders[0];
+  orch.onCandle(
+    dailyCandles,
+    [],
+    [],
+    [mk(M5_MS, 2 * DAY_IN_M5_STEPS - 1, orderB.entryPrice, orderB.entryPrice, orderB.stopLoss - 0.001, orderB.stopLoss - 0.001)],
+  );
+  check("trade B: second consecutive loss crosses equity to <=0", orch.getState().equity <= 0, true);
+
+  // Attempt a fresh, otherwise-valid entry (zone1, still VALID, day-shifted M5) after bankruptcy -> never opens.
+  const m5C = m5RetestAt(3 * DAY_IN_M5_STEPS, zone1Start, 6);
+  for (let k = 1; k <= 9; k++) {
+    const result = orch.onCandle(dailyCandles, [], [], [m5C[k - 1]]);
+    check(`no entry after bankruptcy, M5 step ${k}`, result.action, "NONE");
+  }
+  check("still no open position after bankruptcy", orch.getState().openPosition, null);
+
+  // Sign invariant: summed TP_HIT pnl is never negative, summed SL_HIT pnl is never positive.
+  const trades = orch.getState().tradeLog;
+  const grossProfit = trades.filter((t) => t.exitReason === "TP_HIT").reduce((s, t) => s + (t.realizedPnl ?? 0), 0);
+  const grossLoss = trades.filter((t) => t.exitReason === "SL_HIT").reduce((s, t) => s + (t.realizedPnl ?? 0), 0);
+  check("grossProfit >= 0", grossProfit >= 0, true);
+  check("grossLoss <= 0", grossLoss <= 0, true);
+}
+
 if (failures > 0) {
   console.log(`\n${failures} check(s) FAILED`);
   process.exitCode = 1;
