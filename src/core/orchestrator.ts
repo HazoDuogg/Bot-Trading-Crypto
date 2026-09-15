@@ -16,6 +16,9 @@
  * TICKET-21X-A — H1 history tracked the same shape as M15 (grows, no window),
  * but with no registry/ATR of its own — detectSwingPoints (via detectEntry's
  * own computeH1TradingRange call) is cheap enough not to need one.
+ * TICKET-24X-A — realizedPnl now nets out entry/exit fees (Binance Futures
+ * VIP0, no BNB discount): entry is always taker, exit is maker on TP_HIT
+ * (limit fill) and taker on SL_HIT (market fill).
  */
 import type { Candle } from "./types.js";
 import { detectEntry } from "../entry/entryRouter.js";
@@ -34,6 +37,9 @@ const DIRECTION_CHECK_HORIZONS = [15, 30, 60] as const; // M5 candles after entr
 // ~10.4 days of M5 — working default, not yet verified. Revisit if a backtest shows setups
 // missed because a real retest took longer than this to arrive.
 export const M5_WINDOW_SIZE = 3000;
+
+export const TAKER_FEE_PCT = 0.0005; // 0.05%, Binance Futures VIP0, no BNB discount
+export const MAKER_FEE_PCT = 0.0002; // 0.02%, Binance Futures VIP0, no BNB discount
 
 export interface OpenOrder extends OrderSize {
   closed: boolean;
@@ -74,9 +80,13 @@ export interface OrchestratorState {
 
 export type OnCandleResult = { action: "NONE" | "ORDER_CLOSED" | "ENTRY_OPENED" };
 
-function realizedPnl(order: OpenOrder, exitPrice: number, direction: "UP" | "DOWN"): number {
+function realizedPnl(order: OpenOrder, exitPrice: number, direction: "UP" | "DOWN", exitReason: "SL_HIT" | "TP_HIT"): number {
   const sign = direction === "UP" ? 1 : -1;
-  return sign * order.quantity * (exitPrice - order.entryPrice);
+  const grossPnl = sign * order.quantity * (exitPrice - order.entryPrice);
+  const entryFee = order.quantity * order.entryPrice * TAKER_FEE_PCT; // entry is always taker
+  const exitFeeRate = exitReason === "TP_HIT" ? MAKER_FEE_PCT : TAKER_FEE_PCT; // TP=maker, SL=taker
+  const exitFee = order.quantity * exitPrice * exitFeeRate;
+  return grossPnl - entryFee - exitFee;
 }
 
 /** Equity at the start of the UTC day containing `now`: initial balance plus every trade closed strictly before that day. */
@@ -187,7 +197,7 @@ export function createOrchestrator(initialEquity: number) {
           if (result.reason === "NONE") continue;
           order.closed = true;
           anyClosed = true;
-          const pnl = realizedPnl(order, result.exitPrice as number, openPosition.direction);
+          const pnl = realizedPnl(order, result.exitPrice as number, openPosition.direction, result.reason);
           closedTrades.push({ closeTime: latestM5.closeTime, realizedPnl: pnl });
           order.tradeRecord.exitReason = result.reason;
           order.tradeRecord.exitPrice = result.exitPrice;

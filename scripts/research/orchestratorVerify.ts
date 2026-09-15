@@ -4,7 +4,7 @@
  * Run: tsx scripts/research/orchestratorVerify.ts
  */
 import type { Candle } from "../../src/core/types.js";
-import { createOrchestrator, equityAtStartOfDay, type OnCandleResult } from "../../src/core/orchestrator.js";
+import { createOrchestrator, equityAtStartOfDay, TAKER_FEE_PCT, MAKER_FEE_PCT, type OnCandleResult } from "../../src/core/orchestrator.js";
 import { RISK_PCT_PER_TRADE } from "../../src/risk/positionSizer.js";
 
 const D1_MS = 24 * 60 * 60 * 1000;
@@ -122,8 +122,12 @@ check("price runs to TP -> order closed", closeResult.action, "ORDER_CLOSED");
 const afterClose = orchestrator.getState();
 check("position cleared after close", afterClose.openPosition, null);
 check("one closed trade recorded", afterClose.closedTrades.length, 1);
-const expectedPnl1 = order1.quantity * (219 - 162);
-check("equity updated by the realized PnL", afterClose.equity, 10_000 + expectedPnl1);
+// TICKET-24X-A: TP_HIT -> entry fee is taker, exit fee is maker.
+const trade1GrossPnl = order1.quantity * (219 - 162);
+const trade1EntryFee = order1.quantity * order1.entryPrice * TAKER_FEE_PCT;
+const trade1ExitFee = order1.quantity * 219 * MAKER_FEE_PCT;
+const expectedPnl1 = trade1GrossPnl - trade1EntryFee - trade1ExitFee;
+check("equity updated by the realized PnL (net of fees)", afterClose.equity, 10_000 + expectedPnl1);
 
 // --- Trade 2, day 1: a fresh, isolated zone (base 1000) plus day-shifted M5 -> a fresh entry with the updated equity. ---
 const trade2M15 = demandSupplySnippet(24, 1000); // demand [999,1001], supply [1249,1251]
@@ -144,6 +148,41 @@ check("day 1 order sized off the updated equity", order2.quantity, expectedQuant
 // The exact startOfDayEquity trade 2 should have seen: initial balance + trade 1's realized PnL (closed the day before).
 const expectedStartOfDayEquity2 = equityAtStartOfDay(10_000, afterClose.closedTrades, trade2M5[8].closeTime);
 check("startOfDayEquity for day 1 includes trade 1's PnL", expectedStartOfDayEquity2, 10_000 + expectedPnl1);
+
+// --- TICKET-24X-A: fee-inclusive realizedPnl, TP (maker exit) vs SL (taker exit), and net < gross always. ---
+{
+  function openFreshOrder() {
+    const orch = createOrchestrator(10_000);
+    const m5 = confirmationM5(0);
+    for (let k = 1; k < 9; k++) orch.onCandle(dailyCandles, k === 1 ? wideH1Range : [], k === 1 ? m15Candles : [], [m5[k - 1]]);
+    orch.onCandle(dailyCandles, [], [], [m5[8]]);
+    const order = orch.getState().openPosition!.orders[0];
+    return { orch, order };
+  }
+
+  // 1. TP exit: net PnL = gross - (entry fee, taker) - (exit fee, maker).
+  {
+    const { orch, order } = openFreshOrder();
+    orch.onCandle(dailyCandles, [], [], [tpCandle]);
+    const netPnl = orch.getState().closedTrades[0].realizedPnl;
+    const gross = order.quantity * (219 - 162);
+    const expectedNet = gross - order.quantity * order.entryPrice * TAKER_FEE_PCT - order.quantity * 219 * MAKER_FEE_PCT;
+    check("TP exit: net PnL matches gross - taker entry fee - maker exit fee", netPnl, expectedNet);
+    check("TP exit: net PnL < gross PnL (fees always reduce profit)", netPnl < gross, true);
+  }
+
+  // 2. SL exit: net PnL = gross - (entry fee, taker) - (exit fee, taker).
+  {
+    const { orch, order } = openFreshOrder();
+    const slCandle = mk(M5_MS, 9, order.entryPrice, order.entryPrice, order.stopLoss - 1, order.stopLoss - 1);
+    orch.onCandle(dailyCandles, [], [], [slCandle]);
+    const netPnl = orch.getState().closedTrades[0].realizedPnl;
+    const gross = order.quantity * (order.stopLoss - order.entryPrice); // negative, UP direction
+    const expectedNet = gross - order.quantity * order.entryPrice * TAKER_FEE_PCT - order.quantity * order.stopLoss * TAKER_FEE_PCT;
+    check("SL exit: net PnL matches gross - taker entry fee - taker exit fee", netPnl, expectedNet);
+    check("SL exit: net PnL < gross PnL (fees always reduce profit, even on a loss)", netPnl < gross, true);
+  }
+}
 
 // --- TICKET-15X-A perf check: a few thousand M15 candles fed one at a time (as a backtest would),
 // confirming per-candle cost stays roughly flat instead of growing with total history length. ---
