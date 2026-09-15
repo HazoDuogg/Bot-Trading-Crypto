@@ -1,7 +1,7 @@
 import type { Candle, RegimeSnapshot } from "../core/types.js";
 import { computeAdxDi, calculateTR } from "./adxDiCompare.js";
 
-const MIN_CANDLES = 28; // ADX/ATR need 14+14 bars before values are past the zero-padded warm-up
+export const MIN_CANDLES = 28; // ADX/ATR need 14+14 bars before values are past the zero-padded warm-up
 const ADX_THRESHOLD = 25;
 const ATR_ANOMALY_MULTIPLE = 3;
 

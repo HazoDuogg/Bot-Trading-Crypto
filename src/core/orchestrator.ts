@@ -9,6 +9,10 @@
  * make every onCandle call scan a bigger and bigger M5 array. Trade-off: a
  * retest that happens more than M5_WINDOW_SIZE candles after its zone formed
  * falls outside the window and gets missed — acceptable per the ticket.
+ * TICKET-17X-A — tradeLog: per-order records for the backtest report, plus
+ * "directionCorrect" at 15/30/60 M5 candles after entry — tracked completely
+ * independently of checkExit/SL/TP (same horizons as TICKET-04X-AA, converted
+ * from M15 to M5 units), to separate "bias was right" from "trade actually won".
  */
 import type { Candle } from "./types.js";
 import { detectEntry } from "../entry/entryRouter.js";
@@ -18,8 +22,11 @@ import { computeTargets, decideTradeSplit } from "../entry/targets.js";
 import { advanceRegistry, type Zone } from "../entry/zoneRegistry.js";
 import { calculateTR } from "../regime/adxDiCompare.js";
 import { startOfUtcDay, type ClosedTrade } from "../risk/dailyThrottle.js";
+import { computeConfluenceScore } from "../entry/confluenceScore.js";
+import { MIN_CANDLES as MIN_DAILY_CANDLES } from "../regime/regimeDetector.js";
 
 const ATR_PERIOD = 14; // matches computeAdxDi's default period — kept in lockstep for numeric parity
+const DIRECTION_CHECK_HORIZONS = [15, 30, 60] as const; // M5 candles after entry (= 5/10/20 M15 candles, TICKET-04X-AA)
 
 // ~10.4 days of M5 — working default, not yet verified. Revisit if a backtest shows setups
 // missed because a real retest took longer than this to arrive.
@@ -27,6 +34,7 @@ export const M5_WINDOW_SIZE = 3000;
 
 export interface OpenOrder extends OrderSize {
   closed: boolean;
+  tradeRecord: TradeRecord;
 }
 
 export interface OpenPosition {
@@ -34,9 +42,27 @@ export interface OpenPosition {
   orders: OpenOrder[];
 }
 
+export interface TradeRecord {
+  direction: "UP" | "DOWN";
+  confluenceScoreAtEntry: number;
+  splitMode: "SINGLE" | "SPLIT";
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  entryTick: number; // global M5 tick count at entry, for direction-check horizon lookups
+  exitReason: "SL_HIT" | "TP_HIT" | null; // null while still open
+  exitPrice: number | null;
+  realizedPnl: number | null;
+  closeTime: number | null;
+  directionCorrect15: boolean | null;
+  directionCorrect30: boolean | null;
+  directionCorrect60: boolean | null;
+}
+
 export interface OrchestratorState {
   openPosition: OpenPosition | null;
   closedTrades: ClosedTrade[];
+  tradeLog: TradeRecord[];
   equity: number;
   m15CandleCount: number;
   m5WindowCount: number;
@@ -74,6 +100,9 @@ function extendAtr(atr15: number[], trSum: { sum: number; count: number }, prevC
 export function createOrchestrator(initialEquity: number) {
   let openPosition: OpenPosition | null = null;
   const closedTrades: ClosedTrade[] = [];
+  const tradeLog: TradeRecord[] = [];
+  const pendingDirectionChecks: TradeRecord[] = [];
+  let m5TickCount = 0;
 
   const m15History: Candle[] = [];
   const atr15: number[] = [];
@@ -95,8 +124,24 @@ export function createOrchestrator(initialEquity: number) {
   }
 
   function ingestM5(newM5Candles: Candle[]): void {
-    for (const candle of newM5Candles) m5History.push(candle);
+    for (const candle of newM5Candles) {
+      m5History.push(candle);
+      m5TickCount += 1;
+    }
     if (m5History.length > M5_WINDOW_SIZE) m5History.splice(0, m5History.length - M5_WINDOW_SIZE);
+  }
+
+  /** Resolves any pending 15/30/60-candle direction checks that this tick's close now answers. */
+  function resolveDirectionChecks(latestClose: number): void {
+    for (let i = pendingDirectionChecks.length - 1; i >= 0; i--) {
+      const rec = pendingDirectionChecks[i];
+      const elapsed = m5TickCount - rec.entryTick;
+      const correct = rec.direction === "UP" ? latestClose > rec.entryPrice : latestClose < rec.entryPrice;
+      if (elapsed === 15) rec.directionCorrect15 = correct;
+      else if (elapsed === 30) rec.directionCorrect30 = correct;
+      else if (elapsed === 60) rec.directionCorrect60 = correct;
+      if (elapsed >= 60) pendingDirectionChecks.splice(i, 1);
+    }
   }
 
   return {
@@ -104,6 +149,7 @@ export function createOrchestrator(initialEquity: number) {
       return {
         openPosition,
         closedTrades: [...closedTrades],
+        tradeLog: [...tradeLog],
         equity: currentEquity(),
         m15CandleCount: m15History.length,
         m5WindowCount: m5History.length,
@@ -120,6 +166,7 @@ export function createOrchestrator(initialEquity: number) {
       ingestM5(newM5Candles);
       if (m5History.length === 0) return { action: "NONE" };
       const latestM5 = m5History[m5History.length - 1];
+      resolveDirectionChecks(latestM5.close);
 
       if (openPosition) {
         let anyClosed = false;
@@ -129,13 +176,18 @@ export function createOrchestrator(initialEquity: number) {
           if (result.reason === "NONE") continue;
           order.closed = true;
           anyClosed = true;
-          closedTrades.push({ closeTime: latestM5.closeTime, realizedPnl: realizedPnl(order, result.exitPrice as number, openPosition.direction) });
+          const pnl = realizedPnl(order, result.exitPrice as number, openPosition.direction);
+          closedTrades.push({ closeTime: latestM5.closeTime, realizedPnl: pnl });
+          order.tradeRecord.exitReason = result.reason;
+          order.tradeRecord.exitPrice = result.exitPrice;
+          order.tradeRecord.realizedPnl = pnl;
+          order.tradeRecord.closeTime = latestM5.closeTime;
         }
         if (openPosition.orders.every((o) => o.closed)) openPosition = null;
         return { action: anyClosed ? "ORDER_CLOSED" : "NONE" };
       }
 
-      if (m15History.length === 0) return { action: "NONE" };
+      if (m15History.length === 0 || dailyCandles.length < MIN_DAILY_CANDLES) return { action: "NONE" };
 
       const startOfDayEquity = equityAtStartOfDay(initialEquity, closedTrades, latestM5.closeTime);
       const currentPrice = m15History[m15History.length - 1].close;
@@ -152,7 +204,31 @@ export function createOrchestrator(initialEquity: number) {
       const orders = computeOrderSizes(splitDecision, setup.direction, entryPrice, slPrice, currentEquity());
       if (!orders) return { action: "NONE" };
 
-      openPosition = { direction: setup.direction, orders: orders.map((o) => ({ ...o, closed: false })) };
+      const confluenceScoreAtEntry = computeConfluenceScore(setup.zone);
+      const splitMode = splitDecision.mode as "SINGLE" | "SPLIT"; // orders!==null rules out INSUFFICIENT_DATA (computeOrderSizes returns null for it)
+      const openOrders = orders.map((o) => {
+        const tradeRecord: TradeRecord = {
+          direction: setup.direction,
+          confluenceScoreAtEntry,
+          splitMode,
+          entryPrice: o.entryPrice,
+          stopLoss: o.stopLoss,
+          takeProfit: o.takeProfit,
+          entryTick: m5TickCount,
+          exitReason: null,
+          exitPrice: null,
+          realizedPnl: null,
+          closeTime: null,
+          directionCorrect15: null,
+          directionCorrect30: null,
+          directionCorrect60: null,
+        };
+        tradeLog.push(tradeRecord);
+        pendingDirectionChecks.push(tradeRecord);
+        return { ...o, closed: false, tradeRecord };
+      });
+
+      openPosition = { direction: setup.direction, orders: openOrders };
       return { action: "ENTRY_OPENED" };
     },
   };
