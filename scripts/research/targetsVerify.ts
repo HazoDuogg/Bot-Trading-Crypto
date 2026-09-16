@@ -13,6 +13,8 @@ function check(name: string, actual: unknown, expected: unknown) {
   console.log(`[${pass ? "PASS" : "FAIL"}] ${name}: got ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`);
 }
 
+const UNMITIGATED_IMBALANCE = { high: 1, low: 0 }; // placeholder gap, value doesn't matter for these tests
+
 function zone(overrides: Partial<Zone>): Zone {
   return {
     id: "z",
@@ -22,7 +24,7 @@ function zone(overrides: Partial<Zone>): Zone {
     createdAtIndex: 0,
     state: "VALID",
     touchCount: 0,
-    imbalance: null,
+    imbalance: UNMITIGATED_IMBALANCE, // TICKET-27X-A: findNearTarget now requires a live imbalance by default
     imbalanceMitigated: false,
     hasNearbyLiquidity: false,
     ...overrides,
@@ -75,30 +77,66 @@ const dailyWithSwingHigh130: Candle[] = [
   check("farTarget: no swing above entry -> null", farTarget, null);
 }
 
-// --- TICKET-08X-B: far >= 2x near -> SPLIT ---
+// --- TICKET-27X-A #1: nearest zone already mitigated -> skipped, picks the further still-imbalanced zone. ---
 {
-  // entry 100, near edge 110 (distance 10), far 130 (distance 30, >= 2x10) -> SPLIT
-  const decision = decideTradeSplit("UP", 100, { nearTarget: zone({ high: 110, low: 110 }), farTarget: { index: 2, price: 130 } });
+  const entryPrice = 100;
+  const registry = [
+    zone({ id: "s1", type: "supply", high: 110, low: 108, imbalanceMitigated: true }), // nearest, but imbalance gone
+    zone({ id: "s2", type: "supply", high: 140, low: 138 }), // further, still has imbalance
+  ];
+  const { nearTarget } = computeTargets("UP", entryPrice, registry, []);
+  check("nearTarget: mitigated nearest zone skipped, further imbalanced zone picked", nearTarget?.id, "s2");
+}
+
+// --- TICKET-27X-A #2: no zone with a live imbalance -> nearTarget = null, same as no zone at all. ---
+{
+  const entryPrice = 100;
+  const registry = [
+    zone({ id: "s1", type: "supply", high: 110, low: 108, imbalance: null }),
+    zone({ id: "s2", type: "supply", high: 140, low: 138, imbalanceMitigated: true }),
+  ];
+  const { nearTarget } = computeTargets("UP", entryPrice, registry, []);
+  check("nearTarget: no live-imbalance zone -> null", nearTarget, null);
+}
+
+// --- TICKET-08X-B: far >= 2x near -> SPLIT (slPrice close enough that R:R gate passes) ---
+{
+  // entry 100, SL 99 (distance 1), near edge 110 (distance 10, R:R=10 >= 3), far 130 (distance 30, >= 2x10) -> SPLIT
+  const decision = decideTradeSplit("UP", 100, 99, { nearTarget: zone({ high: 110, low: 110 }), farTarget: { index: 2, price: 130 } });
   check("far >= 2x near -> SPLIT", decision, { mode: "SPLIT", tp1: 110, tp2: 130 });
 }
 
 // --- TICKET-08X-B: far < 2x near -> SINGLE ---
 {
-  // entry 100, near edge 110 (distance 10), far 115 (distance 15, < 2x10) -> SINGLE
-  const decision = decideTradeSplit("UP", 100, { nearTarget: zone({ high: 110, low: 110 }), farTarget: { index: 2, price: 115 } });
+  // entry 100, SL 99, near edge 110 (distance 10), far 115 (distance 15, < 2x10) -> SINGLE
+  const decision = decideTradeSplit("UP", 100, 99, { nearTarget: zone({ high: 110, low: 110 }), farTarget: { index: 2, price: 115 } });
   check("far < 2x near -> SINGLE", decision, { mode: "SINGLE", tp1: 110 });
 }
 
 // --- TICKET-08X-B: no nearTarget -> INSUFFICIENT_DATA ---
 {
-  const decision = decideTradeSplit("UP", 100, { nearTarget: null, farTarget: { index: 2, price: 130 } });
+  const decision = decideTradeSplit("UP", 100, 99, { nearTarget: null, farTarget: { index: 2, price: 130 } });
   check("no nearTarget -> INSUFFICIENT_DATA", decision, { mode: "INSUFFICIENT_DATA" });
 }
 
 // --- TICKET-08X-B: nearTarget present, no farTarget -> SINGLE at nearTarget ---
 {
-  const decision = decideTradeSplit("UP", 100, { nearTarget: zone({ high: 110, low: 110 }), farTarget: null });
+  const decision = decideTradeSplit("UP", 100, 99, { nearTarget: zone({ high: 110, low: 110 }), farTarget: null });
   check("nearTarget only -> SINGLE", decision, { mode: "SINGLE", tp1: 110 });
+}
+
+// --- TICKET-27X-A #3: nearTarget exists but R:R < 3 -> INSUFFICIENT_DATA, regardless of SPLIT/SINGLE. ---
+{
+  // entry 100, SL 96 (distance 4, so 3x = 12), near edge 110 (distance 10 < 12) -> blocked
+  const decision = decideTradeSplit("UP", 100, 96, { nearTarget: zone({ high: 110, low: 110 }), farTarget: { index: 2, price: 130 } });
+  check("R:R < 3 -> INSUFFICIENT_DATA", decision, { mode: "INSUFFICIENT_DATA" });
+}
+
+// --- TICKET-27X-A #4: R:R >= 3 (right at the boundary) -> normal SPLIT/SINGLE logic still applies. ---
+{
+  // entry 100, SL 97 (distance 3, so 3x = 9), near edge 110 (distance 10 >= 9) -> passes, far < 2x near -> SINGLE
+  const decision = decideTradeSplit("UP", 100, 97, { nearTarget: zone({ high: 110, low: 110 }), farTarget: { index: 2, price: 115 } });
+  check("R:R >= 3 (boundary) -> SINGLE as usual", decision, { mode: "SINGLE", tp1: 110 });
 }
 
 if (failures > 0) {

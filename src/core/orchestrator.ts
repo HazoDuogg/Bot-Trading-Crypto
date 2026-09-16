@@ -221,7 +221,7 @@ export function createOrchestrator(initialEquity: number) {
       const slPrice = computeStopLoss(setup.direction, setup.zone, atrAtEntry);
 
       const targets = computeTargets(setup.direction, entryPrice, registry, dailyCandles);
-      const splitDecision = decideTradeSplit(setup.direction, entryPrice, targets);
+      const splitDecision = decideTradeSplit(setup.direction, entryPrice, slPrice, targets);
 
       const orders = computeOrderSizes(splitDecision, setup.direction, entryPrice, slPrice, currentEquity());
       if (!orders) return { action: "NONE" };

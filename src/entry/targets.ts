@@ -9,6 +9,10 @@ import { detectSwingPoints } from "./liquidity.js";
 
 const SPLIT_FAR_TO_NEAR_RATIO = 2;
 
+// TICKET-27X-A — from the video "Toán Học Đằng Sau Trading Thành Công": the EV-optimal
+// zone is R:R 1:3-1:5; using the conservative lower bound.
+export const MIN_REWARD_RISK_RATIO = 3;
+
 export interface FarTarget {
   index: number;
   price: number;
@@ -19,11 +23,16 @@ export interface Targets {
   farTarget: FarTarget | null;
 }
 
-/** Nearest opposite-type, still-live M15 zone beyond entryPrice in the bias direction. */
+/** Nearest opposite-type, still-live, still-imbalanced M15 zone beyond entryPrice in the bias direction. */
 function findNearTarget(bias: "UP" | "DOWN", entryPrice: number, m15Registry: Zone[]): Zone | null {
   const opposingType = bias === "UP" ? "supply" : "demand";
   const candidates = m15Registry.filter(
-    (z) => z.type === opposingType && z.state !== "INVALIDATED" && (bias === "UP" ? z.low > entryPrice : z.high < entryPrice),
+    (z) =>
+      z.type === opposingType &&
+      z.state !== "INVALIDATED" &&
+      z.imbalance !== null &&
+      !z.imbalanceMitigated &&
+      (bias === "UP" ? z.low > entryPrice : z.high < entryPrice),
   );
   if (candidates.length === 0) return null;
   return candidates.reduce((closest, z) => ((bias === "UP" ? z.low < closest.low : z.high > closest.high) ? z : closest));
@@ -52,14 +61,21 @@ export type SplitDecision =
   | { mode: "SINGLE"; tp1: number }
   | { mode: "INSUFFICIENT_DATA" };
 
-/** No nearTarget -> nothing to aim at. farTarget missing, or not far enough, -> one full-size order at nearTarget. */
-export function decideTradeSplit(bias: "UP" | "DOWN", entryPrice: number, targets: Targets): SplitDecision {
+/**
+ * No nearTarget -> nothing to aim at. Reward:risk below MIN_REWARD_RISK_RATIO -> not worth taking,
+ * regardless of what SPLIT/SINGLE would otherwise be. Then farTarget missing, or not far enough,
+ * -> one full-size order at nearTarget.
+ */
+export function decideTradeSplit(bias: "UP" | "DOWN", entryPrice: number, slPrice: number, targets: Targets): SplitDecision {
   if (!targets.nearTarget) return { mode: "INSUFFICIENT_DATA" };
 
   const nearEdge = bias === "UP" ? targets.nearTarget.low : targets.nearTarget.high;
+  const nearDistance = Math.abs(nearEdge - entryPrice);
+  const slDistance = Math.abs(entryPrice - slPrice);
+  if (nearDistance < MIN_REWARD_RISK_RATIO * slDistance) return { mode: "INSUFFICIENT_DATA" };
+
   if (!targets.farTarget) return { mode: "SINGLE", tp1: nearEdge };
 
-  const nearDistance = Math.abs(nearEdge - entryPrice);
   const farDistance = Math.abs(targets.farTarget.price - entryPrice);
   if (farDistance >= SPLIT_FAR_TO_NEAR_RATIO * nearDistance) {
     return { mode: "SPLIT", tp1: nearEdge, tp2: targets.farTarget.price };

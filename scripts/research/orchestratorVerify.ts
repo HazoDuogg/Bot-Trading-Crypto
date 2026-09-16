@@ -28,8 +28,8 @@ function buildH1Range(low: number, high: number): Candle[] {
   const highBlock = [flatH1(9, r), flatH1(10, r), mk(H1_MS, 11, high, high, r, high), flatH1(12, r), flatH1(13, r)];
   return [...lowBlock, ...gap, ...highBlock];
 }
-// Covers every zone used across trade 1 ([99,101]/[219,221]) and trade 2 ([999,1001]/[1249,1251]).
-const wideH1Range = buildH1Range(50, 1300);
+// Covers every zone used across trade 1 ([99,101]/[429,431]) and trade 2 ([999,1001]/[1499,1501]).
+const wideH1Range = buildH1Range(50, 1600);
 
 let failures = 0;
 function check(name: string, actual: unknown, expected: unknown) {
@@ -51,15 +51,18 @@ function strongUptrendD1(n: number): Candle[] {
 }
 const dailyCandles = strongUptrendD1(40);
 
-// M15: a demand zone [99,101] (entry) plus a supply zone [219,221] above it (nearTarget) -> reused for every call, unchanged.
+// M15: a demand zone [99,101] (entry) plus a supply zone [429,431] above it (nearTarget) -> reused for every call, unchanged.
+// TICKET-27X-A: nearTarget now requires a live imbalance (2-candle displacement creates a real FVG)
+// AND R:R >= MIN_REWARD_RISK_RATIO, so the supply zone sits far enough above entry (162) and SL (~91.5).
 const m15Candles: Candle[] = [];
 {
   let price = 100;
   for (let i = 0; i < 20; i++) m15Candles.push(mk(M15_MS, i, price, price + 1, price - 1, price));
   m15Candles.push(mk(M15_MS, 20, 100, 101, 99, 100)); // base
   m15Candles.push(mk(M15_MS, 21, 100, 135, 100, 130)); // displacement -> demand zone [99,101]
-  m15Candles.push(mk(M15_MS, 22, 220, 221, 219, 220)); // base
-  m15Candles.push(mk(M15_MS, 23, 220, 221, 180, 185)); // displacement down -> supply zone [219,221]
+  m15Candles.push(mk(M15_MS, 22, 430, 431, 429, 430)); // supply base
+  m15Candles.push(mk(M15_MS, 23, 430, 431, 390, 396)); // supply displacement 1, doesn't trigger alone
+  m15Candles.push(mk(M15_MS, 24, 410, 415, 340, 345)); // supply displacement 2, triggers + creates FVG -> supply zone [429,431]
 }
 
 // M5 retest+confirmation recipe, anchored at `base` (default 100, matching trade 1's [99,101] zone
@@ -87,9 +90,13 @@ function demandSupplySnippet(startIdx: number, base: number): Candle[] {
   for (let i = 0; i < 20; i++) candles.push(mk(M15_MS, idx++, base, base + 1, base - 1, base));
   candles.push(mk(M15_MS, idx++, base, base + 1, base - 1, base)); // base candle
   candles.push(mk(M15_MS, idx++, base, base + 80, base, base + 75)); // displacement -> demand zone [base-1,base+1]
-  const p2 = base + 250;
+  const p2 = base + 500;
   candles.push(mk(M15_MS, idx++, p2, p2 + 1, p2 - 1, p2)); // base candle
-  candles.push(mk(M15_MS, idx++, p2, p2 + 1, p2 - 90, p2 - 85)); // displacement down -> supply zone [p2-1,p2+1]
+  // TICKET-27X-A: nearTarget now needs a live imbalance AND R:R >= 3, so the zone sits far
+  // enough above entry. ATR here is inflated by trade 1's leftover history plus this zone's
+  // own price jump, so displacement magnitudes are re-tuned (verified via sandbox) vs trade 1's.
+  candles.push(mk(M15_MS, idx++, p2, p2 + 1, p2 - 80, p2 - 74)); // displacement 1, doesn't trigger alone
+  candles.push(mk(M15_MS, idx++, p2 - 20, p2 - 15, p2 - 130, p2 - 125)); // displacement 2, triggers + creates FVG -> supply zone [p2-1,p2+1]
   return candles;
 }
 
@@ -112,10 +119,10 @@ const afterEntry = orchestrator.getState();
 check("one order open, SINGLE mode", afterEntry.openPosition?.orders.length, 1);
 const order1 = afterEntry.openPosition!.orders[0];
 check("entry price", order1.entryPrice, 162);
-check("take profit = nearTarget edge (219)", order1.takeProfit, 219);
+check("take profit = nearTarget edge (429)", order1.takeProfit, 429);
 
-// Price runs straight to TP (219) without touching SL first.
-const tpCandle = mk(M5_MS, 9, 162, 225, 160, 220);
+// Price runs straight to TP (429) without touching SL first.
+const tpCandle = mk(M5_MS, 9, 162, 435, 160, 430);
 const closeResult = orchestrator.onCandle(dailyCandles, [], [], [tpCandle]);
 check("price runs to TP -> order closed", closeResult.action, "ORDER_CLOSED");
 
@@ -123,14 +130,14 @@ const afterClose = orchestrator.getState();
 check("position cleared after close", afterClose.openPosition, null);
 check("one closed trade recorded", afterClose.closedTrades.length, 1);
 // TICKET-24X-A: TP_HIT -> entry fee is taker, exit fee is maker.
-const trade1GrossPnl = order1.quantity * (219 - 162);
+const trade1GrossPnl = order1.quantity * (429 - 162);
 const trade1EntryFee = order1.quantity * order1.entryPrice * TAKER_FEE_PCT;
-const trade1ExitFee = order1.quantity * 219 * MAKER_FEE_PCT;
+const trade1ExitFee = order1.quantity * 429 * MAKER_FEE_PCT;
 const expectedPnl1 = trade1GrossPnl - trade1EntryFee - trade1ExitFee;
 check("equity updated by the realized PnL (net of fees)", afterClose.equity, 10_000 + expectedPnl1);
 
 // --- Trade 2, day 1: a fresh, isolated zone (base 1000) plus day-shifted M5 -> a fresh entry with the updated equity. ---
-const trade2M15 = demandSupplySnippet(24, 1000); // demand [999,1001], supply [1249,1251]
+const trade2M15 = demandSupplySnippet(25, 1000); // demand [999,1001], supply [1499,1501]
 const trade2M5 = confirmationM5(DAY_IN_M5_STEPS, 1000);
 for (let k = 1; k < 9; k++) {
   orchestrator.onCandle(dailyCandles, [], k === 1 ? trade2M15 : [], [trade2M5[k - 1]]);
@@ -165,8 +172,8 @@ check("startOfDayEquity for day 1 includes trade 1's PnL", expectedStartOfDayEqu
     const { orch, order } = openFreshOrder();
     orch.onCandle(dailyCandles, [], [], [tpCandle]);
     const netPnl = orch.getState().closedTrades[0].realizedPnl;
-    const gross = order.quantity * (219 - 162);
-    const expectedNet = gross - order.quantity * order.entryPrice * TAKER_FEE_PCT - order.quantity * 219 * MAKER_FEE_PCT;
+    const gross = order.quantity * (429 - 162);
+    const expectedNet = gross - order.quantity * order.entryPrice * TAKER_FEE_PCT - order.quantity * 429 * MAKER_FEE_PCT;
     check("TP exit: net PnL matches gross - taker entry fee - maker exit fee", netPnl, expectedNet);
     check("TP exit: net PnL < gross PnL (fees always reduce profit)", netPnl < gross, true);
   }
@@ -278,15 +285,16 @@ check("startOfDayEquity for day 1 includes trade 1's PnL", expectedStartOfDayEqu
 // --- TICKET-16X-B window trade-off: a zone formed long ago is still retestable within the M5
 // rolling window, but a retest whose TOUCH candle has rolled off the front of the window is missed. ---
 {
-  // Same proven demand[99,101]+supply[219,221] recipe as trade 1 above, in an isolated instance.
+  // Same proven demand[99,101]+supply[429,431] recipe as trade 1 above, in an isolated instance.
   const windowM15: Candle[] = [];
   {
     let price = 100;
     for (let i = 0; i < 20; i++) windowM15.push(mk(M15_MS, i, price, price + 1, price - 1, price));
     windowM15.push(mk(M15_MS, 20, 100, 101, 99, 100));
     windowM15.push(mk(M15_MS, 21, 100, 135, 100, 130));
-    windowM15.push(mk(M15_MS, 22, 220, 221, 219, 220));
-    windowM15.push(mk(M15_MS, 23, 220, 221, 180, 185));
+    windowM15.push(mk(M15_MS, 22, 430, 431, 429, 430));
+    windowM15.push(mk(M15_MS, 23, 430, 431, 390, 396));
+    windowM15.push(mk(M15_MS, 24, 410, 415, 340, 345));
   }
   const fillerFarFromZoneAndStructure = (i: number) => mk(M5_MS, i, 500, 501, 499, 500); // doesn't touch [99,101] or break the 160 swing
 
@@ -327,19 +335,26 @@ check("startOfDayEquity for day 1 includes trade 1's PnL", expectedStartOfDayEqu
   const zone1Start = price;
   m15.push(mk(M15_MS, idx++, price, price + 0.06, price - 0.06, price)); // zone1 base
   m15.push(mk(M15_MS, idx++, price, price + 2, price, price + 1.6)); // zone1 displacement -> demand [~-0.06,+0.06]
-  price = price + 1.6 + 2.4; // gradual step, no gap
+  // TICKET-27X-A: nearTarget now needs a live imbalance AND R:R >= 3, so supply1 sits much further
+  // above zone1's entry than before (jump re-tuned via sandbox), with a 2-candle FVG displacement.
+  price = price + 1.6 + 15; // gap, no longer a small "gradual" step
   m15.push(mk(M15_MS, idx++, price, price + 0.06, price - 0.06, price)); // supply1 base (zone1's nearTarget)
-  m15.push(mk(M15_MS, idx++, price, price + 0.06, price - 2, price - 1.7)); // supply1 displacement
-  price = price - 1.7;
-  for (let i = 0; i < 5; i++) m15.push(mk(M15_MS, idx++, price, price + 0.06, price - 0.06, price)); // gradual transition
+  m15.push(mk(M15_MS, idx++, price, price + 0.06, price - 2.4, price - 2.37)); // displacement 1, doesn't trigger alone
+  m15.push(mk(M15_MS, idx++, price - 2.37, price - 2.35, price - 3.9, price - 3.85)); // displacement 2, triggers + creates FVG
+  price = price - 3.85;
+  // Long flat run so ATR decays back down before zone2's razor-tight structure (otherwise the
+  // supply1 jump's ATR spike is still elevated enough to swallow zone2's tiny displacement).
+  for (let i = 0; i < 40; i++) m15.push(mk(M15_MS, idx++, price, price + 0.06, price - 0.06, price));
   const zone2Start = price;
   m15.push(mk(M15_MS, idx++, price, price + 0.01, price - 0.01, price)); // zone2 base (razor-tight)
   m15.push(mk(M15_MS, idx++, price, price + 0.5, price, price + 0.4)); // zone2 displacement -> tiny demand zone
   price = price + 0.4 + 0.6;
-  m15.push(mk(M15_MS, idx++, price, price + 0.01, price - 0.01, price)); // supply2 base (zone2's nearTarget)
-  m15.push(mk(M15_MS, idx++, price, price + 0.01, price - 0.3, price - 0.2)); // supply2 displacement
-  const m15Part1 = m15.slice(0, 24); // through supply1 — ingested causally, not the whole array at once
-  const m15Part2 = m15.slice(24);
+  // TICKET-27X-A: this displacement is too small to form its own zone at this ATR (unchanged from
+  // before) — trade B's nearTarget ends up being supply1 above, reached via zone2's tiny SL/entry gap.
+  m15.push(mk(M15_MS, idx++, price, price + 0.01, price - 0.01, price)); // filler base, no zone forms
+  m15.push(mk(M15_MS, idx++, price, price + 0.01, price - 0.3, price - 0.2)); // filler displacement, no zone forms
+  const m15Part1 = m15.slice(0, 25); // through supply1 — ingested causally, not the whole array at once
+  const m15Part2 = m15.slice(25);
 
   function m5RetestAt(dayOffset: number, base: number, k: number): Candle[] {
     return [
