@@ -144,6 +144,28 @@ function slAndRR(trades: TradeRecord[]) {
   };
 }
 
+// TICKET-26X-B — measurement only: reward/risk distance ratio at entry (takeProfit/stopLoss are
+// fixed at entry time, independent of how the trade eventually closed).
+function tpSlRatio(trades: TradeRecord[]) {
+  let sumRatio = 0;
+  let belowOneCount = 0;
+  let sampleSize = 0;
+  for (const t of trades) {
+    const riskDistance = Math.abs(t.entryPrice - t.stopLoss);
+    if (riskDistance === 0) continue; // defensive only; computeOrderSizes never produces this
+    const rewardDistance = Math.abs(t.takeProfit - t.entryPrice);
+    const ratio = rewardDistance / riskDistance;
+    sumRatio += ratio;
+    if (ratio < 1) belowOneCount++;
+    sampleSize++;
+  }
+  return {
+    sampleSize,
+    avgRatio: sampleSize > 0 ? sumRatio / sampleSize : null,
+    pctRatioBelow1: sampleSize > 0 ? (belowOneCount / sampleSize) * 100 : null,
+  };
+}
+
 function buildReport(trades: TradeRecord[], equity: number, dailyAll: Candle[]) {
   const overall = summarize(trades);
   const score2 = trades.filter((t) => t.confluenceScoreAtEntry === 2);
@@ -197,6 +219,11 @@ function buildReport(trades: TradeRecord[], equity: number, dailyAll: Candle[]) 
     slAndRRByDirection: {
       up: slAndRR(up),
       down: slAndRR(down),
+    },
+    tpSlRatio: {
+      overall: tpSlRatio(trades),
+      up: tpSlRatio(up),
+      down: tpSlRatio(down),
     },
   };
 }
