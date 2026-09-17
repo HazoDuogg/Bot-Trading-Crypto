@@ -99,29 +99,29 @@ const dailyWithSwingHigh130: Candle[] = [
   check("nearTarget: no live-imbalance zone -> null", nearTarget, null);
 }
 
-// --- TICKET-08X-B: far >= 2x near -> SPLIT (slPrice close enough that R:R gate passes) ---
+// --- TICKET-08X-B: far >= 2x near -> SPLIT (slPrice close enough that R:R gate passes [3,5]) ---
 {
-  // entry 100, SL 99 (distance 1), near edge 110 (distance 10, R:R=10 >= 3), far 130 (distance 30, >= 2x10) -> SPLIT
-  const decision = decideTradeSplit("UP", 100, 99, { nearTarget: zone({ high: 110, low: 110 }), farTarget: { index: 2, price: 130 } });
+  // entry 100, SL 97 (distance 3), near edge 110 (distance 10, R:R=3.33, within [3,5]), far 130 (distance 30, >= 2x10) -> SPLIT
+  const decision = decideTradeSplit("UP", 100, 97, { nearTarget: zone({ high: 110, low: 110 }), farTarget: { index: 2, price: 130 } });
   check("far >= 2x near -> SPLIT", decision, { mode: "SPLIT", tp1: 110, tp2: 130 });
 }
 
 // --- TICKET-08X-B: far < 2x near -> SINGLE ---
 {
-  // entry 100, SL 99, near edge 110 (distance 10), far 115 (distance 15, < 2x10) -> SINGLE
-  const decision = decideTradeSplit("UP", 100, 99, { nearTarget: zone({ high: 110, low: 110 }), farTarget: { index: 2, price: 115 } });
+  // entry 100, SL 97, near edge 110 (distance 10), far 115 (distance 15, < 2x10) -> SINGLE
+  const decision = decideTradeSplit("UP", 100, 97, { nearTarget: zone({ high: 110, low: 110 }), farTarget: { index: 2, price: 115 } });
   check("far < 2x near -> SINGLE", decision, { mode: "SINGLE", tp1: 110 });
 }
 
 // --- TICKET-08X-B: no nearTarget -> INSUFFICIENT_DATA ---
 {
-  const decision = decideTradeSplit("UP", 100, 99, { nearTarget: null, farTarget: { index: 2, price: 130 } });
+  const decision = decideTradeSplit("UP", 100, 97, { nearTarget: null, farTarget: { index: 2, price: 130 } });
   check("no nearTarget -> INSUFFICIENT_DATA", decision, { mode: "INSUFFICIENT_DATA" });
 }
 
 // --- TICKET-08X-B: nearTarget present, no farTarget -> SINGLE at nearTarget ---
 {
-  const decision = decideTradeSplit("UP", 100, 99, { nearTarget: zone({ high: 110, low: 110 }), farTarget: null });
+  const decision = decideTradeSplit("UP", 100, 97, { nearTarget: zone({ high: 110, low: 110 }), farTarget: null });
   check("nearTarget only -> SINGLE", decision, { mode: "SINGLE", tp1: 110 });
 }
 
@@ -137,6 +137,27 @@ const dailyWithSwingHigh130: Candle[] = [
   // entry 100, SL 97 (distance 3, so 3x = 9), near edge 110 (distance 10 >= 9) -> passes, far < 2x near -> SINGLE
   const decision = decideTradeSplit("UP", 100, 97, { nearTarget: zone({ high: 110, low: 110 }), farTarget: { index: 2, price: 115 } });
   check("R:R >= 3 (boundary) -> SINGLE as usual", decision, { mode: "SINGLE", tp1: 110 });
+}
+
+// --- TICKET-27X-B #2: R:R = 3.5 (middle of the [3,5] window) -> enters normally. ---
+{
+  // entry 100, SL 98 (distance 2), near edge 107 (distance 7, ratio 3.5) -> passes both gates -> SINGLE
+  const decision = decideTradeSplit("UP", 100, 98, { nearTarget: zone({ high: 107, low: 107 }), farTarget: null });
+  check("R:R = 3.5 (mid-window) -> SINGLE as usual", decision, { mode: "SINGLE", tp1: 107 });
+}
+
+// --- TICKET-27X-B #3: R:R = 5.0 (right at the ceiling) -> closed boundary, still enters. ---
+{
+  // entry 100, SL 98 (distance 2), near edge 110 (distance 10, ratio 5.0) -> passes -> SINGLE
+  const decision = decideTradeSplit("UP", 100, 98, { nearTarget: zone({ high: 110, low: 110 }), farTarget: null });
+  check("R:R = 5.0 (ceiling boundary) -> SINGLE as usual", decision, { mode: "SINGLE", tp1: 110 });
+}
+
+// --- TICKET-27X-B #4: R:R = 8 (past the ceiling) -> INSUFFICIENT_DATA. ---
+{
+  // entry 100, SL 98 (distance 2), near edge 116 (distance 16, ratio 8) -> blocked
+  const decision = decideTradeSplit("UP", 100, 98, { nearTarget: zone({ high: 116, low: 116 }), farTarget: null });
+  check("R:R = 8 (past ceiling) -> INSUFFICIENT_DATA", decision, { mode: "INSUFFICIENT_DATA" });
 }
 
 if (failures > 0) {

@@ -12,6 +12,8 @@ const SPLIT_FAR_TO_NEAR_RATIO = 2;
 // TICKET-27X-A — from the video "Toán Học Đằng Sau Trading Thành Công": the EV-optimal
 // zone is R:R 1:3-1:5; using the conservative lower bound.
 export const MIN_REWARD_RISK_RATIO = 3;
+// TICKET-27X-B — same video, same EV-optimal zone: the upper bound (1:5).
+export const MAX_REWARD_RISK_RATIO = 5;
 
 export interface FarTarget {
   index: number;
@@ -62,9 +64,9 @@ export type SplitDecision =
   | { mode: "INSUFFICIENT_DATA" };
 
 /**
- * No nearTarget -> nothing to aim at. Reward:risk below MIN_REWARD_RISK_RATIO -> not worth taking,
- * regardless of what SPLIT/SINGLE would otherwise be. Then farTarget missing, or not far enough,
- * -> one full-size order at nearTarget.
+ * No nearTarget -> nothing to aim at. Reward:risk outside [MIN_REWARD_RISK_RATIO, MAX_REWARD_RISK_RATIO]
+ * -> not worth taking, regardless of what SPLIT/SINGLE would otherwise be. Then farTarget missing,
+ * or not far enough, -> one full-size order at nearTarget.
  */
 export function decideTradeSplit(bias: "UP" | "DOWN", entryPrice: number, slPrice: number, targets: Targets): SplitDecision {
   if (!targets.nearTarget) return { mode: "INSUFFICIENT_DATA" };
@@ -72,7 +74,9 @@ export function decideTradeSplit(bias: "UP" | "DOWN", entryPrice: number, slPric
   const nearEdge = bias === "UP" ? targets.nearTarget.low : targets.nearTarget.high;
   const nearDistance = Math.abs(nearEdge - entryPrice);
   const slDistance = Math.abs(entryPrice - slPrice);
-  if (nearDistance < MIN_REWARD_RISK_RATIO * slDistance) return { mode: "INSUFFICIENT_DATA" };
+  if (nearDistance < MIN_REWARD_RISK_RATIO * slDistance || nearDistance > MAX_REWARD_RISK_RATIO * slDistance) {
+    return { mode: "INSUFFICIENT_DATA" };
+  }
 
   if (!targets.farTarget) return { mode: "SINGLE", tp1: nearEdge };
 

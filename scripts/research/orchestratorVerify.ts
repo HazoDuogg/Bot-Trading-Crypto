@@ -28,7 +28,7 @@ function buildH1Range(low: number, high: number): Candle[] {
   const highBlock = [flatH1(9, r), flatH1(10, r), mk(H1_MS, 11, high, high, r, high), flatH1(12, r), flatH1(13, r)];
   return [...lowBlock, ...gap, ...highBlock];
 }
-// Covers every zone used across trade 1 ([99,101]/[429,431]) and trade 2 ([999,1001]/[1499,1501]).
+// Covers every zone used across trade 1 ([99,101]/[429,431]) and trade 2 ([999,1001]/[1349,1351]).
 const wideH1Range = buildH1Range(50, 1600);
 
 let failures = 0;
@@ -90,11 +90,11 @@ function demandSupplySnippet(startIdx: number, base: number): Candle[] {
   for (let i = 0; i < 20; i++) candles.push(mk(M15_MS, idx++, base, base + 1, base - 1, base));
   candles.push(mk(M15_MS, idx++, base, base + 1, base - 1, base)); // base candle
   candles.push(mk(M15_MS, idx++, base, base + 80, base, base + 75)); // displacement -> demand zone [base-1,base+1]
-  const p2 = base + 500;
+  const p2 = base + 350;
   candles.push(mk(M15_MS, idx++, p2, p2 + 1, p2 - 1, p2)); // base candle
-  // TICKET-27X-A: nearTarget now needs a live imbalance AND R:R >= 3, so the zone sits far
-  // enough above entry. ATR here is inflated by trade 1's leftover history plus this zone's
-  // own price jump, so displacement magnitudes are re-tuned (verified via sandbox) vs trade 1's.
+  // TICKET-27X-A/B: nearTarget now needs a live imbalance AND R:R in [3,5], so the zone sits far
+  // enough above entry but not too far. ATR here is inflated by trade 1's leftover history plus
+  // this zone's own price jump, so displacement magnitudes are re-tuned (via sandbox) vs trade 1's.
   candles.push(mk(M15_MS, idx++, p2, p2 + 1, p2 - 80, p2 - 74)); // displacement 1, doesn't trigger alone
   candles.push(mk(M15_MS, idx++, p2 - 20, p2 - 15, p2 - 130, p2 - 125)); // displacement 2, triggers + creates FVG -> supply zone [p2-1,p2+1]
   return candles;
@@ -137,7 +137,7 @@ const expectedPnl1 = trade1GrossPnl - trade1EntryFee - trade1ExitFee;
 check("equity updated by the realized PnL (net of fees)", afterClose.equity, 10_000 + expectedPnl1);
 
 // --- Trade 2, day 1: a fresh, isolated zone (base 1000) plus day-shifted M5 -> a fresh entry with the updated equity. ---
-const trade2M15 = demandSupplySnippet(25, 1000); // demand [999,1001], supply [1499,1501]
+const trade2M15 = demandSupplySnippet(25, 1000); // demand [999,1001], supply [1349,1351]
 const trade2M5 = confirmationM5(DAY_IN_M5_STEPS, 1000);
 for (let k = 1; k < 9; k++) {
   orchestrator.onCandle(dailyCandles, [], k === 1 ? trade2M15 : [], [trade2M5[k - 1]]);
@@ -335,13 +335,13 @@ check("startOfDayEquity for day 1 includes trade 1's PnL", expectedStartOfDayEqu
   const zone1Start = price;
   m15.push(mk(M15_MS, idx++, price, price + 0.06, price - 0.06, price)); // zone1 base
   m15.push(mk(M15_MS, idx++, price, price + 2, price, price + 1.6)); // zone1 displacement -> demand [~-0.06,+0.06]
-  // TICKET-27X-A: nearTarget now needs a live imbalance AND R:R >= 3, so supply1 sits much further
+  // TICKET-27X-A/B: nearTarget now needs a live imbalance AND R:R in [3,5], so supply1 sits further
   // above zone1's entry than before (jump re-tuned via sandbox), with a 2-candle FVG displacement.
-  price = price + 1.6 + 15; // gap, no longer a small "gradual" step
+  price = price + 1.6 + 7; // gap, no longer a small "gradual" step
   m15.push(mk(M15_MS, idx++, price, price + 0.06, price - 0.06, price)); // supply1 base (zone1's nearTarget)
-  m15.push(mk(M15_MS, idx++, price, price + 0.06, price - 2.4, price - 2.37)); // displacement 1, doesn't trigger alone
-  m15.push(mk(M15_MS, idx++, price - 2.37, price - 2.35, price - 3.9, price - 3.85)); // displacement 2, triggers + creates FVG
-  price = price - 3.85;
+  m15.push(mk(M15_MS, idx++, price, price + 0.06, price - 1.12, price - 1.09)); // displacement 1, doesn't trigger alone
+  m15.push(mk(M15_MS, idx++, price - 1.09, price - 1.07, price - 1.82, price - 1.77)); // displacement 2, triggers + creates FVG
+  price = price - 1.77;
   // Long flat run so ATR decays back down before zone2's razor-tight structure (otherwise the
   // supply1 jump's ATR spike is still elevated enough to swallow zone2's tiny displacement).
   for (let i = 0; i < 40; i++) m15.push(mk(M15_MS, idx++, price, price + 0.06, price - 0.06, price));
