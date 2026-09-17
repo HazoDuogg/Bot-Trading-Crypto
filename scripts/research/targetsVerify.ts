@@ -27,6 +27,8 @@ function zone(overrides: Partial<Zone>): Zone {
     imbalance: UNMITIGATED_IMBALANCE, // TICKET-27X-A: findNearTarget now requires a live imbalance by default
     imbalanceMitigated: false,
     hasNearbyLiquidity: false,
+    nearbyLiquidityLevel: null,
+    liquiditySwept: false,
     ...overrides,
   };
 }

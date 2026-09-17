@@ -6,7 +6,7 @@ import type { Candle } from "../../src/core/types.js";
 import { detectEntry } from "../../src/entry/entryRouter.js";
 import type { ClosedTrade } from "../../src/risk/dailyThrottle.js";
 import { computeAdxDi } from "../../src/regime/adxDiCompare.js";
-import { buildInitialRegistry } from "../../src/entry/zoneRegistry.js";
+import { advanceRegistry, buildInitialRegistry } from "../../src/entry/zoneRegistry.js";
 
 // TICKET-15X-A/21X-A: detectEntry now takes a pre-built registry plus raw h1Candles instead of
 // atr15/currentPrice. This reproduces exactly what it used to do internally, once, per test.
@@ -257,9 +257,18 @@ const throttlingTrades: ClosedTrade[] = [{ closeTime: now, realizedPnl: 0.05 * e
   check("throttled + low score -> blocked", result, null);
 }
 
-// 6. Same throttle, but max-score zone (=2) -> still allowed through.
+// 6. Same throttle, but max-score zone (=2, once its nearby liquidity is swept) -> still allowed through.
+// TICKET-27X-F: buildInitialRegistry (unchanged) gets the zone with its imbalance intact, then one
+// extra advanceRegistry step applies a sweep candle — mirrors a new candle arriving causally after
+// the zone already exists, without touching buildInitialRegistry's own (unbounded) base search.
 {
-  const result = detectEntryFromM15(strongUptrendD1(40), m15WithScore2DemandZone(), buildH1Range(90, 110), m5Confirmed, throttlingTrades, equity);
+  const baseCandles = m15WithScore2DemandZone();
+  const sweepCandle = mk(M15_MS, baseCandles.length, 100, 100.5, 97.1, 97.3); // closes inside [zone.low=97, liquidityLevel=97.5)
+  const allCandles = [...baseCandles, sweepCandle];
+  const { atr: atr15 } = computeAdxDi(allCandles);
+  let registry = buildInitialRegistry(baseCandles, atr15.slice(0, baseCandles.length));
+  registry = advanceRegistry(registry, allCandles, atr15, baseCandles.length);
+  const result = detectEntry(strongUptrendD1(40), registry, buildH1Range(90, 110), m5Confirmed, throttlingTrades, equity);
   check("throttled + score=2 -> still allowed", result !== null, true);
 }
 

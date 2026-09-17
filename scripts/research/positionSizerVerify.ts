@@ -25,6 +25,8 @@ function zone(overrides: Partial<Zone>): Zone {
     imbalance: null,
     imbalanceMitigated: false,
     hasNearbyLiquidity: false,
+    nearbyLiquidityLevel: null,
+    liquiditySwept: false,
     ...overrides,
   };
 }

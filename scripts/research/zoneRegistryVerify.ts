@@ -32,6 +32,8 @@ function runDemand(name: string, candles: Candle[], expectState: Zone["state"], 
     imbalance: null,
     imbalanceMitigated: false,
     hasNearbyLiquidity: false,
+    nearbyLiquidityLevel: null,
+    liquiditySwept: false,
   };
   const atr = Array(candles.length).fill(FLAT_ATR);
   let zones: Zone[] = [zoneSeed];
@@ -76,6 +78,8 @@ runDemand(
     imbalance: null,
     imbalanceMitigated: false,
     hasNearbyLiquidity: false,
+    nearbyLiquidityLevel: null,
+    liquiditySwept: false,
   };
   const candles = [candle(0, 50, 55, 45, 50), candle(1, 112, 120, 108, 115), candle(2, 105, 118, 95, 104)];
   const atr = Array(candles.length).fill(FLAT_ATR);
@@ -84,6 +88,54 @@ runDemand(
   const z = zones.find((x) => x.id === "s")!;
   check("supply mirror: close above -> INVALIDATED, no recovery", z.state, "INVALIDATED");
 }
+
+// TICKET-27X-F: liquiditySwept — same latch pattern as imbalanceMitigated, but gated on a CLOSE
+// past nearbyLiquidityLevel (a wick alone must not count, per the method's false-signal filter).
+function runLiquiditySweep(name: string, candles: Candle[], expectSweptSequence: boolean[]) {
+  const zoneSeed: Zone = {
+    id: "z",
+    type: "demand",
+    high: 110,
+    low: 100,
+    createdAtIndex: 0,
+    state: "VALID",
+    touchCount: 0,
+    imbalance: null,
+    imbalanceMitigated: false,
+    hasNearbyLiquidity: true,
+    nearbyLiquidityLevel: 95, // resting liquidity just below this demand zone's low
+    liquiditySwept: false,
+  };
+  const atr = Array(candles.length).fill(FLAT_ATR);
+  let zones: Zone[] = [zoneSeed];
+  const observed: boolean[] = [];
+  for (let i = 1; i < candles.length; i++) {
+    zones = advanceRegistry(zones, candles, atr, i);
+    observed.push(zones.find((z) => z.id === "z")!.liquiditySwept);
+  }
+  check(name, observed, expectSweptSequence);
+}
+
+// 2. Candle closes past the liquidity level (95) -> liquiditySwept flips true from that candle on.
+runLiquiditySweep(
+  "liquiditySwept: close past level -> true from that candle on",
+  [candle(0, 200, 205, 195, 200), candle(1, 200, 202, 198, 199), candle(2, 97, 98, 90, 93)],
+  [false, true],
+);
+
+// 3. Wick dips below the level but closes back above it -> liquiditySwept stays false (no wick-only trigger).
+runLiquiditySweep(
+  "liquiditySwept: wick-only dip below level -> stays false",
+  [candle(0, 200, 205, 195, 200), candle(1, 200, 202, 90, 199)],
+  [false],
+);
+
+// 4. Once swept, price closing back above the level -> liquiditySwept stays true (no reversal).
+runLiquiditySweep(
+  "liquiditySwept: latches true, no reversal on close back above",
+  [candle(0, 200, 205, 195, 200), candle(1, 97, 98, 90, 93), candle(2, 96, 150, 95, 140)],
+  [true, true],
+);
 
 // Smoke test: buildInitialRegistry over a real base+displacement pattern actually produces a zone.
 {

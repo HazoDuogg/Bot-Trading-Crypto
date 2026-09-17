@@ -24,14 +24,18 @@ function zone(overrides: Partial<Zone>): Zone {
     imbalance: null,
     imbalanceMitigated: false,
     hasNearbyLiquidity: false,
+    nearbyLiquidityLevel: null,
+    liquiditySwept: false,
     ...overrides,
   };
 }
 
-// 1. Unmitigated imbalance + nearby liquidity + touchCount<3 -> 2.
+// 1. Unmitigated imbalance + nearby liquidity (swept) + touchCount<3 -> 2.
 check(
-  "imbalance + liquidity, touchCount<3 -> 2",
-  computeConfluenceScore(zone({ imbalance: { high: 105, low: 102 }, imbalanceMitigated: false, hasNearbyLiquidity: true, touchCount: 1 })),
+  "imbalance + swept liquidity, touchCount<3 -> 2",
+  computeConfluenceScore(
+    zone({ imbalance: { high: 105, low: 102 }, imbalanceMitigated: false, hasNearbyLiquidity: true, liquiditySwept: true, touchCount: 1 }),
+  ),
   2,
 );
 
@@ -42,17 +46,21 @@ check(
   1,
 );
 
-// 3. No imbalance (mitigated), nearby liquidity, touchCount<3 -> 1.
+// 3. No imbalance (mitigated), nearby liquidity (swept), touchCount<3 -> 1.
 check(
-  "mitigated imbalance + liquidity, touchCount<3 -> 1",
-  computeConfluenceScore(zone({ imbalance: { high: 105, low: 102 }, imbalanceMitigated: true, hasNearbyLiquidity: true, touchCount: 1 })),
+  "mitigated imbalance + swept liquidity, touchCount<3 -> 1",
+  computeConfluenceScore(
+    zone({ imbalance: { high: 105, low: 102 }, imbalanceMitigated: true, hasNearbyLiquidity: true, liquiditySwept: true, touchCount: 1 }),
+  ),
   1,
 );
 
-// 4. Both bonus factors but touchCount>=3 -> 2-1=1.
+// 4. Both bonus factors (liquidity swept) but touchCount>=3 -> 2-1=1.
 check(
-  "imbalance + liquidity, touchCount>=3 -> 1",
-  computeConfluenceScore(zone({ imbalance: { high: 105, low: 102 }, imbalanceMitigated: false, hasNearbyLiquidity: true, touchCount: 3 })),
+  "imbalance + swept liquidity, touchCount>=3 -> 1",
+  computeConfluenceScore(
+    zone({ imbalance: { high: 105, low: 102 }, imbalanceMitigated: false, hasNearbyLiquidity: true, liquiditySwept: true, touchCount: 3 }),
+  ),
   1,
 );
 
@@ -61,6 +69,18 @@ check(
   "no bonuses, touchCount>=3 -> -1",
   computeConfluenceScore(zone({ imbalance: null, imbalanceMitigated: false, hasNearbyLiquidity: false, touchCount: 4 })),
   -1,
+);
+
+// --- TICKET-27X-F #1: nearby liquidity NOT yet swept -> no bonus, same score as no liquidity at all. ---
+check(
+  "nearby liquidity, unswept -> no bonus (matches no-liquidity score)",
+  computeConfluenceScore(zone({ imbalance: null, imbalanceMitigated: false, hasNearbyLiquidity: true, liquiditySwept: false, touchCount: 1 })),
+  0,
+);
+check(
+  "no liquidity at all -> same score as unswept liquidity",
+  computeConfluenceScore(zone({ imbalance: null, imbalanceMitigated: false, hasNearbyLiquidity: false, touchCount: 1 })),
+  0,
 );
 
 if (failures > 0) {

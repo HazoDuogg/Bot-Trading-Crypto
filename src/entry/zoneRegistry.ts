@@ -20,19 +20,25 @@ export interface Zone {
   imbalance: Imbalance | null;
   imbalanceMitigated: boolean;
   hasNearbyLiquidity: boolean;
+  // TICKET-27X-F: the matched equal-high/low price itself, so applyCandle can check for a sweep —
+  // same role for liquiditySwept that `imbalance`'s range plays for imbalanceMitigated.
+  nearbyLiquidityLevel: number | null;
+  liquiditySwept: boolean;
 }
 
 // Demand zones sit near resting buy-side liquidity (equal lows); supply zones near equal highs — same 0.1x ATR tolerance as findEqualPoints.
-function computeHasNearbyLiquidity(candles: Candle[], atr: number[], upToIndex: number, c: ZoneCandidate): boolean {
+function findNearbyLiquidityLevel(candles: Candle[], atr: number[], upToIndex: number, c: ZoneCandidate): number | null {
   const swings = detectSwingPoints(candles.slice(0, upToIndex + 1));
   const equalPoints = findEqualPoints(swings, atr);
   const wantKind = c.type === "demand" ? "equal-low" : "equal-high";
   const boundary = c.type === "demand" ? c.low : c.high;
   const tolerance = EQUAL_ATR_MULT * atr[upToIndex];
-  return equalPoints.some((e) => e.type === wantKind && Math.abs(e.priceB - boundary) <= tolerance);
+  const match = equalPoints.find((e) => e.type === wantKind && Math.abs(e.priceB - boundary) <= tolerance);
+  return match ? match.priceB : null;
 }
 
 function toZone(c: ZoneCandidate, candles: Candle[], atr: number[]): Zone {
+  const nearbyLiquidityLevel = findNearbyLiquidityLevel(candles, atr, c.confirmedIndex, c);
   return {
     id: `${c.type}-${c.confirmedIndex}`, // confirmedIndex is the merge key, so it's unique per merged candidate
     type: c.type,
@@ -43,7 +49,9 @@ function toZone(c: ZoneCandidate, candles: Candle[], atr: number[]): Zone {
     touchCount: 0,
     imbalance: findFvgInRange(candles, c.baseEndIndex, c.confirmedIndex, c.type),
     imbalanceMitigated: false,
-    hasNearbyLiquidity: computeHasNearbyLiquidity(candles, atr, c.confirmedIndex, c),
+    hasNearbyLiquidity: nearbyLiquidityLevel !== null,
+    nearbyLiquidityLevel,
+    liquiditySwept: false,
   };
 }
 
@@ -65,6 +73,12 @@ function applyCandle(zone: Zone, candle: Candle): Zone {
   if (next.imbalance && !next.imbalanceMitigated) {
     const filled = candle.low <= next.imbalance.low && candle.high >= next.imbalance.high;
     if (filled) next = { ...next, imbalanceMitigated: true };
+  }
+  // TICKET-27X-F: liquidity is "swept" only on a close past the level (a wick alone is not
+  // trusted, same false-signal filter as the method's own step 5) — latches true, no reversal.
+  if (next.hasNearbyLiquidity && !next.liquiditySwept && next.nearbyLiquidityLevel !== null) {
+    const swept = next.type === "demand" ? candle.close < next.nearbyLiquidityLevel : candle.close > next.nearbyLiquidityLevel;
+    if (swept) next = { ...next, liquiditySwept: true };
   }
   return next;
 }
