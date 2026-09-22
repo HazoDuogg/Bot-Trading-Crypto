@@ -1,0 +1,140 @@
+//@version=6
+strategy("Trend Join L/S - BTCUSDT v2d (Trend Strength)", shorttitle="TJL v2d TS", overlay=true,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=20,
+     commission_type=strategy.commission.percent, commission_value=0.075,
+     slippage=1, calc_on_every_tick=false, process_orders_on_close=true,
+     margin_long=100, margin_short=100)
+
+// =============================================================================
+// Trend Join Long/Short v2d - Short-side Variant 3: trend strength confirmation
+//
+// Builds on top of v2c (bufferMult=0.5, LOCKED IN - not removed here, just
+// added to). Baseline for comparison is v2c itself, not the original v2:
+//   v2c (buffer=0.5 only): Short 18 trades, 50.0% win, PF 0.79
+//
+// ONE new change, isolated to the Short side only:
+//   daily_breakdown currently requires prev_daily_close < SMA200 (binary -
+//   any amount below counts, including the very first day SMA200 turns
+//   bearish). This adds a MINIMUM DISTANCE requirement:
+//     prev_daily_close < SMA200 * (1 - minTrendDistPct / 100)
+//   i.e. the prior close must sit at least minTrendDistPct% below the
+//   200-day SMA, not just barely under it. Goal: filter out the early,
+//   weak-trend period right after SMA200 first flips bearish (where
+//   whipsaws are more likely) and only allow shorts once the downtrend is
+//   more clearly established.
+//
+// minTrendDistPct is an input, tested at 2% and 3% per user request (see
+// report). ATR buffer (v2c) and everything else stay exactly as they were -
+// this is purely an additional AND-ed gate on daily_breakdown.
+//
+// Long side entry logic is byte-identical to v1/v2/v2c - not touched.
+// =============================================================================
+
+// ---- Inputs ----
+grpExit = "Exit Settings"
+atrLen             = input.int(14, "ATR Length", group=grpExit)
+initialStopAtrMult = input.float(1.5, "Initial Stop - ATR Multiplier", minval=0.1, step=0.1, group=grpExit)
+trailAtrMult       = input.float(2.0, "Trailing Stop - ATR Multiplier", minval=0.1, step=0.1, group=grpExit)
+
+grpDaily = "Daily Trend Filter"
+smaLen = input.int(200, "Daily SMA Length", group=grpDaily)
+
+grpShort = "Short Entry Filter"
+bufferMult      = input.float(0.5, "Intraday Breakdown - ATR Buffer Multiplier", minval=0.0, step=0.05, group=grpShort)
+minTrendDistPct = input.float(2.0, "Min % Below SMA200 for Daily Breakdown", minval=0.0, step=0.5, group=grpShort)
+
+// ---- Daily-context data (previous COMPLETED daily bar only, no repainting) ----
+dHigh1    = request.security(syminfo.tickerid, "D", high[1],  lookahead=barmerge.lookahead_off)
+dLow1     = request.security(syminfo.tickerid, "D", low[1],   lookahead=barmerge.lookahead_off)
+dClose1   = request.security(syminfo.tickerid, "D", close[1], lookahead=barmerge.lookahead_off)
+dSma200_1 = request.security(syminfo.tickerid, "D", ta.sma(close, smaLen)[1], lookahead=barmerge.lookahead_off)
+
+// ---- Intraday session high/low since 00:00 UTC today (15m timeframe) ----
+utcYear  = year(time, "UTC")
+utcMonth = month(time, "UTC")
+utcDay   = dayofmonth(time, "UTC")
+newUtcDay = utcDay != utcDay[1] or utcMonth != utcMonth[1] or utcYear != utcYear[1]
+
+var float sessionHigh = na
+var float sessionLow  = na
+if newUtcDay
+    sessionHigh := na
+    sessionLow  := na
+
+sessionHighExclCurrent = sessionHigh
+sessionLowExclCurrent  = sessionLow
+sessionHigh := math.max(nz(sessionHigh, high), high)
+sessionLow  := math.min(nz(sessionLow, low), low)
+
+// ---- Entry logic ----
+currPx = close
+atrVal = ta.atr(atrLen)
+
+// ---- LONG SIDE: byte-identical to v1/v2/v2c - not touched. ----
+dailyBreakout    = currPx > dHigh1 and dClose1 > dSma200_1
+intradayBreakout = not na(sessionHighExclCurrent) and currPx > sessionHighExclCurrent
+longCondition    = dailyBreakout and intradayBreakout
+
+// ---- SHORT SIDE: Variant 3 - trend strength confirmation on top of v2c ----
+// Prior close must sit at least minTrendDistPct% below SMA200, not just
+// barely under it.
+dailyBreakdown = currPx < dLow1 and dClose1 < dSma200_1 * (1 - minTrendDistPct / 100)
+
+// v2c ATR buffer, unchanged/kept.
+intradayBreakdown = not na(sessionLowExclCurrent) and not na(atrVal) and
+     currPx < sessionLowExclCurrent - bufferMult * atrVal
+
+shortCondition = dailyBreakdown and intradayBreakdown
+
+flat = strategy.position_size == 0
+
+// ---- Exit logic: symmetric chandelier trail per side (unchanged from v2/v2c) ----
+var float initialStopPrice = na
+var float highestSinceEntry = na  // long side trail anchor
+var float lowestSinceEntry  = na  // short side trail anchor
+
+if flat
+    initialStopPrice := na
+    highestSinceEntry := na
+    lowestSinceEntry := na
+
+if flat and longCondition and not na(atrVal)
+    strategy.entry("Long", strategy.long)
+    initialStopPrice := currPx - initialStopAtrMult * atrVal
+    highestSinceEntry := high
+else if flat and shortCondition and not na(atrVal)
+    strategy.entry("Short", strategy.short)
+    initialStopPrice := currPx + initialStopAtrMult * atrVal
+    lowestSinceEntry := low
+
+if strategy.position_size > 0
+    highestSinceEntry := math.max(nz(highestSinceEntry, high), high)
+    trailStopPrice = highestSinceEntry - trailAtrMult * atrVal
+    activeStop = math.max(trailStopPrice, initialStopPrice)
+    strategy.exit("Exit Long", "Long", stop=activeStop)
+else if strategy.position_size < 0
+    lowestSinceEntry := math.min(nz(lowestSinceEntry, low), low)
+    trailStopPrice = lowestSinceEntry + trailAtrMult * atrVal
+    activeStop = math.min(trailStopPrice, initialStopPrice)
+    strategy.exit("Exit Short", "Short", stop=activeStop)
+
+// ---- Plots ----
+plot(dHigh1, "Prev Daily High", color=color.new(color.red, 0), style=plot.style_stepline)
+plot(dLow1, "Prev Daily Low", color=color.new(color.green, 0), style=plot.style_stepline)
+plot(dSma200_1, "Daily SMA200 (prev)", color=color.new(color.blue, 0), linewidth=2)
+plot(sessionHigh, "Session High (today, UTC)", color=color.new(color.orange, 0), style=plot.style_stepline)
+plot(sessionLow, "Session Low (today, UTC)", color=color.new(color.purple, 0), style=plot.style_stepline)
+
+activeStopPlot = strategy.position_size > 0 ? math.max(highestSinceEntry - trailAtrMult * atrVal, initialStopPrice) :
+     strategy.position_size < 0 ? math.min(lowestSinceEntry + trailAtrMult * atrVal, initialStopPrice) : na
+plot(activeStopPlot, "Active Stop", color=color.new(color.fuchsia, 0), style=plot.style_linebr)
+
+plotshape(flat and longCondition, title="Long Entry",
+     location=location.belowbar, style=shape.triangleup, color=color.new(color.lime, 0), size=size.small)
+plotshape(flat and shortCondition, title="Short Entry",
+     location=location.abovebar, style=shape.triangledown, color=color.new(color.red, 0), size=size.small)
+
+alertcondition(flat and longCondition, title="TJL Long Entry",
+     message="Trend Join Long/Short v2d: BTCUSDT long entry conditions met")
+alertcondition(flat and shortCondition, title="TJL Short Entry (trend strength)",
+     message="Trend Join Long/Short v2d: BTCUSDT trend-strength-confirmed short entry conditions met")

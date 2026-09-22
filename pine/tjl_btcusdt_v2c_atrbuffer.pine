@@ -1,0 +1,158 @@
+//@version=6
+strategy("Trend Join L/S - BTCUSDT v2c (ATR Buffer)", shorttitle="TJL v2c AB", overlay=true,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=20,
+     commission_type=strategy.commission.percent, commission_value=0.075,
+     slippage=1, calc_on_every_tick=false, process_orders_on_close=true,
+     margin_long=100, margin_short=100)
+
+// =============================================================================
+// Trend Join Long/Short v2c - FINALIZED working Short-improved version
+//
+// Status: bufferMult=0.5 is LOCKED IN as the working value. Buffer tuning on
+// the Jul1-Sep18 2026 window is DONE - do not keep re-tuning this number
+// against the same 43-trade sample. Full curve tested on that window
+// (Short-side trades / win rate / PF):
+//   buffer 0.00 (baseline, tjl_btcusdt_v2_longshort.pine): 28 trades, 32.1%, PF 0.42
+//   buffer 0.25:                                           24 trades, 37.5%, PF 0.51
+//   buffer 0.50 (LOCKED IN):                                18 trades, 50.0%, PF 0.79
+//   buffer 0.75:                                            15 trades, 46.7%, PF 0.66
+//   buffer 1.00:                                            13 trades, 30.8%, PF 0.36
+// Rises to a peak at 0.5, then reverses - confirms 0.5 is a genuine local
+// optimum, not just "bigger buffer is always better". Sample sizes are thin
+// throughout (13-28 trades), so this curve's SHAPE is more trustworthy than
+// any single number on it.
+//
+// Variant 1 (tjl_btcusdt_v2b_short_confirm.pine, 2-bar confirmation) was
+// DISCARDED: it cut short trades 28->11 but win rate and PF both got
+// slightly WORSE (27.3% win, PF 0.36) - a volume cut, not a quality filter.
+//
+// NEXT STEP (per user decision): TradingView's plan limits block a longer
+// historical backtest, so validation moves to forward/paper testing instead
+// - running this version's Short logic alongside the untouched baseline on
+// fresh data neither was tuned on. See tjl_btcusdt_short_compare_scanner.sh
+// for the parallel deterministic scanner built for that comparison.
+//
+// ONE change from v2, isolated to the Short side only:
+//   Require the breakdown to clear session_low by a meaningful margin,
+//   not just tick under it: intradayBreakdown now requires
+//     currPx < sessionLowExclCurrent - bufferMult * atrVal
+//   instead of the plain currPx < sessionLowExclCurrent. This targets
+//   shallow/wick breakdowns specifically - a real breakdown should push
+//   meaningfully past the level in ATR terms, not just barely under it.
+//
+//   No 2-bar confirmation (that was Variant 1, discarded). daily_breakdown
+//   and every other condition are untouched from v2.
+//
+// Long side entry logic is byte-identical to v2 - not touched.
+// =============================================================================
+
+// ---- Inputs ----
+grpExit = "Exit Settings"
+atrLen             = input.int(14, "ATR Length", group=grpExit)
+initialStopAtrMult = input.float(1.5, "Initial Stop - ATR Multiplier", minval=0.1, step=0.1, group=grpExit)
+trailAtrMult       = input.float(2.0, "Trailing Stop - ATR Multiplier", minval=0.1, step=0.1, group=grpExit)
+
+grpDaily = "Daily Trend Filter"
+smaLen = input.int(200, "Daily SMA Length", group=grpDaily)
+
+grpShort = "Short Entry Filter"
+bufferMult = input.float(0.5, "Intraday Breakdown - ATR Buffer Multiplier", minval=0.0, step=0.05, group=grpShort)
+
+// ---- Daily-context data (previous COMPLETED daily bar only, no repainting) ----
+// Verified directly against the live deployed v1/v2 strategies: this [1]
+// offset pattern correctly resolves to YESTERDAY's completed daily bar (a
+// 1-day lag), not 2 days - confirmed by reading dHigh1's live plot value
+// against the actual daily chart. Unchanged from v2.
+dHigh1    = request.security(syminfo.tickerid, "D", high[1],  lookahead=barmerge.lookahead_off)
+dLow1     = request.security(syminfo.tickerid, "D", low[1],   lookahead=barmerge.lookahead_off)
+dClose1   = request.security(syminfo.tickerid, "D", close[1], lookahead=barmerge.lookahead_off)
+dSma200_1 = request.security(syminfo.tickerid, "D", ta.sma(close, smaLen)[1], lookahead=barmerge.lookahead_off)
+
+// ---- Intraday session high/low since 00:00 UTC today (15m timeframe) ----
+// Unchanged from v2.
+utcYear  = year(time, "UTC")
+utcMonth = month(time, "UTC")
+utcDay   = dayofmonth(time, "UTC")
+newUtcDay = utcDay != utcDay[1] or utcMonth != utcMonth[1] or utcYear != utcYear[1]
+
+var float sessionHigh = na
+var float sessionLow  = na
+if newUtcDay
+    sessionHigh := na
+    sessionLow  := na
+
+sessionHighExclCurrent = sessionHigh
+sessionLowExclCurrent  = sessionLow
+sessionHigh := math.max(nz(sessionHigh, high), high)
+sessionLow  := math.min(nz(sessionLow, low), low)
+
+// ---- Entry logic ----
+currPx = close
+atrVal = ta.atr(atrLen)
+
+// ---- LONG SIDE: byte-identical to v2, not touched. ----
+dailyBreakout    = currPx > dHigh1 and dClose1 > dSma200_1
+intradayBreakout = not na(sessionHighExclCurrent) and currPx > sessionHighExclCurrent
+longCondition    = dailyBreakout and intradayBreakout
+
+// ---- SHORT SIDE: Variant 2 - ATR distance buffer on intraday breakdown ----
+dailyBreakdown = currPx < dLow1 and dClose1 < dSma200_1
+
+// Must clear session low by bufferMult * ATR, not just tick under it.
+intradayBreakdown = not na(sessionLowExclCurrent) and not na(atrVal) and
+     currPx < sessionLowExclCurrent - bufferMult * atrVal
+
+shortCondition = dailyBreakdown and intradayBreakdown
+
+flat = strategy.position_size == 0
+
+// ---- Exit logic: symmetric chandelier trail per side (unchanged from v2) ----
+var float initialStopPrice = na
+var float highestSinceEntry = na  // long side trail anchor
+var float lowestSinceEntry  = na  // short side trail anchor
+
+if flat
+    initialStopPrice := na
+    highestSinceEntry := na
+    lowestSinceEntry := na
+
+if flat and longCondition and not na(atrVal)
+    strategy.entry("Long", strategy.long)
+    initialStopPrice := currPx - initialStopAtrMult * atrVal
+    highestSinceEntry := high
+else if flat and shortCondition and not na(atrVal)
+    strategy.entry("Short", strategy.short)
+    initialStopPrice := currPx + initialStopAtrMult * atrVal
+    lowestSinceEntry := low
+
+if strategy.position_size > 0
+    highestSinceEntry := math.max(nz(highestSinceEntry, high), high)
+    trailStopPrice = highestSinceEntry - trailAtrMult * atrVal
+    activeStop = math.max(trailStopPrice, initialStopPrice)
+    strategy.exit("Exit Long", "Long", stop=activeStop)
+else if strategy.position_size < 0
+    lowestSinceEntry := math.min(nz(lowestSinceEntry, low), low)
+    trailStopPrice = lowestSinceEntry + trailAtrMult * atrVal
+    activeStop = math.min(trailStopPrice, initialStopPrice)
+    strategy.exit("Exit Short", "Short", stop=activeStop)
+
+// ---- Plots ----
+plot(dHigh1, "Prev Daily High", color=color.new(color.red, 0), style=plot.style_stepline)
+plot(dLow1, "Prev Daily Low", color=color.new(color.green, 0), style=plot.style_stepline)
+plot(dSma200_1, "Daily SMA200 (prev)", color=color.new(color.blue, 0), linewidth=2)
+plot(sessionHigh, "Session High (today, UTC)", color=color.new(color.orange, 0), style=plot.style_stepline)
+plot(sessionLow, "Session Low (today, UTC)", color=color.new(color.purple, 0), style=plot.style_stepline)
+
+activeStopPlot = strategy.position_size > 0 ? math.max(highestSinceEntry - trailAtrMult * atrVal, initialStopPrice) :
+     strategy.position_size < 0 ? math.min(lowestSinceEntry + trailAtrMult * atrVal, initialStopPrice) : na
+plot(activeStopPlot, "Active Stop", color=color.new(color.fuchsia, 0), style=plot.style_linebr)
+
+plotshape(flat and longCondition, title="Long Entry",
+     location=location.belowbar, style=shape.triangleup, color=color.new(color.lime, 0), size=size.small)
+plotshape(flat and shortCondition, title="Short Entry",
+     location=location.abovebar, style=shape.triangledown, color=color.new(color.red, 0), size=size.small)
+
+alertcondition(flat and longCondition, title="TJL Long Entry",
+     message="Trend Join Long/Short v2c: BTCUSDT long entry conditions met")
+alertcondition(flat and shortCondition, title="TJL Short Entry (ATR buffer)",
+     message="Trend Join Long/Short v2c: BTCUSDT ATR-buffer short entry conditions met")

@@ -1,0 +1,15 @@
+{
+  "scanned_at": "2026-09-18T09:30:01Z",
+  "symbol": "BINANCE:BTCUSDT",
+  "variant": "short_baseline",
+  "buffer_mult": 0.0,
+  "curr_price": 78157.88,
+  "prev_daily_low": 76000.0,
+  "prev_daily_close": 76417.01,
+  "sma200": 70419.28145,
+  "session_low": 76296.0,
+  "atr14_15m": 198.11529274633372,
+  "daily_breakdown": false,
+  "intraday_breakdown": false,
+  "result": "fail_daily"
+}

@@ -1,0 +1,144 @@
+//@version=6
+strategy("Trend Join L/S - BTCUSDT v2b (Short Confirm)", shorttitle="TJL v2b SC", overlay=true,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=20,
+     commission_type=strategy.commission.percent, commission_value=0.075,
+     slippage=1, calc_on_every_tick=false, process_orders_on_close=true,
+     margin_long=100, margin_short=100)
+
+// =============================================================================
+// Trend Join Long/Short v2b - Short-side Variant 1: 2-bar confirmation
+//
+// Baseline for comparison (tjl_btcusdt_v2_longshort.pine, Jul1-Sep18 2026):
+//   Short: 28 trades, 32.1% win rate, PF ~0.42
+//   Long side is UNCHANGED here and must keep matching v1/v2 exactly -
+//   verified below after building this variant.
+//
+// ONE change from v2, isolated to the Short side only:
+//
+//   CLARIFICATION: the brief asked for "close (not intrabar low) below
+//   session_low" - v2 already does this. currPx = close is used for BOTH
+//   dailyBreakdown and intradayBreakdown; `low` is never compared against
+//   session_low anywhere in v2. That part of the ask was already true.
+//
+//   THE ACTUAL NEW LOGIC: intradayBreakdown (close < session low) must now
+//   hold on the current CLOSED bar AND the immediately preceding CLOSED bar
+//   - two consecutive confirmations, not one - before a short can fire.
+//   dailyBreakdown (prev-day low/SMA200 check) is left checked on the
+//   current bar only, same as v2: it only updates once per day, so
+//   requiring 2-bar confirmation on it would be a near-no-op except at the
+//   exact day-boundary bar, and the stated goal (filter fast wick-driven
+//   fake breakdowns) is specifically about the noisier intraday signal.
+//
+// Long side entry logic is byte-identical to v2 - not touched.
+// =============================================================================
+
+// ---- Inputs ----
+grpExit = "Exit Settings"
+atrLen             = input.int(14, "ATR Length", group=grpExit)
+initialStopAtrMult = input.float(1.5, "Initial Stop - ATR Multiplier", minval=0.1, step=0.1, group=grpExit)
+trailAtrMult       = input.float(2.0, "Trailing Stop - ATR Multiplier", minval=0.1, step=0.1, group=grpExit)
+
+grpDaily = "Daily Trend Filter"
+smaLen = input.int(200, "Daily SMA Length", group=grpDaily)
+
+// ---- Daily-context data (previous COMPLETED daily bar only, no repainting) ----
+// Verified directly against the live deployed v1/v2 strategies: this [1]
+// offset pattern correctly resolves to YESTERDAY's completed daily bar (a
+// 1-day lag), not 2 days - confirmed by reading dHigh1's live plot value
+// against the actual daily chart. Unchanged from v2.
+dHigh1    = request.security(syminfo.tickerid, "D", high[1],  lookahead=barmerge.lookahead_off)
+dLow1     = request.security(syminfo.tickerid, "D", low[1],   lookahead=barmerge.lookahead_off)
+dClose1   = request.security(syminfo.tickerid, "D", close[1], lookahead=barmerge.lookahead_off)
+dSma200_1 = request.security(syminfo.tickerid, "D", ta.sma(close, smaLen)[1], lookahead=barmerge.lookahead_off)
+
+// ---- Intraday session high/low since 00:00 UTC today (15m timeframe) ----
+// Unchanged from v2.
+utcYear  = year(time, "UTC")
+utcMonth = month(time, "UTC")
+utcDay   = dayofmonth(time, "UTC")
+newUtcDay = utcDay != utcDay[1] or utcMonth != utcMonth[1] or utcYear != utcYear[1]
+
+var float sessionHigh = na
+var float sessionLow  = na
+if newUtcDay
+    sessionHigh := na
+    sessionLow  := na
+
+sessionHighExclCurrent = sessionHigh
+sessionLowExclCurrent  = sessionLow
+sessionHigh := math.max(nz(sessionHigh, high), high)
+sessionLow  := math.min(nz(sessionLow, low), low)
+
+// ---- Entry logic ----
+currPx = close
+
+// ---- LONG SIDE: byte-identical to v2, not touched. ----
+dailyBreakout    = currPx > dHigh1 and dClose1 > dSma200_1
+intradayBreakout = not na(sessionHighExclCurrent) and currPx > sessionHighExclCurrent
+longCondition    = dailyBreakout and intradayBreakout
+
+// ---- SHORT SIDE: Variant 1 - 2-consecutive-closed-bar confirmation ----
+dailyBreakdown = currPx < dLow1 and dClose1 < dSma200_1
+
+intradayBreakdownRaw = not na(sessionLowExclCurrent) and currPx < sessionLowExclCurrent
+// Require the raw intraday breakdown to have also been true on the PRIOR
+// closed bar - two consecutive confirmations rather than one - to filter
+// single-bar wick-driven fake breakdowns that immediately reverse.
+intradayBreakdownConfirmed = intradayBreakdownRaw and intradayBreakdownRaw[1]
+
+shortCondition = dailyBreakdown and intradayBreakdownConfirmed
+
+flat = strategy.position_size == 0
+
+// ---- Exit logic: symmetric chandelier trail per side (unchanged from v2) ----
+atrVal = ta.atr(atrLen)
+
+var float initialStopPrice = na
+var float highestSinceEntry = na  // long side trail anchor
+var float lowestSinceEntry  = na  // short side trail anchor
+
+if flat
+    initialStopPrice := na
+    highestSinceEntry := na
+    lowestSinceEntry := na
+
+if flat and longCondition and not na(atrVal)
+    strategy.entry("Long", strategy.long)
+    initialStopPrice := currPx - initialStopAtrMult * atrVal
+    highestSinceEntry := high
+else if flat and shortCondition and not na(atrVal)
+    strategy.entry("Short", strategy.short)
+    initialStopPrice := currPx + initialStopAtrMult * atrVal
+    lowestSinceEntry := low
+
+if strategy.position_size > 0
+    highestSinceEntry := math.max(nz(highestSinceEntry, high), high)
+    trailStopPrice = highestSinceEntry - trailAtrMult * atrVal
+    activeStop = math.max(trailStopPrice, initialStopPrice)
+    strategy.exit("Exit Long", "Long", stop=activeStop)
+else if strategy.position_size < 0
+    lowestSinceEntry := math.min(nz(lowestSinceEntry, low), low)
+    trailStopPrice = lowestSinceEntry + trailAtrMult * atrVal
+    activeStop = math.min(trailStopPrice, initialStopPrice)
+    strategy.exit("Exit Short", "Short", stop=activeStop)
+
+// ---- Plots ----
+plot(dHigh1, "Prev Daily High", color=color.new(color.red, 0), style=plot.style_stepline)
+plot(dLow1, "Prev Daily Low", color=color.new(color.green, 0), style=plot.style_stepline)
+plot(dSma200_1, "Daily SMA200 (prev)", color=color.new(color.blue, 0), linewidth=2)
+plot(sessionHigh, "Session High (today, UTC)", color=color.new(color.orange, 0), style=plot.style_stepline)
+plot(sessionLow, "Session Low (today, UTC)", color=color.new(color.purple, 0), style=plot.style_stepline)
+
+activeStopPlot = strategy.position_size > 0 ? math.max(highestSinceEntry - trailAtrMult * atrVal, initialStopPrice) :
+     strategy.position_size < 0 ? math.min(lowestSinceEntry + trailAtrMult * atrVal, initialStopPrice) : na
+plot(activeStopPlot, "Active Stop", color=color.new(color.fuchsia, 0), style=plot.style_linebr)
+
+plotshape(flat and longCondition, title="Long Entry",
+     location=location.belowbar, style=shape.triangleup, color=color.new(color.lime, 0), size=size.small)
+plotshape(flat and shortCondition, title="Short Entry",
+     location=location.abovebar, style=shape.triangledown, color=color.new(color.red, 0), size=size.small)
+
+alertcondition(flat and longCondition, title="TJL Long Entry",
+     message="Trend Join Long/Short v2b: BTCUSDT long entry conditions met")
+alertcondition(flat and shortCondition, title="TJL Short Entry (confirmed)",
+     message="Trend Join Long/Short v2b: BTCUSDT confirmed short entry conditions met")

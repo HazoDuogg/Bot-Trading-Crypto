@@ -1,0 +1,160 @@
+//@version=6
+strategy("Trend Join L/S - BTCUSDT v2", shorttitle="TJL L/S v2", overlay=true,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=20,
+     commission_type=strategy.commission.percent, commission_value=0.075,
+     slippage=1, calc_on_every_tick=false, process_orders_on_close=true,
+     margin_long=100, margin_short=100)
+
+// =============================================================================
+// Trend Join Long/Short v2
+//
+// Two-directional extension of tjl_btcusdt_v1.pine (that script is untouched -
+// this is a separate file/chart slot so both can be compared side by side).
+//
+// Position sizing is 20% of equity (not v1's 100%) with explicit
+// margin_long/margin_short=100 - discovered directly that 100%-of-equity
+// shorts get force-liquidated by the paper broker's margin-call mechanism
+// (0% win rate, trade IDs literally named "Margin call N") well before this
+// script's own ATR stop can fire, since an adverse move against a
+// fully-equity-sized short depletes available margin almost immediately.
+//
+// Entries also require ta.atr(atrLen) to be a real number (not na). Without
+// this guard, a trade opened during the ATR's warmup period computes
+// initialStopPrice = currPx +/- (initialStopAtrMult * na) = na, and since
+// that na is never recomputed after entry, strategy.exit(..., stop=na) never
+// places a stop order at all - the position rides completely unprotected for
+// its entire life. Confirmed directly: a debug build showed exactly this -
+// lowestSinceEntry held a real number while initialStopPrice stayed na for
+// an entire multi-week open short with zero exit orders ever generated.
+//
+// Long side is identical to v1:
+//   daily_breakout    = (curr_px > prev completed daily bar's high)
+//                       AND (prev daily close > 200-day SMA)
+//   intraday_breakout = (curr_px > session high since 00:00 UTC today,
+//                        excluding the still-forming current bar)
+//
+// Short side mirrors it symmetrically:
+//   daily_breakdown    = (curr_px < prev completed daily bar's low)
+//                        AND (prev daily close < 200-day SMA)
+//   intraday_breakdown = (curr_px < session low since 00:00 UTC today,
+//                         excluding the still-forming current bar)
+//
+// Mutual exclusion: entry conditions are only evaluated when
+// strategy.position_size == 0 - while either a long or short is open, no new
+// entry (of either direction) is considered until that position closes via
+// its stop/trail exit. Never both directions open at once.
+// =============================================================================
+
+// ---- Inputs ----
+grpExit = "Exit Settings"
+atrLen             = input.int(14, "ATR Length", group=grpExit)
+initialStopAtrMult = input.float(1.5, "Initial Stop - ATR Multiplier", minval=0.1, step=0.1, group=grpExit)
+trailAtrMult       = input.float(2.0, "Trailing Stop - ATR Multiplier", minval=0.1, step=0.1, group=grpExit)
+
+grpDaily = "Daily Trend Filter"
+smaLen = input.int(200, "Daily SMA Length", group=grpDaily)
+
+// ---- Daily-context data (previous COMPLETED daily bar only, no repainting) ----
+// The [1] offset inside request.security() is what makes this the LAST
+// CLOSED daily bar rather than today's still-forming one - request.security()
+// without an offset would return the in-progress daily bar's live-updating
+// values, which is not "prev_daily_high/low/close" from the scanner.
+dHigh1    = request.security(syminfo.tickerid, "D", high[1],  lookahead=barmerge.lookahead_off)
+dLow1     = request.security(syminfo.tickerid, "D", low[1],   lookahead=barmerge.lookahead_off)
+dClose1   = request.security(syminfo.tickerid, "D", close[1], lookahead=barmerge.lookahead_off)
+dSma200_1 = request.security(syminfo.tickerid, "D", ta.sma(close, smaLen)[1], lookahead=barmerge.lookahead_off)
+
+// ---- Intraday session high/low since 00:00 UTC today (15m timeframe) ----
+utcYear  = year(time, "UTC")
+utcMonth = month(time, "UTC")
+utcDay   = dayofmonth(time, "UTC")
+newUtcDay = utcDay != utcDay[1] or utcMonth != utcMonth[1] or utcYear != utcYear[1]
+
+var float sessionHigh = na
+var float sessionLow  = na
+if newUtcDay
+    sessionHigh := na
+    sessionLow  := na
+
+// Session high/low EXCLUDING the current (still-forming) bar - captured
+// before this bar's own high/low is folded in, matching the scanner's
+// "excluding current bar" rule exactly (same pattern as v1, mirrored for low).
+sessionHighExclCurrent = sessionHigh
+sessionLowExclCurrent  = sessionLow
+sessionHigh := math.max(nz(sessionHigh, high), high)
+sessionLow  := math.min(nz(sessionLow, low), low)
+
+// ---- Entry logic ----
+currPx = close
+
+dailyBreakout    = currPx > dHigh1 and dClose1 > dSma200_1
+intradayBreakout = not na(sessionHighExclCurrent) and currPx > sessionHighExclCurrent
+longCondition    = dailyBreakout and intradayBreakout
+
+dailyBreakdown    = currPx < dLow1 and dClose1 < dSma200_1
+intradayBreakdown = not na(sessionLowExclCurrent) and currPx < sessionLowExclCurrent
+shortCondition    = dailyBreakdown and intradayBreakdown
+
+flat = strategy.position_size == 0
+
+// ---- Exit logic: symmetric chandelier trail per side ----
+atrVal = ta.atr(atrLen)
+
+var float initialStopPrice = na
+var float highestSinceEntry = na  // long side trail anchor
+var float lowestSinceEntry  = na  // short side trail anchor
+
+if flat
+    initialStopPrice := na
+    highestSinceEntry := na
+    lowestSinceEntry := na
+
+// Only ONE of these can fire per bar since both require flat, and a filled
+// entry immediately makes position_size != 0 for every subsequent bar until
+// it closes - enforcing "never both open at once" structurally, not just by
+// intent. `not na(atrVal)` additionally blocks entries during ATR warmup -
+// see the na-stop bug note above.
+if flat and longCondition and not na(atrVal)
+    strategy.entry("Long", strategy.long)
+    initialStopPrice := currPx - initialStopAtrMult * atrVal
+    highestSinceEntry := high
+else if flat and shortCondition and not na(atrVal)
+    strategy.entry("Short", strategy.short)
+    initialStopPrice := currPx + initialStopAtrMult * atrVal
+    lowestSinceEntry := low
+
+if strategy.position_size > 0
+    highestSinceEntry := math.max(nz(highestSinceEntry, high), high)
+    trailStopPrice = highestSinceEntry - trailAtrMult * atrVal
+    // Never let the trailing stop sit below the initial protective stop -
+    // it can only ratchet up from there, matching standard chandelier logic.
+    activeStop = math.max(trailStopPrice, initialStopPrice)
+    strategy.exit("Exit Long", "Long", stop=activeStop)
+else if strategy.position_size < 0
+    lowestSinceEntry := math.min(nz(lowestSinceEntry, low), low)
+    trailStopPrice = lowestSinceEntry + trailAtrMult * atrVal
+    // Mirror of the long side: never let the trailing stop sit above the
+    // initial protective stop - it can only ratchet down from there.
+    activeStop = math.min(trailStopPrice, initialStopPrice)
+    strategy.exit("Exit Short", "Short", stop=activeStop)
+
+// ---- Plots ----
+plot(dHigh1, "Prev Daily High", color=color.new(color.red, 0), style=plot.style_stepline)
+plot(dLow1, "Prev Daily Low", color=color.new(color.green, 0), style=plot.style_stepline)
+plot(dSma200_1, "Daily SMA200 (prev)", color=color.new(color.blue, 0), linewidth=2)
+plot(sessionHigh, "Session High (today, UTC)", color=color.new(color.orange, 0), style=plot.style_stepline)
+plot(sessionLow, "Session Low (today, UTC)", color=color.new(color.purple, 0), style=plot.style_stepline)
+
+activeStopPlot = strategy.position_size > 0 ? math.max(highestSinceEntry - trailAtrMult * atrVal, initialStopPrice) :
+     strategy.position_size < 0 ? math.min(lowestSinceEntry + trailAtrMult * atrVal, initialStopPrice) : na
+plot(activeStopPlot, "Active Stop", color=color.new(color.fuchsia, 0), style=plot.style_linebr)
+
+plotshape(flat and longCondition, title="Long Entry",
+     location=location.belowbar, style=shape.triangleup, color=color.new(color.lime, 0), size=size.small)
+plotshape(flat and shortCondition, title="Short Entry",
+     location=location.abovebar, style=shape.triangledown, color=color.new(color.red, 0), size=size.small)
+
+alertcondition(flat and longCondition, title="TJL Long Entry",
+     message="Trend Join Long/Short: BTCUSDT long entry conditions met")
+alertcondition(flat and shortCondition, title="TJL Short Entry",
+     message="Trend Join Long/Short: BTCUSDT short entry conditions met")

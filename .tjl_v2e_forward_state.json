@@ -1,0 +1,14 @@
+{
+  "position": 0,
+  "entry_price": 86372.66,
+  "entry_time": 1790018100000,
+  "initial_stop": 85935.36002379074,
+  "tp_price": 87356.58494647087,
+  "highest_since_entry": null,
+  "lowest_since_entry": null,
+  "last_processed_bar_time": 1790045100000,
+  "last_scan_at": "2026-09-22T03:11:00Z",
+  "last_result": "fail_daily",
+  "should_notify": false,
+  "notify_reason": null
+}

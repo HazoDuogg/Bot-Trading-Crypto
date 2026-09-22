@@ -1,0 +1,200 @@
+//@version=6
+strategy("Trend Join - BTCUSDT v3 (Trend+Zone+Reaction)", shorttitle="TJL v3 TZ", overlay=true,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=20,
+     commission_type=strategy.commission.percent, commission_value=0.075,
+     slippage=1, calc_on_every_tick=false, process_orders_on_close=true,
+     margin_long=100, margin_short=100)
+
+// =============================================================================
+// Trend Join v3 - fundamentally different methodology from v1/v2/v2c/v2d.
+//
+// Those were all BREAKOUT entries (enter when price breaks a daily/session
+// high or low, filtered by SMA200 + ATR buffer). Visual analysis showed all
+// 28 baseline v2 Short trades fired inside a $62k-$65.8k CHOP range and none
+// inside the genuine May-Jun downtrend - breakout entries at range boundaries
+// mostly catch fakeouts, not real continuation.
+//
+// v3 instead runs entirely on the DAILY chart (no 15m/request.security split
+// like the earlier versions - trend structure, zones, and the reaction
+// candle are all daily-bar concepts) and requires THREE things to align:
+//
+//   1. TREND STRUCTURE: last two confirmed pivot highs/lows (ta.pivothigh/
+//      pivotlow) must show higher-highs+higher-lows (uptrend) or
+//      lower-highs+lower-lows (downtrend). Anything else = range/unclear,
+//      and NO entries of either direction are allowed while unclear.
+//   2. SMA SLOPE CONFIRMATION: SMA50 must be rising (uptrend) or falling
+//      (downtrend) over the last slopeLookback bars, agreeing with the
+//      pivot-structure read.
+//   3. ZONE + REACTION: price must pull back into a zone built from a
+//      TIGHT CLUSTER OF 2+ PIVOT TOUCHES (not a single-touch breakout
+//      level), then print a rejection candle - defined precisely as: the
+//      bar's range overlaps the zone, closes back outside/away from it in
+//      the trend direction, AND the wick against the zone is at least as
+//      large as the candle's body (a genuine rejection wick, not just a
+//      close that happens to clear the zone).
+//
+// Manual visual setup count (done before writing this code, per user
+// request) across ~10 months of loadable daily history: only ~3-6
+// qualifying Short setups total (2 real downtrend episodes: Feb 2026 crash
+// ~1-2, May-Jun 2026 crash ~2-4). This is a THIN sample - expected going in,
+// not a bug if the Jul1-Sep18 backtest window (almost entirely chop/uptrend)
+// shows few or zero v3 signals.
+//
+// Exit logic (ATR initial stop + chandelier trail) is unchanged in spirit
+// from v1/v2/v2c/v2d, just computed on daily ATR since the whole script now
+// runs on daily bars instead of 15m.
+// =============================================================================
+
+// ---- Inputs ----
+grpStructure = "Trend Structure"
+pivotLen      = input.int(3, "Pivot Lookback (bars each side)", minval=1, group=grpStructure)
+smaLen        = input.int(50, "SMA Length (slope filter)", minval=2, group=grpStructure)
+slopeLookback = input.int(10, "SMA Slope Lookback (bars)", minval=1, group=grpStructure)
+
+grpZone = "Zone + Reaction"
+maxPivots  = input.int(8, "Max Stored Pivots per Side", minval=2, group=grpZone)
+zoneTolPct = input.float(1.5, "Zone Cluster Tolerance (%)", minval=0.1, step=0.1, group=grpZone)
+
+grpExit = "Exit Settings"
+atrLen             = input.int(14, "ATR Length", group=grpExit)
+initialStopAtrMult = input.float(1.5, "Initial Stop - ATR Multiplier", minval=0.1, step=0.1, group=grpExit)
+trailAtrMult       = input.float(2.0, "Trailing Stop - ATR Multiplier", minval=0.1, step=0.1, group=grpExit)
+
+// ---- Pivot detection (confirmed pivotLen bars after the actual extreme) ----
+phVal = ta.pivothigh(pivotLen, pivotLen)
+plVal = ta.pivotlow(pivotLen, pivotLen)
+
+var float lastPH = na
+var float prevPH = na
+var float lastPL = na
+var float prevPL = na
+
+if not na(phVal)
+    prevPH := lastPH
+    lastPH := phVal
+if not na(plVal)
+    prevPL := lastPL
+    lastPL := plVal
+
+// ---- Trend structure: higher-highs+higher-lows / lower-highs+lower-lows ----
+structureUp   = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL) and
+     lastPH > prevPH and lastPL > prevPL
+structureDown = not na(lastPH) and not na(prevPH) and not na(lastPL) and not na(prevPL) and
+     lastPH < prevPH and lastPL < prevPL
+
+// ---- SMA slope confirmation ----
+smaVal      = ta.sma(close, smaLen)
+slopeRising  = smaVal > smaVal[slopeLookback]
+slopeFalling = smaVal < smaVal[slopeLookback]
+
+allowLong  = structureUp and slopeRising
+allowShort = structureDown and slopeFalling
+
+// ---- Zone tracking: store recent confirmed pivots, find tightest 2+ cluster ----
+var array<float> pivotHighs = array.new_float(0)
+var array<float> pivotLows  = array.new_float(0)
+
+if not na(phVal)
+    array.push(pivotHighs, phVal)
+    if array.size(pivotHighs) > maxPivots
+        array.shift(pivotHighs)
+if not na(plVal)
+    array.push(pivotLows, plVal)
+    if array.size(pivotLows) > maxPivots
+        array.shift(pivotLows)
+
+// Returns [zoneLow, zoneHigh] of the TIGHTEST pair within tolPct of each
+// other found in arr - i.e. a cluster of 2+ touches within a tight price
+// band, not a single-touch level. na/na if no such pair exists.
+f_findZone(arr, tolPct) =>
+    n = array.size(arr)
+    float bestLow = na
+    float bestHigh = na
+    if n >= 2
+        for i = 0 to n - 2
+            for j = i + 1 to n - 1
+                a = array.get(arr, i)
+                b = array.get(arr, j)
+                mid = (a + b) / 2
+                diffPct = math.abs(a - b) / mid * 100
+                if diffPct <= tolPct
+                    lo = math.min(a, b)
+                    hi = math.max(a, b)
+                    if na(bestLow) or (hi - lo) < (bestHigh - bestLow)
+                        bestLow := lo
+                        bestHigh := hi
+    [bestLow, bestHigh]
+
+[supportLo, supportHi]    = f_findZone(pivotLows, zoneTolPct)
+[resistanceLo, resistanceHi] = f_findZone(pivotHighs, zoneTolPct)
+
+// ---- Reaction (rejection candle) confirmation ----
+body = math.abs(close - open)
+
+touchedSupport = not na(supportLo) and low <= supportHi and high >= supportLo
+lowerWick = math.min(open, close) - low
+rejectionUp = touchedSupport and close > supportHi and close > open and lowerWick >= body
+
+touchedResistance = not na(resistanceLo) and high >= resistanceLo and low <= resistanceHi
+upperWick = high - math.max(open, close)
+rejectionDown = touchedResistance and close < resistanceLo and close < open and upperWick >= body
+
+longCondition  = allowLong and rejectionUp
+shortCondition = allowShort and rejectionDown
+
+flat = strategy.position_size == 0
+
+// ---- Exit logic: ATR initial stop + chandelier trail (daily ATR) ----
+atrVal = ta.atr(atrLen)
+
+var float initialStopPrice  = na
+var float highestSinceEntry = na
+var float lowestSinceEntry  = na
+
+if flat
+    initialStopPrice := na
+    highestSinceEntry := na
+    lowestSinceEntry := na
+
+if flat and longCondition and not na(atrVal)
+    strategy.entry("Long", strategy.long)
+    initialStopPrice := close - initialStopAtrMult * atrVal
+    highestSinceEntry := high
+else if flat and shortCondition and not na(atrVal)
+    strategy.entry("Short", strategy.short)
+    initialStopPrice := close + initialStopAtrMult * atrVal
+    lowestSinceEntry := low
+
+if strategy.position_size > 0
+    highestSinceEntry := math.max(nz(highestSinceEntry, high), high)
+    trailStopPrice = highestSinceEntry - trailAtrMult * atrVal
+    activeStop = math.max(trailStopPrice, initialStopPrice)
+    strategy.exit("Exit Long", "Long", stop=activeStop)
+else if strategy.position_size < 0
+    lowestSinceEntry := math.min(nz(lowestSinceEntry, low), low)
+    trailStopPrice = lowestSinceEntry + trailAtrMult * atrVal
+    activeStop = math.min(trailStopPrice, initialStopPrice)
+    strategy.exit("Exit Short", "Short", stop=activeStop)
+
+// ---- Plots ----
+plot(supportHi, "Support Zone High", color=color.new(color.green, 0), style=plot.style_stepline)
+plot(supportLo, "Support Zone Low", color=color.new(color.green, 40), style=plot.style_stepline)
+plot(resistanceHi, "Resistance Zone High", color=color.new(color.red, 40), style=plot.style_stepline)
+plot(resistanceLo, "Resistance Zone Low", color=color.new(color.red, 0), style=plot.style_stepline)
+plot(smaVal, "SMA (slope filter)", color=color.new(color.blue, 0), linewidth=2)
+
+activeStopPlot = strategy.position_size > 0 ? math.max(highestSinceEntry - trailAtrMult * atrVal, initialStopPrice) :
+     strategy.position_size < 0 ? math.min(lowestSinceEntry + trailAtrMult * atrVal, initialStopPrice) : na
+plot(activeStopPlot, "Active Stop", color=color.new(color.fuchsia, 0), style=plot.style_linebr)
+
+plotshape(flat and longCondition, title="Long Entry",
+     location=location.belowbar, style=shape.triangleup, color=color.new(color.lime, 0), size=size.small)
+plotshape(flat and shortCondition, title="Short Entry",
+     location=location.abovebar, style=shape.triangledown, color=color.new(color.red, 0), size=size.small)
+
+bgcolor(structureUp ? color.new(color.green, 92) : structureDown ? color.new(color.red, 92) : na, title="Structure background")
+
+alertcondition(flat and longCondition, title="TJL v3 Long Entry",
+     message="Trend Join v3: BTCUSDT trend+zone+reaction long entry conditions met")
+alertcondition(flat and shortCondition, title="TJL v3 Short Entry",
+     message="Trend Join v3: BTCUSDT trend+zone+reaction short entry conditions met")

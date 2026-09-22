@@ -1,0 +1,14 @@
+{
+  "position": 0,
+  "entry_price": null,
+  "entry_time": null,
+  "initial_stop": null,
+  "tp_price": null,
+  "highest_since_entry": null,
+  "lowest_since_entry": null,
+  "last_processed_bar_time": 1790045100000,
+  "last_scan_at": "2026-09-22T03:11:00Z",
+  "last_result": "fail_daily",
+  "should_notify": false,
+  "notify_reason": null
+}

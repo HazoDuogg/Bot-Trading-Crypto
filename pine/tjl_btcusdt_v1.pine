@@ -1,0 +1,100 @@
+//@version=6
+strategy("Trend Join Long - BTCUSDT v1", shorttitle="TJL Lng v1", overlay=true,
+     initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+     commission_type=strategy.commission.percent, commission_value=0.075,
+     slippage=1, calc_on_every_tick=false, process_orders_on_close=true)
+
+// =============================================================================
+// Trend Join Long v1
+//
+// Entry logic ported 1:1 from the deterministic TJL BTCUSDT scanner
+// (tjl_btcusdt_scanner.sh, itself validated against Binance's REST API and
+// cross-checked against a live TradingView MCP scan):
+//
+//   daily_breakout    = (curr_px > prev completed daily bar's high)
+//                       AND (prev daily close > 200-day SMA)
+//   intraday_breakout = (curr_px > session high since 00:00 UTC today,
+//                        excluding the still-forming current bar)
+//   long entry when both are true
+//
+// Intended chart: BTCUSDT, 15-minute timeframe (matches the scanner). Exit
+// logic (initial stop + ATR trailing stop) is this script's own addition -
+// the scanner only ever evaluated entry conditions, never exits.
+// =============================================================================
+
+// ---- Inputs ----
+grpExit = "Exit Settings"
+atrLen             = input.int(14, "ATR Length", group=grpExit)
+initialStopAtrMult = input.float(1.5, "Initial Stop - ATR Multiplier", minval=0.1, step=0.1, group=grpExit)
+trailAtrMult       = input.float(2.0, "Trailing Stop - ATR Multiplier", minval=0.1, step=0.1, group=grpExit)
+
+grpDaily = "Daily Trend Filter"
+smaLen = input.int(200, "Daily SMA Length", group=grpDaily)
+
+// ---- Daily-context data (previous COMPLETED daily bar only, no repainting) ----
+// The [1] offset inside request.security() is what makes this the LAST
+// CLOSED daily bar rather than today's still-forming one - request.security()
+// without an offset would return the in-progress daily bar's live-updating
+// values, which is not "prev_daily_high"/"prev_daily_close" from the scanner.
+dHigh1    = request.security(syminfo.tickerid, "D", high[1],  lookahead=barmerge.lookahead_off)
+dClose1   = request.security(syminfo.tickerid, "D", close[1], lookahead=barmerge.lookahead_off)
+dSma200_1 = request.security(syminfo.tickerid, "D", ta.sma(close, smaLen)[1], lookahead=barmerge.lookahead_off)
+
+// ---- Intraday session high since 00:00 UTC today (15m timeframe) ----
+utcYear  = year(time, "UTC")
+utcMonth = month(time, "UTC")
+utcDay   = dayofmonth(time, "UTC")
+newUtcDay = utcDay != utcDay[1] or utcMonth != utcMonth[1] or utcYear != utcYear[1]
+
+var float sessionHigh = na
+if newUtcDay
+    sessionHigh := na
+
+// Session high EXCLUDING the current (still-forming) bar - captured before
+// this bar's own high is folded in, matching the scanner's
+// "excluding current bar" rule exactly.
+sessionHighExclCurrent = sessionHigh
+sessionHigh := math.max(nz(sessionHigh, high), high)
+
+// ---- Entry logic (identical to the scanner) ----
+currPx = close
+
+dailyBreakout    = currPx > dHigh1 and dClose1 > dSma200_1
+intradayBreakout = not na(sessionHighExclCurrent) and currPx > sessionHighExclCurrent
+longCondition    = dailyBreakout and intradayBreakout
+
+// ---- Exit logic (this script's own addition - chandelier-style trail) ----
+atrVal = ta.atr(atrLen)
+
+var float initialStopPrice = na
+var float highestSinceEntry = na
+
+if strategy.position_size == 0
+    initialStopPrice := na
+    highestSinceEntry := na
+
+if longCondition and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+    initialStopPrice := currPx - initialStopAtrMult * atrVal
+    highestSinceEntry := high
+
+if strategy.position_size > 0
+    highestSinceEntry := math.max(nz(highestSinceEntry, high), high)
+    trailStopPrice = highestSinceEntry - trailAtrMult * atrVal
+    // Never let the trailing stop sit below the initial protective stop -
+    // it can only ratchet up from there, matching standard chandelier logic.
+    activeStop = math.max(trailStopPrice, initialStopPrice)
+    strategy.exit("Exit", "Long", stop=activeStop)
+
+// ---- Plots ----
+plot(dHigh1, "Prev Daily High", color=color.new(color.red, 0), style=plot.style_stepline)
+plot(dSma200_1, "Daily SMA200 (prev)", color=color.new(color.blue, 0), linewidth=2)
+plot(sessionHigh, "Session High (today, UTC)", color=color.new(color.orange, 0), style=plot.style_stepline)
+plot(strategy.position_size > 0 ? math.max(highestSinceEntry - trailAtrMult * atrVal, initialStopPrice) : na,
+     "Active Stop", color=color.new(color.fuchsia, 0), style=plot.style_linebr)
+
+plotshape(longCondition and strategy.position_size == 0, title="Long Entry",
+     location=location.belowbar, style=shape.triangleup, color=color.new(color.lime, 0), size=size.small)
+
+alertcondition(longCondition and strategy.position_size == 0, title="TJL Long Entry",
+     message="Trend Join Long: BTCUSDT entry conditions met")
