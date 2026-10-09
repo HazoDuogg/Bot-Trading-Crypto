@@ -1,5 +1,0 @@
-[utc=2026-09-22T02:31:32Z local=2026-09-22 09:31:33] Guard passed. Running SOLUSDT v2e Long-only forward scan...
-{"v2e": {"variant": "v2e", "position": 0, "last_result": "fail_daily", "closed_trades_this_run": 0, "should_notify": false, "notify_reason": null}}
-SOLUSDT 1-variant forward scan: v2e=flat(fail_daily)
-
-[utc=2026-09-22T02:31:32Z local=2026-09-22 09:31:33] Scan succeeded (exit 0). Run-gate updated.
