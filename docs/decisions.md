@@ -1,8 +1,141 @@
 # Decisions and open notes
 
-This file is seeded early (during the `chore/restructure` work) with an open
-diagnostic note. The full decisions log (locked parameters, rejected
-approaches, phase plan) is written up in Step 8 of the restructure.
+Project goal: a TypeScript trading-bot FRAMEWORK with a place for an AI
+layer (XGBoost-style signal scoring). Pine on TradingView is only the
+research lab. **Strategy is not locked yet** - everything below the
+"Current forward-test parameters" section is provisional, swept and
+tested but not committed to a final production spec.
+
+## Current forward-test parameters (provisional - see config/*.json)
+
+Running live in `legacy/scanners/tjl_forward_scanner.py`, dual-write into
+`runtime/bot.db` since 2026-10-09:
+
+| Symbol | Variant | Sides | Gate | Buffer | R:R |
+|---|---|---|---|---|---|
+| BTCUSDT | v2f | Long + Short | trend_structure | 0.5 | 2.25 |
+| ETHUSDT | v2f | Long only | trend_structure | 0.5 | 2.25 |
+| SOLUSDT | v2e | Long only | none (ungated) | 0.5 | 2.25 |
+
+Risk (provisional, see `config/risk.json`): 1% risk/trade; 15% margin cap
+**as margin, not notional** (margin_used = notional/leverage; allowed
+notional = margin_cap% * equity * leverage); leverage 20x BTC/ETH, 10x
+SOL; circuit breaker = halve position size after 3 consecutive losses on
+a symbol, reset on that symbol's next win (per-symbol, not cross-symbol).
+
+Fees (provisional, see `config/fees.json`): 0.075%/fill (0.15% round
+trip). Fill model (signal-bar close vs next-bar open) is **undecided** -
+the current scanner assumes same-bar-close fills, which is optimistic
+vs real execution.
+
+## Rejected approaches
+
+- **v3 (Trend+Zone+Reaction, Daily-chart methodology)** - fundamentally
+  different from the breakout+gate family; not adopted. Archived at
+  `research/pine/archive/tjl_btcusdt_v3_trendzone.pine`.
+- **SMC (Smart Money Concepts)** - tried twice: once as a from-scratch
+  Pine rebuild (`research/pine/archive/tjl_btcusdt_smc_v1.pine` /
+  `smc_v2.pine` - Phase 1 showed promising Long PF but all 6 Short
+  trades lost), and once as a full prior TypeScript implementation
+  (the pre-existing `src/{regime,direction,entry,exit,...}` code - see
+  the "existing src/ codebase" note below). Neither was adopted; the
+  project continued with the breakout+gate (v1/v2/v2c/v2e/v2f) lineage
+  instead.
+- **Cross-symbol correlation cap** - capping total simultaneous same-
+  direction risk across BTC/ETH/SOL. Tested via backtest simulation:
+  reduced max drawdown but cost proportionally MORE return than the
+  drawdown it saved (worse Return/MaxDD than flat sizing), and didn't
+  target the actual dominant risk (SOL's own sequential-loss streaks,
+  not cross-symbol correlation). Not adopted - see the per-symbol
+  circuit breaker below instead.
+- **XRP** - tested via a Python-replica backtest that turned out
+  wrong/misleading once checked against reality. This is the specific
+  incident behind the "real Pine Strategy Tester, not a Python proxy,
+  for anything load-bearing" rule applied for the rest of the project
+  (e.g. the SOL Short real-Pine sweep below).
+- **SOL Short** - properly tested (unlike ETH Short, below) via a real
+  Pine Strategy Tester buffer/RR sweep (11 parameter combinations, SMA200
+  gate, same discipline as BTC's original sweep). Every combination was
+  net-negative, PF never exceeded 0.79 - structurally weak, not merely
+  untested. Rejected.
+- **ETH Short** - tested earlier in the project and failed explicitly
+  (referenced throughout the session as the known-bad baseline SOL
+  Short was compared against).
+
+## Key lessons
+
+1. **Python replicas of Pine strategies can diverge from real Pine** -
+   the XRP incident is the cautionary example. Validate via the real
+   TradingView Strategy Tester wherever the platform's history depth
+   allows it; label Python-replica results clearly as such when it
+   doesn't (see `tools/backtest_tjl_v2_binance.py`'s header note).
+2. **TradingView's Basic plan has a hard intraday-history wall** (~5-6
+   weeks back from "now", confirmed via SOLUSDT's earliest-loadable 15m
+   bar), independent of symbol. This blocks real-Pine backtesting of
+   older windows (e.g. the Apr-Jul crash-coverage window) - Python
+   replica is the only option there, clearly labeled.
+3. **BTC/ETH/SOL are highly correlated** (0.75-0.87 Daily/15m return
+   correlation, measured directly). The 3-symbol portfolio is closer to
+   one BTC-trend bet expressed in three tickers than three independent
+   edges - ETH's Long "edge" is almost pure beta (flips to a net loser
+   on days BTC isn't pumping, n=10); SOL's is beta-dominated but retains
+   a thin independent slice.
+4. **Fees change the picture at this trade frequency/size.** Every one
+   of the 6 live configs' samples (as of the Oct 9 review) flipped from
+   net-positive to net-negative once 0.075%/fill fees were applied -
+   invisible in the original unfee'd design, only surfaced when checked
+   explicitly. `tools/status.py` now always reports net-of-fees figures.
+5. **Live-vs-backtest gap, still open** - BTC v2/v2c/v2e's Long-side win
+   rate ran ~21-23% live vs ~47-52% in the Jul1-Sep20 backtest, at
+   genuinely comparable sample sizes (13-15 trades each side, not a
+   small-sample fluke by itself). Not resolved - see "Open items" below.
+6. **A per-symbol circuit breaker (halve size after 3 consecutive
+   losses) beat both flat sizing and the cross-symbol correlation cap**
+   on two different historical windows (Jul1-Sep20 and Apr1-Jul15 2026),
+   each with a different streak pattern. Directionally validated, but
+   not scientifically settled (N=3 vs 4 vs 5 tested on only two
+   overlapping-period windows - see `config/risk.json`'s
+   `circuit_breaker` note).
+7. **Windows Task Scheduler + PowerShell window flashing** needed a VBS
+   launcher (`WshShell.Run` with window style 0), not just
+   `-WindowStyle Hidden` on `powershell.exe` directly - the latter can
+   still flash briefly on some builds.
+8. **Transient non-zero `LastTaskResult` codes are not always real
+   failures** - two were observed during this restructure
+   (`0x80070520`, `SCHED_S_TASK_RUNNING`/267009), both resolving to 0
+   moments later with the task's own run log confirming no actual
+   failure. Always cross-check the scanner's own log before concluding
+   a real fault - see the dated note below for the full detail.
+
+## Open items
+
+- **Pine-vs-scanner comparison**: the live Python scanner's logic is
+  modeled on the Pine strategies but has never been directly cross-
+  validated against a live-running Pine strategy on TradingView, side
+  by side, for the same config over the same real-time period. Worth
+  doing before trusting the scanner's forward-test numbers as a proxy
+  for "what Pine would have done."
+- **Fee/fill model**: fee rate is set, but the fill-timing model
+  (same-bar close, the scanner's current assumption, vs next-bar open,
+  more realistic) is explicitly undecided - see `config/fees.json`.
+  This affects every backtest and live number computed so far, all of
+  which assume the optimistic same-bar-close fill.
+- **Backtest-vs-live gap**: BTC v2/v2c/v2e's Long-side live performance
+  gap (point 5 above) isn't explained yet - regime change (Jul1-Sep20
+  being a cleaner uptrend than the current Sep22-Oct window) is the
+  natural guess but hasn't been verified against actual price action.
+- **Existing `src/` codebase**: `src/{core,config,direction,entry,
+  exchange,exit,indicators,notify,regime,risk,analysis}` plus `tests/`
+  and `scripts/research/` (and `data/`, ~88MB of cached OHLCV/backtest
+  results) are a complete prior SMC-based TypeScript implementation,
+  last touched 2026-09-17 - effectively the "separate blind VS Code/
+  TypeScript backtester" that `research/pine/archive/tjl_btcusdt_smc_v1.pine`'s
+  own header refers to being replaced by Pine-based research. Proposed
+  (not yet executed - awaiting approval) to relocate this whole prior
+  attempt into `research/` as TS-based research history, parallel to
+  `research/pine/`, keeping `src/`'s new interfaces-only skeleton
+  (`src/pipeline.ts`, `src/strategy/`, `src/execution/`, `src/ai/`,
+  `src/configSchema.ts`) uncontaminated by the old implementation.
 
 ## Open notes
 
