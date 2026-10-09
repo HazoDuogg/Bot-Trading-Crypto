@@ -16,3 +16,8 @@ README.md
 data/*
 !data/.gitkeep
 
+# chore/restructure additions (2026-10-09)
+runtime/
+archive/
+*.zip
+__pycache__/
