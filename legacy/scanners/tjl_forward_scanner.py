@@ -45,6 +45,7 @@ tracked per variant same as before, for later use.
 """
 import json
 import os
+import sys
 import time as time_module
 import urllib.request
 from datetime import datetime, timezone, timedelta
@@ -449,6 +450,11 @@ def process_variant(prefix, variant_name, cfg, bars_15m, atr, daily_by_date, sma
         "closed_trades_this_run": len(closed_trades),
         "should_notify": should_notify,
         "notify_reason": notify_reason,
+        # Additive, for db_writer.py's dual-write only - not used by, and
+        # does not change, any trading decision or the JSON files already
+        # written above by save_state()/append_trade().
+        "closed_trades": closed_trades,
+        "new_state": new_state,
     }
 
 
@@ -464,6 +470,57 @@ def _trade_record(side, entry_time, entry_price, exit_time, exit_price):
         "exit_time_iso": datetime.fromtimestamp(exit_time / 1000, tz=timezone.utc).isoformat(),
         "exit_price": exit_price,
         "return_pct": ret_pct,
+    }
+
+
+def build_feature_snapshot(bars_15m, atr, daily_by_date, sma200_by_date, gate_by_date, gate_type):
+    """Read-only, for db_writer.py's signals.features_json ONLY (feature_
+    version=1 - see docs/db_conventions.md for the authoritative key list).
+    Never consulted by process_variant()'s simulation - this independently
+    re-derives the LATEST bar's context from the same already-fetched
+    bars_15m/atr/daily_by_date/sma200_by_date/gate_by_date, so it cannot
+    affect any trading decision even if it's wrong. Mirrors (duplicates,
+    deliberately, to avoid touching the simulation loop) process_variant()'s
+    own gate-selection logic for the single most recent bar only."""
+    if not bars_15m:
+        return None
+    last_bar = bars_15m[-1]
+    d = utc_date(last_bar["open_time"])
+    prev_day = d - timedelta(days=1)
+    d_high1 = daily_by_date.get(prev_day, {}).get("high")
+    d_low1 = daily_by_date.get(prev_day, {}).get("low")
+    d_close1 = daily_by_date.get(prev_day, {}).get("close")
+    d_sma200_1 = sma200_by_date.get(prev_day)
+    gate_state = gate_by_date.get(prev_day, {"allow_long": False, "allow_short": False})
+
+    if gate_type == "trend_structure":
+        gate_allow_long, gate_allow_short = gate_state["allow_long"], gate_state["allow_short"]
+    elif gate_type == "none":
+        gate_allow_long, gate_allow_short = True, True
+    else:  # sma200
+        gate_allow_long = d_close1 is not None and d_sma200_1 is not None and d_close1 > d_sma200_1
+        gate_allow_short = d_close1 is not None and d_sma200_1 is not None and d_close1 < d_sma200_1
+
+    # Session high/low excluding the current (last) bar - cheap independent
+    # recompute over just today's bars, same definition process_variant()
+    # uses, but read-only and only for the final bar.
+    today_bars = [b for b in bars_15m if utc_date(b["open_time"]) == d]
+    prior_today_bars = today_bars[:-1]
+    session_high_excl = max((b["high"] for b in prior_today_bars), default=None)
+    session_low_excl = min((b["low"] for b in prior_today_bars), default=None)
+
+    return {
+        "bar_time_ms": last_bar["open_time"],
+        "curr_price": last_bar["close"],
+        "atr_val": atr[-1] if atr else None,
+        "d_high1": d_high1,
+        "d_low1": d_low1,
+        "d_close1": d_close1,
+        "d_sma200_1": d_sma200_1,
+        "gate_allow_long": gate_allow_long,
+        "gate_allow_short": gate_allow_short,
+        "session_high_excl": session_high_excl,
+        "session_low_excl": session_low_excl,
     }
 
 
@@ -492,6 +549,10 @@ def scan_symbol(symbol, cfg, scanned_at):
         results[variant_name] = process_variant(
             prefix, variant_name, variant_cfg, bars_15m, atr, daily_by_date, sma200_by_date, gate_by_date, scanned_at
         )
+        # Additive, for db_writer.py's dual-write only - see build_feature_snapshot().
+        results[variant_name]["feature_snapshot"] = build_feature_snapshot(
+            bars_15m, atr, daily_by_date, sma200_by_date, gate_by_date, variant_cfg.get("gate", "sma200")
+        )
     return results
 
 
@@ -502,7 +563,17 @@ def main():
     for symbol, cfg in SYMBOLS.items():
         all_results[symbol] = scan_symbol(symbol, cfg, scanned_at)
 
-    print(json.dumps(all_results))
+    # Print exactly the pre-dual-write shape (stdout/run-log output must
+    # stay byte-identical) - the additive closed_trades/new_state/
+    # feature_snapshot keys are for db_write_results() below only.
+    printable_results = {
+        symbol: {
+            v: {k: val for k, val in r.items() if k not in ("closed_trades", "new_state", "feature_snapshot")}
+            for v, r in results.items()
+        }
+        for symbol, results in all_results.items()
+    }
+    print(json.dumps(printable_results))
     for symbol, results in all_results.items():
         summary_bits = []
         for v, r in results.items():
@@ -510,6 +581,89 @@ def main():
             notify_bit = f" [NOTIFY:{r['notify_reason']}]" if r["should_notify"] else ""
             summary_bits.append(f"{v}={pos_str}({r['last_result']}){notify_bit}")
         print(f"{symbol} {len(results)}-variant forward scan: " + ", ".join(summary_bits))
+
+    db_write_results(all_results, SYMBOLS, scanned_at)
+
+
+def db_write_results(all_results, symbols_cfg, scanned_at):
+    """Dual-write entry point - everything in here is additive logging of
+    decisions already made and already written to JSON above. Wrapped in
+    try/except at the OUTERMOST level: any failure anywhere (import error,
+    missing DB file, locked file, disk full, schema mismatch, anything)
+    is caught here, logged to stderr (captured by the .ps1 wrapper's own
+    log same as any other stderr output) and otherwise ignored - it must
+    never raise out of main() and must never change main()'s own exit
+    code (0 on the line above this call always already happened)."""
+    try:
+        import db_writer as db
+    except Exception as e:  # noqa: BLE001 - deliberately broad, see docstring
+        print(f"DB dual-write DISABLED (import failed): {e}", file=sys.stderr)
+        return
+
+    run_id = None
+    error_text = None
+    bars_processed = 0
+    try:
+        conn = db.open_conn()
+    except Exception as e:  # noqa: BLE001
+        print(f"DB dual-write DISABLED (could not open bot.db): {e}", file=sys.stderr)
+        return
+
+    try:
+        run_id = db.insert_run_start(conn, scanned_at)
+    except Exception as e:  # noqa: BLE001
+        print(f"DB dual-write: failed to insert runs row, skipping this tick's DB writes: {e}", file=sys.stderr)
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+        return
+
+    try:
+        for symbol, cfg in symbols_cfg.items():
+            prefix = cfg["state_prefix"]
+            for variant_name, variant_cfg in cfg["variants"].items():
+                r = all_results[symbol][variant_name]
+                config_id = db.get_config_id(conn, symbol, variant_name)
+                bars_processed += 1
+
+                db.upsert_scanner_state(conn, config_id, r["new_state"])
+
+                ignored = 0
+                for trade in r["closed_trades"]:
+                    inserted = db.insert_trade(
+                        conn, config_id, trade, variant_cfg, source="live", mode="sim", created_at=scanned_at
+                    )
+                    if not inserted:
+                        ignored += 1
+                if ignored:
+                    print(f"DB dual-write: {symbol}/{variant_name}: ignored {ignored} duplicate trade row(s) (ON CONFLICT DO NOTHING)", file=sys.stderr)
+
+                db.insert_signal(
+                    conn, config_id, scanned_at, r.get("feature_snapshot", {}).get("bar_time_ms") if r.get("feature_snapshot") else None,
+                    r["last_result"], r["position"], r["closed_trades_this_run"], r.get("feature_snapshot"),
+                    created_at=scanned_at,
+                )
+        conn.commit()
+    except Exception as e:  # noqa: BLE001
+        error_text = str(e)
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        print(f"DB dual-write: scan-data transaction failed and was rolled back: {e}", file=sys.stderr)
+    finally:
+        try:
+            db.update_run_finish(
+                conn, run_id, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                exit_code=0 if error_text is None else 1, bars_processed=bars_processed, error=error_text,
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"DB dual-write: failed to update runs row at finish: {e}", file=sys.stderr)
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 if __name__ == "__main__":
