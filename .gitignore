@@ -19,3 +19,4 @@ data/*
 runtime/
 *.zip
 __pycache__/
+.scratch/
