@@ -1,11 +1,9 @@
 {
     "js/ts.tsdk.path": "node_modules\\typescript\\lib",
     "files.watcherExclude": {
-        "**/runtime/**": true,
-        "**/archive/**": true
+        "**/runtime/**": true
     },
     "search.exclude": {
-        "**/runtime/**": true,
-        "**/archive/**": true
+        "**/runtime/**": true
     }
 }

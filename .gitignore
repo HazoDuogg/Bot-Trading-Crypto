@@ -18,6 +18,5 @@ data/*
 
 # chore/restructure additions (2026-10-09)
 runtime/
-archive/
 *.zip
 __pycache__/
