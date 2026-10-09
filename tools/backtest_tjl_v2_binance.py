@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
 """
+NOTE (added during the chore/restructure reorganization, 2026-10-09): this
+is a Python REPLICA of the Pine strategy, not a real TradingView Strategy
+Tester run. It has a known, unresolved ~10-trade divergence against live
+Pine on at least one prior comparison and was never fully reconciled - it
+was accepted in-session as "good enough" for the specific crash-coverage
+window Pine's plan-gated history couldn't reach, with trades labeled
+borderline/clear-cut to weight confidence, not treated as exact. Do not
+treat its numbers as Pine-equivalent without re-checking against a real
+Strategy Tester run wherever that's possible.
+
 Standalone backtester replicating tjl_btcusdt_v2_longshort.pine EXACTLY,
 using Binance's public REST API instead of TradingView (which gates
 intraday historical depth behind a paid plan on this account - confirmed
