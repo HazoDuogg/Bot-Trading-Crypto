@@ -77,7 +77,7 @@ try {
     $stdErrFile = [System.IO.Path]::GetTempFileName()
     $stdInFile = [System.IO.Path]::GetTempFileName()  # empty file - just needs to not be a live console handle
     try {
-        $proc = Start-Process -FilePath $BashExe -ArgumentList "btc_momentum_scanner.sh" `
+        $proc = Start-Process -FilePath $BashExe -ArgumentList "legacy\scanners\btc_momentum_scanner.sh" `
             -WorkingDirectory $RepoRoot -NoNewWindow -Wait -PassThru `
             -RedirectStandardOutput $stdOutFile -RedirectStandardError $stdErrFile -RedirectStandardInput $stdInFile
         $exitCode = $proc.ExitCode

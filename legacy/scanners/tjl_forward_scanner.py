@@ -60,7 +60,9 @@ GATE_PIVOT_LEN = 3
 GATE_SMA_LEN = 50
 GATE_SLOPE_LOOKBACK = 10
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+from paths_config import DATA_DIR  # noqa: E402 - see paths_config.py: data stays at repo root,
+                                     # decoupled from this script's own location (moved here
+                                     # during chore/restructure, 2026-10-09)
 
 SYMBOLS = {
     "BTCUSDT": {
@@ -217,11 +219,11 @@ def build_trend_gate_index(daily_bars, pivot_len=GATE_PIVOT_LEN, sma_len=GATE_SM
 
 
 def state_path(prefix, variant):
-    return os.path.join(SCRIPT_DIR, f".tjl_{prefix}{variant}_forward_state.json")
+    return os.path.join(DATA_DIR, f".tjl_{prefix}{variant}_forward_state.json")
 
 
 def trades_path(prefix, variant):
-    return os.path.join(SCRIPT_DIR, f"tjl_{prefix}{variant}_forward_trades.jsonl")
+    return os.path.join(DATA_DIR, f"tjl_{prefix}{variant}_forward_trades.jsonl")
 
 
 def load_state(prefix, variant):

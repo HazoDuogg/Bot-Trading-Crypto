@@ -15,7 +15,11 @@
 ' style applies. Routing the scheduled task's Action through this VBS
 ' wrapper is the standard, reliable fix for Task Scheduler + PowerShell
 ' window flashes.
+'
+' Moved into legacy/scanners/ during the chore/restructure (2026-10-09) -
+' path below updated to match; the scheduled task's own Action argument
+' pointing AT this .vbs file was updated separately.
 Dim objShell, exitCode
 Set objShell = CreateObject("WScript.Shell")
-exitCode = objShell.Run("powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""D:\BotTradingV2\scripts\run_tjl_forward_scanner_guarded.ps1""", 0, True)
+exitCode = objShell.Run("powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""D:\BotTradingV2\legacy\scanners\run_tjl_forward_scanner_guarded.ps1""", 0, True)
 WScript.Quit(exitCode)

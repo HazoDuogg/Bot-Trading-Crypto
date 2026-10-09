@@ -8,6 +8,11 @@
 # scheduled task (see the task's Action), not here - this wrapper just
 # keeps the Start-Process + explicit stdio redirection pattern as cheap
 # insurance against detached-launch hangs under Task Scheduler.
+#
+# Moved into legacy/scanners/ during the chore/restructure (2026-10-09).
+# RunGateFile/LogFile and the Python script's own data files all stay at
+# the repo root ($RepoRoot, unchanged below) - only this wrapper's and
+# the Python script's own CODE location moved. See paths_config.py.
 param(
     [int]$MinGapMinutes = 25
 )
@@ -54,7 +59,7 @@ try {
     $stdErrFile = [System.IO.Path]::GetTempFileName()
     $stdInFile = [System.IO.Path]::GetTempFileName()
     try {
-        $proc = Start-Process -FilePath $PythonExe -ArgumentList "tjl_forward_scanner.py" `
+        $proc = Start-Process -FilePath $PythonExe -ArgumentList "legacy\scanners\tjl_forward_scanner.py" `
             -WorkingDirectory $RepoRoot -NoNewWindow -Wait -PassThru `
             -RedirectStandardOutput $stdOutFile -RedirectStandardError $stdErrFile -RedirectStandardInput $stdInFile
         $exitCode = $proc.ExitCode
