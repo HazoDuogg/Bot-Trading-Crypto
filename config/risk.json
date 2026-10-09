@@ -1,0 +1,27 @@
+{
+  "status": "provisional",
+  "note": "Strategy is not locked yet - these are discussion-stage values from the forward-test review sessions, not a committed production risk spec.",
+  "risk_per_trade_pct": {
+    "value": 1.0,
+    "status": "provisional"
+  },
+  "margin_cap_pct": {
+    "value": 15.0,
+    "status": "provisional",
+    "basis": "margin",
+    "note": "Cap is on MARGIN USED (position_notional / leverage), NOT on notional directly. A prior internal simulation this session mistakenly capped notional directly, which crushed effective risk far below intent given these symbols' tight ATR-based stops - corrected here. margin_used_cap = margin_cap_pct% of equity; allowed_notional = margin_used_cap * leverage."
+  },
+  "leverage": {
+    "BTCUSDT": { "value": 20, "status": "provisional" },
+    "ETHUSDT": { "value": 20, "status": "provisional" },
+    "SOLUSDT": { "value": 10, "status": "provisional" }
+  },
+  "circuit_breaker": {
+    "status": "provisional",
+    "mode": "halve_size",
+    "consecutive_losses_threshold": 3,
+    "scope": "per_symbol",
+    "note": "Halve position size for a symbol after 3 consecutive losses on that symbol, reset to full size on its next win. Validated across two different backtest windows (Jul1-Sep20 and Apr1-Jul15 2026) with a consistent Return/MaxDD improvement over flat sizing; exact threshold (3 vs 4 vs 5) not scientifically settled - see docs/decisions.md.",
+    "rejected_alternative": "cross-symbol correlation cap (capping total simultaneous same-direction risk across symbols) - tested and NOT adopted, see docs/decisions.md"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "status": "provisional",
+  "note": "Strategy is not locked yet - these are the configs currently running in the Pine/Python forward-test scanner (legacy/scanners/), not a committed production spec.",
+  "symbols": [
+    {
+      "symbol": "BTCUSDT",
+      "variant": "v2f",
+      "sides": ["long", "short"],
+      "status": "provisional",
+      "gate": "trend_structure",
+      "buffer_mult": 0.5,
+      "rr_mult": 2.25,
+      "exit_style": "fixed_tp"
+    },
+    {
+      "symbol": "ETHUSDT",
+      "variant": "v2f",
+      "sides": ["long"],
+      "status": "provisional",
+      "gate": "trend_structure",
+      "buffer_mult": 0.5,
+      "rr_mult": 2.25,
+      "exit_style": "fixed_tp",
+      "note": "Long only - Short tested and rejected (see docs/decisions.md)"
+    },
+    {
+      "symbol": "SOLUSDT",
+      "variant": "v2e",
+      "sides": ["long"],
+      "status": "provisional",
+      "gate": "none",
+      "buffer_mult": 0.5,
+      "rr_mult": 2.25,
+      "exit_style": "fixed_tp",
+      "note": "Long only, ungated - Short tested across 11 real-Pine parameter combinations and rejected (see docs/decisions.md)"
+    }
+  ]
+}

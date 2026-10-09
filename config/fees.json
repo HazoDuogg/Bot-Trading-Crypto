@@ -1,0 +1,18 @@
+{
+  "status": "provisional",
+  "note": "Strategy is not locked yet - these are discussion-stage values, not a committed production fee/execution spec.",
+  "fee_pct_per_fill": {
+    "value": 0.075,
+    "status": "provisional",
+    "note": "Round-trip = 2x this (0.15%). Matches the Pine strategies' own commission_value=0.075 setting and db_writer.py's FEE_PCT_PER_FILL."
+  },
+  "fill_model": {
+    "value": "undecided",
+    "status": "undecided",
+    "options": [
+      "signal_bar_close",
+      "next_bar_open"
+    ],
+    "note": "The current forward-test scanner (legacy/scanners/tjl_forward_scanner.py) fills at the SAME bar's close that triggered the breakout condition - a same-bar, zero-latency assumption, confirmed optimistic vs real execution (see docs/decisions.md). Which fill model the production bot should actually use is an open decision, not yet made."
+  }
+}
