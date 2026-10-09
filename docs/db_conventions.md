@@ -42,21 +42,30 @@ manual tool running while the scheduled scan fires) gets an immediate
 
 ## Transaction pattern for a scan run
 
-Every scan run writes all of its DB changes - the `runs` row, every
-`scanner_state` update, every new `trades`/`signals` row - inside **one
-transaction**:
+As actually implemented in `db_write_results()`
+(`legacy/scanners/tjl_forward_scanner.py`):
 
 1. At the start of the run, `INSERT` a `runs` row with `started_at` set
-   and `finished_at`/`exit_code`/`bars_processed`/`summary`/`error` left
-   NULL.
-2. Do all the scan's own work and accumulate the DB writes for this tick.
-3. Immediately before committing, `UPDATE` that same `runs` row with
-   `finished_at`, `exit_code`, `bars_processed`, and `summary`.
-4. Commit once. If anything in steps 2-3 raised, roll back and instead
-   `UPDATE` the `runs` row's `error` column with what went wrong (in a
-   SEPARATE connection/transaction, since the first one is being rolled
-   back) - then let the scanner continue exactly as it would have with no
-   DB at all (see dual-write safety rules below).
+   and everything else NULL - committed immediately, in its OWN small
+   transaction (`insert_run_start()`). This is deliberate: it must
+   survive even if everything below fails entirely, or there would be no
+   row left to record the failure on.
+2. All of the scan's substantive data writes - every `scanner_state`
+   upsert, every new `trades` insert, one `signals` row per config - go
+   into **one transaction** (`conn.commit()` once at the end, or
+   `conn.rollback()` once if anything raised).
+3. Regardless of whether step 2 committed or rolled back, `UPDATE` the
+   same `runs` row - in its own small transaction (`update_run_finish()`)
+   - with `finished_at`, `exit_code` (0 if step 2 committed cleanly, 1 if
+   it rolled back), `bars_processed` (count of configs processed this
+   tick), and `error` (NULL if clean, the exception text if step 2
+   rolled back).
+
+So there are three small transactions per scan (`runs` insert, the one
+substantive data transaction, `runs` update), not literally one - the
+"one transaction" in the design brief refers to step 2, the actual scan
+data. Splitting the `runs` bookkeeping out is what makes a totally-failed
+scan still leave a diagnosable row behind.
 
 ## Dual-write safety rules (while JSON is still the source of truth)
 
@@ -70,3 +79,28 @@ transaction**:
   with its normal success code exactly as if `bot.db` didn't exist.
 - A DB problem must never alter the trading simulation's outcome and must
   never stop the scanner from running.
+
+## signals.features_json - feature_version 1
+
+Written by `build_feature_snapshot()` in `tjl_forward_scanner.py` - a
+READ-ONLY, independent re-derivation of the latest bar's market context
+from data already fetched for the simulation, never consulted by the
+simulation itself. Keys, as of feature_version=1:
+
+| Key | Meaning |
+|---|---|
+| `bar_time_ms` | epoch ms, UTC - the most recent 15m bar's open time |
+| `curr_price` | that bar's close |
+| `atr_val` | ATR(14) at that bar |
+| `d_high1` | previous completed daily bar's high |
+| `d_low1` | previous completed daily bar's low |
+| `d_close1` | previous completed daily bar's close |
+| `d_sma200_1` | previous completed daily bar's 200-day SMA (null for `gate=none`/`trend_structure` configs where this isn't the gate basis) |
+| `gate_allow_long` | whether this config's own gate (sma200 / trend_structure / none) currently permits a Long entry |
+| `gate_allow_short` | same, for Short |
+| `session_high_excl` | today's UTC session high, excluding the current bar |
+| `session_low_excl` | same, for the session low |
+
+If this key list ever changes, bump `FEATURE_VERSION` in
+`legacy/scanners/db_writer.py` and add a new row to this table rather
+than silently changing what an existing version number means.
