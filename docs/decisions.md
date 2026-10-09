@@ -29,3 +29,15 @@ dry-run and the first real tick on the new Action path succeeded cleanly.
 **Status: treated as transient, cause undetermined.** If this recurs now
 that the Operational log is active, capture the actual event IDs/messages
 from that log before concluding it's benign again.
+
+**Update (same day, during G2 verification)**: caught a second, different
+transient non-zero code on the same task - `LastTaskResult: 267009`
+(`0x41301` = `SCHED_S_TASK_RUNNING`), read 3 seconds after `LastRunTime`
+while the task was still actively executing. This is a documented
+Windows-informational code (not an error), and corroborates the general
+pattern: `Get-ScheduledTaskInfo` can surface transient in-flight status
+codes that resolve to `0` moments later once the task actually finishes -
+independent of whatever caused the original `0x80070520` reading. The
+Operational log was still disabled at this point (the elevated
+`wevtutil sl` command from the earlier note had not yet been run/had not
+persisted) - revisit if it recurs once that log is confirmed active.
