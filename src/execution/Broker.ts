@@ -10,7 +10,7 @@
  * pattern, which this interface is deliberately similar in spirit to).
  */
 
-import type { Side } from "../strategy/Strategy";
+import type { Side } from "../strategy/Strategy.js";
 
 export interface OrderRequest {
   symbol: string;

@@ -13,7 +13,7 @@
  * wired in yet.
  */
 
-import type { Signal } from "../strategy/Strategy";
+import type { Signal } from "../strategy/Strategy.js";
 
 export interface ScoreResult {
   /** Model's confidence/score for this signal - scale and meaning are model-specific, not fixed by this interface. */
