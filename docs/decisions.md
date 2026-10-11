@@ -124,18 +124,35 @@ vs real execution.
   gap (point 5 above) isn't explained yet - regime change (Jul1-Sep20
   being a cleaner uptrend than the current Sep22-Oct window) is the
   natural guess but hasn't been verified against actual price action.
-- **Existing `src/` codebase**: `src/{core,config,direction,entry,
-  exchange,exit,indicators,notify,regime,risk,analysis}` plus `tests/`
-  and `scripts/research/` (and `data/`, ~88MB of cached OHLCV/backtest
-  results) are a complete prior SMC-based TypeScript implementation,
-  last touched 2026-09-17 - effectively the "separate blind VS Code/
-  TypeScript backtester" that `research/pine/archive/tjl_btcusdt_smc_v1.pine`'s
-  own header refers to being replaced by Pine-based research. Proposed
-  (not yet executed - awaiting approval) to relocate this whole prior
-  attempt into `research/` as TS-based research history, parallel to
-  `research/pine/`, keeping `src/`'s new interfaces-only skeleton
-  (`src/pipeline.ts`, `src/strategy/`, `src/execution/`, `src/ai/`,
-  `src/configSchema.ts`) uncontaminated by the old implementation.
+- **~~Existing `src/` codebase~~ - DONE, 2026-10-11**: the complete
+  prior SMC-based TypeScript implementation (`core/config/direction/
+  entry/exchange/exit/indicators/notify/regime/risk/analysis`, plus
+  `tests/`, `scripts/` incl. `scripts/research/`, and `data/`, ~88MB of
+  cached OHLCV/backtest results) - effectively the "separate blind VS
+  Code/TypeScript backtester" that `research/pine/archive/
+  tjl_btcusdt_smc_v1.pine`'s own header refers to being replaced by
+  Pine-based research - has been moved via `git mv` to
+  `research/smc-legacy/{src,tests,scripts,data}/`, parallel to
+  `research/pine/`. `src/` now contains ONLY the new interfaces-only
+  skeleton (`pipeline.ts`, `strategy/Strategy.ts`, `execution/Broker.ts`,
+  `ai/{ScoringModel,FeatureRecorder}.ts`, `configSchema.ts`). All broken
+  paths fixed (4 `package.json` scripts, 26 CWD-relative `data/`
+  references across 7 moved scripts); `vitest run` and `tsc --noEmit`
+  confirmed identical before/after the move.
+
+## Repo layout notes
+
+- **`.ai/`** (8.0 MB) - a duplicate of `.claude/`'s config (`CLAUDE.md`,
+  `settings.json`, `settings.local.json`, plus a `.codegraph/`
+  database). **All 16 of its skill symlinks are broken** (point at a
+  nonexistent `.agents/` directory) and **nothing in the codebase
+  references `.ai/` at all** (confirmed via grep across `package.json`,
+  `src/`, `tests/`, `tools/`, `legacy/`, `docs/`). Left in place per
+  explicit instruction; already fully gitignored (the existing
+  no-leading-slash `.claude`/`.codegraph` rules happen to catch it too,
+  confirmed via `git status`/`git check-ignore`). Likely orphaned
+  tooling config from an earlier setup attempt - nobody has investigated
+  further or proposed removing it.
 
 ## Open notes
 

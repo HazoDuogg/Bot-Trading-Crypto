@@ -40,7 +40,8 @@ legacy/scanners/   # the LIVE forward-test scanner (Python) + its Windows
                    # because it's unmaintained; it's the thing actually
                    # running right now. Do not edit casually - see
                    # docs/db_conventions.md before touching db_writer.py.
-runtime/           # bot.db (SQLite), logs, cache - all gitignored.
+runtime/           # bot.db (SQLite), cache/ (Binance kline cache for
+                   # tools/backtest_tjl_v2_binance.py) - all gitignored.
                    # The *_forward_state.json / *_forward_trades.jsonl
                    # files at the repo root are STILL the source of
                    # truth during the dual-write validation period;
@@ -50,20 +51,21 @@ research/
                    # match the 3 live configs; research/pine/archive/
                    # holds superseded/rejected variants with a
                    # MANIFEST.md (role, locked result, reason archived).
+  smc-legacy/      # the EARLIER, complete SMC-based TypeScript
+                   # implementation attempt - {src,tests,scripts,data}/,
+                   # moved here wholesale (git history preserved) so
+                   # src/ at the repo root could be a clean skeleton.
+                   # Not wired to anything live. package.json's
+                   # dev/fetch-ohlcv/fetch-cvd/fetch-cvd-6m/backtest
+                   # scripts point in here.
   ml/              # reserved for future AI/ML research artifacts -
                    # empty for now.
-src/               # the TypeScript framework. Currently a MIX of:
-                   #   - a new, empty interfaces-only skeleton
-                   #     (pipeline.ts, strategy/, execution/, ai/,
-                   #     configSchema.ts) - no trading logic.
-                   #   - an EARLIER, complete SMC-based implementation
-                   #     attempt (core/, config/, direction/, entry/,
-                   #     exchange/, exit/, indicators/, notify/,
-                   #     regime/, risk/, analysis/) - not currently
-                   #     wired to anything live, proposed for
-                   #     relocation to research/ (see docs/decisions.md),
-                   #     not yet moved.
-tests/             # mirrors src/ - same old/new mix as above.
+src/               # the TypeScript framework - ONLY the new,
+                   # interfaces-only skeleton (pipeline.ts, strategy/,
+                   # execution/, ai/, configSchema.ts). No trading logic.
+tests/             # mirrors src/ - currently just a .gitkeep (nothing to
+                   # test yet; the old SMC tests moved to
+                   # research/smc-legacy/tests/).
 tools/             # operational scripts: status.py (read-only dashboard),
                    # init_bot_db.py, import_history.py, compare_state.py,
                    # bot_db_schema.sql, plus two standalone analysis
@@ -77,11 +79,12 @@ config/            # symbols.json / risk.json / fees.json - PROVISIONAL
 docs/              # decisions.md (read this first), db_conventions.md,
                    # ARCHITECTURE.md / AGENTS.md / CLAUDE.md (prior
                    # project's own docs, untouched).
-scripts/           # dev tooling for the src/ TypeScript code (fetch
-                   # OHLCV, run backtests) - same old/new mix as src/.
-data/              # ~88MB cached OHLCV + backtest results, tied to the
-                   # earlier SMC implementation attempt (gitignored
-                   # except .gitkeep).
+scripts/           # dev tooling for the NEW src/ skeleton - currently
+                   # just a .gitkeep (the old SMC tooling moved to
+                   # research/smc-legacy/scripts/).
+.ai/               # unreferenced, likely-orphaned duplicate of .claude/'s
+                   # config (all 16 skill symlinks broken) - left in
+                   # place, already gitignored, see docs/decisions.md.
 ```
 
 ## Running the live scanner's own tools
