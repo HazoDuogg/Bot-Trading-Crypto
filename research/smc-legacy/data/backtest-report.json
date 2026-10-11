@@ -1,0 +1,224 @@
+{
+  "generatedAt": "2026-09-17T07:52:46.647Z",
+  "finalEquity": 3571.017269195001,
+  "initialEquity": 10000,
+  "sampleSizeWarning": null,
+  "overall": {
+    "totalTrades": 449,
+    "wins": 81,
+    "losses": 368,
+    "stillOpenAtEnd": 0,
+    "winRatePct": 18.040089086859687,
+    "profitFactor": 0.7089697308547673,
+    "grossProfit": 15661.443635109325,
+    "grossLoss": -22090.42636591431
+  },
+  "directionCorrectVsActualWin": {
+    "at15Candles": {
+      "resolvedCount": 449,
+      "correctCount": 227,
+      "pctDirectionCorrect": 50.55679287305123
+    },
+    "at30Candles": {
+      "resolvedCount": 449,
+      "correctCount": 226,
+      "pctDirectionCorrect": 50.33407572383074
+    },
+    "at60Candles": {
+      "resolvedCount": 449,
+      "correctCount": 269,
+      "pctDirectionCorrect": 59.910913140311806
+    },
+    "actualWinRatePct": 18.040089086859687
+  },
+  "byConfluenceScore": {
+    "score2": {
+      "totalTrades": 0,
+      "wins": 0,
+      "losses": 0,
+      "stillOpenAtEnd": 0,
+      "winRatePct": null,
+      "profitFactor": null,
+      "grossProfit": 0,
+      "grossLoss": 0
+    },
+    "scoreOther": {
+      "totalTrades": 449,
+      "wins": 81,
+      "losses": 368,
+      "stillOpenAtEnd": 0,
+      "winRatePct": 18.040089086859687,
+      "profitFactor": 0.7089697308547673,
+      "grossProfit": 15661.443635109325,
+      "grossLoss": -22090.42636591431
+    }
+  },
+  "bySplitMode": {
+    "split": {
+      "totalTrades": 156,
+      "wins": 22,
+      "losses": 134,
+      "stillOpenAtEnd": 0,
+      "winRatePct": 14.102564102564102,
+      "profitFactor": 0.5940103424692788,
+      "grossProfit": 3789.110093525894,
+      "grossLoss": -6378.862155454576
+    },
+    "single": {
+      "totalTrades": 293,
+      "wins": 59,
+      "losses": 234,
+      "stillOpenAtEnd": 0,
+      "winRatePct": 20.13651877133106,
+      "profitFactor": 0.7556430017120508,
+      "grossProfit": 11872.333541583434,
+      "grossLoss": -15711.56421045975
+    }
+  },
+  "byDirection": {
+    "up": {
+      "totalTrades": 260,
+      "wins": 47,
+      "losses": 213,
+      "stillOpenAtEnd": 0,
+      "winRatePct": 18.076923076923077,
+      "profitFactor": 0.7173018392669416,
+      "grossProfit": 9553.469991708875,
+      "grossLoss": -13318.619120609255
+    },
+    "down": {
+      "totalTrades": 189,
+      "wins": 34,
+      "losses": 155,
+      "stillOpenAtEnd": 0,
+      "winRatePct": 17.989417989417987,
+      "profitFactor": 0.6963187257300502,
+      "grossProfit": 6107.97364340045,
+      "grossLoss": -8771.807245305074
+    }
+  },
+  "crossTabDirectionByScore": {
+    "upScore2": {
+      "totalTrades": 0,
+      "wins": 0,
+      "losses": 0,
+      "stillOpenAtEnd": 0,
+      "winRatePct": null,
+      "profitFactor": null,
+      "grossProfit": 0,
+      "grossLoss": 0
+    },
+    "upScoreOther": {
+      "totalTrades": 260,
+      "wins": 47,
+      "losses": 213,
+      "stillOpenAtEnd": 0,
+      "winRatePct": 18.076923076923077,
+      "profitFactor": 0.7173018392669416,
+      "grossProfit": 9553.469991708875,
+      "grossLoss": -13318.619120609255
+    },
+    "downScore2": {
+      "totalTrades": 0,
+      "wins": 0,
+      "losses": 0,
+      "stillOpenAtEnd": 0,
+      "winRatePct": null,
+      "profitFactor": null,
+      "grossProfit": 0,
+      "grossLoss": 0
+    },
+    "downScoreOther": {
+      "totalTrades": 189,
+      "wins": 34,
+      "losses": 155,
+      "stillOpenAtEnd": 0,
+      "winRatePct": 17.989417989417987,
+      "profitFactor": 0.6963187257300502,
+      "grossProfit": 6107.97364340045,
+      "grossLoss": -8771.807245305074
+    }
+  },
+  "directionCorrectByDirection": {
+    "up": {
+      "at15Candles": {
+        "resolvedCount": 260,
+        "correctCount": 130,
+        "pctDirectionCorrect": 50
+      },
+      "at30Candles": {
+        "resolvedCount": 260,
+        "correctCount": 138,
+        "pctDirectionCorrect": 53.07692307692308
+      },
+      "at60Candles": {
+        "resolvedCount": 260,
+        "correctCount": 165,
+        "pctDirectionCorrect": 63.46153846153846
+      }
+    },
+    "down": {
+      "at15Candles": {
+        "resolvedCount": 189,
+        "correctCount": 97,
+        "pctDirectionCorrect": 51.32275132275132
+      },
+      "at30Candles": {
+        "resolvedCount": 189,
+        "correctCount": 88,
+        "pctDirectionCorrect": 46.56084656084656
+      },
+      "at60Candles": {
+        "resolvedCount": 189,
+        "correctCount": 104,
+        "pctDirectionCorrect": 55.026455026455025
+      }
+    }
+  },
+  "d1RegimeTimeDistribution": {
+    "totalDaysEvaluated": 1070,
+    "counts": {
+      "UPTREND": 330,
+      "DOWNTREND": 212,
+      "SIDEWAY": 520,
+      "DANGER_ZONE": 8
+    },
+    "pctOfDaysEvaluated": {
+      "UPTREND": 30.8411214953271,
+      "DOWNTREND": 19.813084112149532,
+      "SIDEWAY": 48.598130841121495,
+      "DANGER_ZONE": 0.7476635514018692
+    }
+  },
+  "slAndRRByDirection": {
+    "up": {
+      "sampleSize": 260,
+      "avgSlDistance": 249.86259836895505,
+      "avgSlDistancePct": 0.452210706235348,
+      "avgRMultiple": 0.09112055647011319
+    },
+    "down": {
+      "sampleSize": 189,
+      "avgSlDistance": 691.861359989169,
+      "avgSlDistancePct": 0.9608495429557177,
+      "avgRMultiple": -0.0882306588748613
+    }
+  },
+  "tpSlRatio": {
+    "overall": {
+      "sampleSize": 449,
+      "avgRatio": 6.358819596706266,
+      "pctRatioBelow1": 0
+    },
+    "up": {
+      "sampleSize": 260,
+      "avgRatio": 7.515926828825663,
+      "pctRatioBelow1": 0
+    },
+    "down": {
+      "sampleSize": 189,
+      "avgRatio": 4.767031869981203,
+      "pctRatioBelow1": 0
+    }
+  }
+}

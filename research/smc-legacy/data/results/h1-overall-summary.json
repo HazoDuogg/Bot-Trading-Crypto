@@ -1,0 +1,22 @@
+{
+  "period": "2021-2024",
+  "timeframe": "H1",
+  "total_trades": 65,
+  "wins": 16,
+  "losses": 49,
+  "win_rate": 0.24615384615384617,
+  "avg_mfe_r": 1.4172784615384615,
+  "avg_mae_r": -1.2578646153846151,
+  "avg_time_to_mfe": 10.138461538461538,
+  "avg_time_to_mae": 9.984615384615385,
+  "profit_factor_raw": 0.7758831198394139,
+  "profit_factor_after_fee": 0.6888707037643207,
+  "total_fee_r": 5.7088,
+  "pnl_r_raw": -10.829999999999998,
+  "pnl_r_after_fee": -16.5387,
+  "mfe_mae_ratio": 1.1267337074309087,
+  "max_drawdown_r_raw": 17.808,
+  "max_drawdown_r_after_fee": 22.8241,
+  "sharpe_ratio_per_trade_raw": -0.11460224061308642,
+  "sharpe_ratio_per_trade_after_fee": -0.17255043150383184
+}

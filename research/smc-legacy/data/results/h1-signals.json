@@ -1,0 +1,932 @@
+[
+  {
+    "index": 274,
+    "timestamp": "2021-01-12T10:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 35133.4,
+    "stopLoss": 37171.268003210265,
+    "takeProfit": 30448,
+    "size": 0.049070891658571356,
+    "riskRewardRatio": 2.299167557770703
+  },
+  {
+    "index": 519,
+    "timestamp": "2021-01-22T15:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 32454.51,
+    "stopLoss": 33150.71103452955,
+    "takeProfit": 28880,
+    "size": 0.14363667251309595,
+    "riskRewardRatio": 5.134307222647863
+  },
+  {
+    "index": 520,
+    "timestamp": "2021-01-22T16:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 32380.52,
+    "stopLoss": 33145.39203206315,
+    "takeProfit": 28880,
+    "size": 0.13074082435758821,
+    "riskRewardRatio": 4.576608704802247
+  },
+  {
+    "index": 623,
+    "timestamp": "2021-01-26T23:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 32474.14,
+    "stopLoss": 33261.216648679045,
+    "takeProfit": 30810,
+    "size": 0.127052428969695,
+    "riskRewardRatio": 2.1143302914562816
+  },
+  {
+    "index": 652,
+    "timestamp": "2021-01-28T04:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 31313.81,
+    "stopLoss": 31956.525997501925,
+    "takeProfit": 29240,
+    "size": 0.1555897167468601,
+    "riskRewardRatio": 3.2266351048680617
+  },
+  {
+    "index": 1300,
+    "timestamp": "2021-02-24T04:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 50673.15,
+    "stopLoss": 52214.19057841696,
+    "takeProfit": 44893.82,
+    "size": 0.06489121792154601,
+    "riskRewardRatio": 3.750277624705286
+  },
+  {
+    "index": 1301,
+    "timestamp": "2021-02-24T05:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 50302.29,
+    "stopLoss": 52192.447679958605,
+    "takeProfit": 44893.82,
+    "size": 0.05290563906932362,
+    "riskRewardRatio": 2.861385617372648
+  },
+  {
+    "index": 1306,
+    "timestamp": "2021-02-24T10:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 50120.68,
+    "stopLoss": 52157.997556895694,
+    "takeProfit": 45285,
+    "size": 0.04908414972498064,
+    "riskRewardRatio": 2.3735524114209436
+  },
+  {
+    "index": 1370,
+    "timestamp": "2021-02-27T02:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 47449.99,
+    "stopLoss": 48691.239418953555,
+    "takeProfit": 44100,
+    "size": 0.08056398534655959,
+    "riskRewardRatio": 2.69888545271121
+  },
+  {
+    "index": 1962,
+    "timestamp": "2021-03-23T18:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 55423.42,
+    "stopLoss": 56234.541410809004,
+    "takeProfit": 52981.4,
+    "size": 0.12328610571413813,
+    "riskRewardRatio": 3.010671358760392
+  },
+  {
+    "index": 2022,
+    "timestamp": "2021-03-26T06:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 52588.1,
+    "stopLoss": 53337.12733386423,
+    "takeProfit": 50452.08,
+    "size": 0.13350647630454338,
+    "riskRewardRatio": 2.8517250351603027
+  },
+  {
+    "index": 2335,
+    "timestamp": "2021-04-08T07:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 57067.4,
+    "stopLoss": 57678.77126124844,
+    "takeProfit": 55536.07,
+    "size": 0.1635667332412667,
+    "riskRewardRatio": 2.5047464561434922
+  },
+  {
+    "index": 2596,
+    "timestamp": "2021-04-19T04:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 56948.04,
+    "stopLoss": 57698.74479464084,
+    "takeProfit": 53100,
+    "size": 0.1332081541424586,
+    "riskRewardRatio": 5.125903054663464
+  },
+  {
+    "index": 2597,
+    "timestamp": "2021-04-19T05:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 56507.7,
+    "stopLoss": 57686.85516645222,
+    "takeProfit": 53100,
+    "size": 0.08480648081361064,
+    "riskRewardRatio": 2.889950446685407
+  },
+  {
+    "index": 2600,
+    "timestamp": "2021-04-19T08:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 56813.01,
+    "stopLoss": 57942.286953606235,
+    "takeProfit": 53284.42,
+    "size": 0.08855223661534929,
+    "riskRewardRatio": 3.124645365985557
+  },
+  {
+    "index": 2628,
+    "timestamp": "2021-04-20T12:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 55836.75,
+    "stopLoss": 56912.19359386009,
+    "takeProfit": 53330.82,
+    "size": 0.09298488602370136,
+    "riskRewardRatio": 2.33013615433374
+  },
+  {
+    "index": 2987,
+    "timestamp": "2021-05-05T11:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 55191.6,
+    "stopLoss": 56301.42763261385,
+    "takeProfit": 52880.38,
+    "size": 0.0901040819865706,
+    "riskRewardRatio": 2.082503563690018
+  },
+  {
+    "index": 3141,
+    "timestamp": "2021-05-11T21:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 56559.96,
+    "stopLoss": 57255.15178413898,
+    "takeProfit": 54541.33,
+    "size": 0.14384519823382771,
+    "riskRewardRatio": 2.9037023251075125
+  },
+  {
+    "index": 3203,
+    "timestamp": "2021-05-14T11:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 50569,
+    "stopLoss": 51448.774149806995,
+    "takeProfit": 46994.97,
+    "size": 0.11366553566269022,
+    "riskRewardRatio": 4.062440344245246
+  },
+  {
+    "index": 3204,
+    "timestamp": "2021-05-14T12:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 50349.99,
+    "stopLoss": 51430.462424820784,
+    "takeProfit": 46994.97,
+    "size": 0.09255210748815422,
+    "riskRewardRatio": 3.1051417166490687
+  },
+  {
+    "index": 3208,
+    "timestamp": "2021-05-14T16:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 50861,
+    "stopLoss": 51937.634456874905,
+    "takeProfit": 48410,
+    "size": 0.09288203564491632,
+    "riskRewardRatio": 2.276538693656899
+  },
+  {
+    "index": 3248,
+    "timestamp": "2021-05-16T08:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 48916.34,
+    "stopLoss": 49926.86072356271,
+    "takeProfit": 46481.14,
+    "size": 0.09895888096924677,
+    "riskRewardRatio": 2.409846669363094
+  },
+  {
+    "index": 3342,
+    "timestamp": "2021-05-20T06:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 39686.97,
+    "stopLoss": 41217.20327025408,
+    "takeProfit": 28688,
+    "size": 0.0653495136616628,
+    "riskRewardRatio": 7.187773402792194
+  },
+  {
+    "index": 3343,
+    "timestamp": "2021-05-20T07:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 39946.92,
+    "stopLoss": 41737.91660809308,
+    "takeProfit": 28688,
+    "size": 0.0558348349450379,
+    "riskRewardRatio": 6.28639939859386
+  },
+  {
+    "index": 3344,
+    "timestamp": "2021-05-20T08:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 39831.33,
+    "stopLoss": 41702.91256465786,
+    "takeProfit": 28688,
+    "size": 0.05343071787927283,
+    "riskRewardRatio": 5.953961214656374
+  },
+  {
+    "index": 3398,
+    "timestamp": "2021-05-22T14:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 37801.51,
+    "stopLoss": 39461.08667407679,
+    "takeProfit": 33400,
+    "size": 0.060256330160599204,
+    "riskRewardRatio": 2.6521883976517913
+  },
+  {
+    "index": 3436,
+    "timestamp": "2021-05-24T04:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 34864.49,
+    "stopLoss": 36506.70641441182,
+    "takeProfit": 31096.7,
+    "size": 0.060893314134736705,
+    "riskRewardRatio": 2.2943322006371947
+  },
+  {
+    "index": 3753,
+    "timestamp": "2021-06-06T09:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 36170.4,
+    "stopLoss": 36670.950390933525,
+    "takeProfit": 34800,
+    "size": 0.1997800857042595,
+    "riskRewardRatio": 2.7377862944911753
+  },
+  {
+    "index": 3815,
+    "timestamp": "2021-06-08T23:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 33372.58,
+    "stopLoss": 34096.4178227422,
+    "takeProfit": 30969,
+    "size": 0.13815249335984991,
+    "riskRewardRatio": 3.320605699898683
+  },
+  {
+    "index": 4717,
+    "timestamp": "2021-07-16T13:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 31754.45,
+    "stopLoss": 32115.891046370267,
+    "takeProfit": 31018.59,
+    "size": 0.27667029244254226,
+    "riskRewardRatio": 2.035906013967693
+  },
+  {
+    "index": 4966,
+    "timestamp": "2021-07-26T22:00:00.000Z",
+    "direction": "LONG",
+    "entry": 37569.73,
+    "stopLoss": 36221.238281581864,
+    "takeProfit": 40578.93,
+    "size": 0.07415692557408207,
+    "riskRewardRatio": 2.231530204375275
+  },
+  {
+    "index": 4968,
+    "timestamp": "2021-07-27T00:00:00.000Z",
+    "direction": "LONG",
+    "entry": 37428.68,
+    "stopLoss": 36248.05129891497,
+    "takeProfit": 40578.93,
+    "size": 0.08470063442308104,
+    "riskRewardRatio": 2.6682817359131104
+  },
+  {
+    "index": 4971,
+    "timestamp": "2021-07-27T03:00:00.000Z",
+    "direction": "LONG",
+    "entry": 36819.12,
+    "stopLoss": 35954.30738473622,
+    "takeProfit": 40578.93,
+    "size": 0.11563198574467834,
+    "riskRewardRatio": 4.347542963226989
+  },
+  {
+    "index": 4972,
+    "timestamp": "2021-07-27T04:00:00.000Z",
+    "direction": "LONG",
+    "entry": 36943.02,
+    "stopLoss": 35969.1890001122,
+    "takeProfit": 40578.93,
+    "size": 0.10268722192199872,
+    "riskRewardRatio": 3.7336149705841475
+  },
+  {
+    "index": 6087,
+    "timestamp": "2021-09-11T15:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 45589.34,
+    "stopLoss": 45977.69034270906,
+    "takeProfit": 44120,
+    "size": 0.2574994508886437,
+    "riskRewardRatio": 3.783542431687188
+  },
+  {
+    "index": 7093,
+    "timestamp": "2021-10-23T13:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 61372.61,
+    "stopLoss": 62121.81750253782,
+    "takeProfit": 59622,
+    "size": 0.13347437080016664,
+    "riskRewardRatio": 2.3366156826647977
+  },
+  {
+    "index": 7104,
+    "timestamp": "2021-10-24T00:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 61135.85,
+    "stopLoss": 61833.23003810932,
+    "takeProfit": 59622,
+    "size": 0.1433938377001889,
+    "riskRewardRatio": 2.170767612024308
+  },
+  {
+    "index": 7125,
+    "timestamp": "2021-10-24T21:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 61036.47,
+    "stopLoss": 61708.48952602267,
+    "takeProfit": 59504.46,
+    "size": 0.14880520003912334,
+    "riskRewardRatio": 2.2797105451193764
+  },
+  {
+    "index": 7159,
+    "timestamp": "2021-10-26T07:00:00.000Z",
+    "direction": "LONG",
+    "entry": 62495.28,
+    "stopLoss": 62025.589861763365,
+    "takeProfit": 63795.98,
+    "size": 0.21290632240104454,
+    "riskRewardRatio": 2.769272535470396
+  },
+  {
+    "index": 7699,
+    "timestamp": "2021-11-17T19:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 60221.52,
+    "stopLoss": 61052.02813074857,
+    "takeProfit": 58336.68,
+    "size": 0.12040821311389872,
+    "riskRewardRatio": 2.2695021640560045
+  },
+  {
+    "index": 8119,
+    "timestamp": "2021-12-05T07:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 49267.19,
+    "stopLoss": 50040.663249463454,
+    "takeProfit": 46102.36,
+    "size": 0.1292869534523252,
+    "riskRewardRatio": 4.091712288945225
+  },
+  {
+    "index": 8121,
+    "timestamp": "2021-12-05T09:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 48981.75,
+    "stopLoss": 50026.35366918022,
+    "takeProfit": 46750,
+    "size": 0.09573008687445778,
+    "riskRewardRatio": 2.1364562138207117
+  },
+  {
+    "index": 8130,
+    "timestamp": "2021-12-05T18:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 49084.81,
+    "stopLoss": 49711.81709306855,
+    "takeProfit": 47755,
+    "size": 0.15948782893444308,
+    "riskRewardRatio": 2.1208850979531135
+  },
+  {
+    "index": 8340,
+    "timestamp": "2021-12-14T12:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 47483.53,
+    "stopLoss": 48249.53959165841,
+    "takeProfit": 45600,
+    "size": 0.13054666819967625,
+    "riskRewardRatio": 2.45888565954136
+  },
+  {
+    "index": 8704,
+    "timestamp": "2021-12-29T16:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 47721.81,
+    "stopLoss": 48280.87360865008,
+    "takeProfit": 46559.46,
+    "size": 0.17887052287567168,
+    "riskRewardRatio": 2.079101522645367
+  },
+  {
+    "index": 8938,
+    "timestamp": "2022-01-08T10:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 41907.21,
+    "stopLoss": 42400.12674087574,
+    "takeProfit": 40456.56,
+    "size": 0.20287401848501774,
+    "riskRewardRatio": 2.942991949152913
+  },
+  {
+    "index": 9299,
+    "timestamp": "2022-01-23T11:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 35671.57,
+    "stopLoss": 36390.049826326795,
+    "takeProfit": 34211.5,
+    "size": 0.13918275271728478,
+    "riskRewardRatio": 2.0321656175992593
+  },
+  {
+    "index": 9868,
+    "timestamp": "2022-02-16T04:00:00.000Z",
+    "direction": "LONG",
+    "entry": 43886.9,
+    "stopLoss": 43491.136316564596,
+    "takeProfit": 44777,
+    "size": 0.2526760392261246,
+    "riskRewardRatio": 2.249069425151731
+  },
+  {
+    "index": 10114,
+    "timestamp": "2022-02-26T10:00:00.000Z",
+    "direction": "LONG",
+    "entry": 38983.1,
+    "stopLoss": 38311.344973285995,
+    "takeProfit": 40441.1,
+    "size": 0.14886379114893408,
+    "riskRewardRatio": 2.170434074951459
+  },
+  {
+    "index": 10116,
+    "timestamp": "2022-02-26T12:00:00.000Z",
+    "direction": "LONG",
+    "entry": 38977.3,
+    "stopLoss": 38506.301022884356,
+    "takeProfit": 40441.1,
+    "size": 0.2123146861430369,
+    "riskRewardRatio": 3.1078623757617647
+  },
+  {
+    "index": 10219,
+    "timestamp": "2022-03-02T19:00:00.000Z",
+    "direction": "LONG",
+    "entry": 43690.3,
+    "stopLoss": 43102.36112682311,
+    "takeProfit": 45350,
+    "size": 0.17008570884190058,
+    "riskRewardRatio": 2.822912509649019
+  },
+  {
+    "index": 10226,
+    "timestamp": "2022-03-03T02:00:00.000Z",
+    "direction": "LONG",
+    "entry": 43783.3,
+    "stopLoss": 43319.34547710129,
+    "takeProfit": 45350,
+    "size": 0.21553836650889058,
+    "riskRewardRatio": 3.3768395880947826
+  },
+  {
+    "index": 10290,
+    "timestamp": "2022-03-05T18:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 39380.8,
+    "stopLoss": 39750.97490883948,
+    "takeProfit": 38521,
+    "size": 0.27014256669504183,
+    "riskRewardRatio": 2.3226857884439776
+  },
+  {
+    "index": 10293,
+    "timestamp": "2022-03-05T21:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 39362,
+    "stopLoss": 39733.17816134123,
+    "takeProfit": 38547.6,
+    "size": 0.2694124019545106,
+    "riskRewardRatio": 2.194094601517538
+  },
+  {
+    "index": 11556,
+    "timestamp": "2022-04-27T12:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 38882.7,
+    "stopLoss": 39324.08768505642,
+    "takeProfit": 37671.8,
+    "size": 0.22655820129466853,
+    "riskRewardRatio": 2.743393259477128
+  },
+  {
+    "index": 14108,
+    "timestamp": "2022-08-11T20:00:00.000Z",
+    "direction": "LONG",
+    "entry": 24190.7,
+    "stopLoss": 23903.40482056399,
+    "takeProfit": 24972,
+    "size": 0.3480740616543217,
+    "riskRewardRatio": 2.719502643705213
+  },
+  {
+    "index": 14111,
+    "timestamp": "2022-08-11T23:00:00.000Z",
+    "direction": "LONG",
+    "entry": 23917.2,
+    "stopLoss": 23718.991869817448,
+    "takeProfit": 24972,
+    "size": 0.5045201723455965,
+    "riskRewardRatio": 5.321678777901349
+  },
+  {
+    "index": 14114,
+    "timestamp": "2022-08-12T02:00:00.000Z",
+    "direction": "LONG",
+    "entry": 23995.5,
+    "stopLoss": 23629.24374562279,
+    "takeProfit": 24972,
+    "size": 0.27303288013481675,
+    "riskRewardRatio": 2.6661660745164855
+  },
+  {
+    "index": 14320,
+    "timestamp": "2022-08-20T16:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 21227.7,
+    "stopLoss": 21436.034461965286,
+    "takeProfit": 20760,
+    "size": 0.4799973996460699,
+    "riskRewardRatio": 2.2449478381446726
+  },
+  {
+    "index": 14822,
+    "timestamp": "2022-09-10T14:00:00.000Z",
+    "direction": "LONG",
+    "entry": 21234.4,
+    "stopLoss": 21022.24654822017,
+    "takeProfit": 21670,
+    "size": 0.4713569313205321,
+    "riskRewardRatio": 2.053230792832231
+  },
+  {
+    "index": 15808,
+    "timestamp": "2022-10-21T16:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 19116.9,
+    "stopLoss": 19281.215871752804,
+    "takeProfit": 18600,
+    "size": 0.6085839361302882,
+    "riskRewardRatio": 3.1457703658574685
+  },
+  {
+    "index": 15810,
+    "timestamp": "2022-10-21T18:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 19130.3,
+    "stopLoss": 19278.475420031755,
+    "takeProfit": 18600,
+    "size": 0.6748757653500762,
+    "riskRewardRatio": 3.5788661836514493
+  },
+  {
+    "index": 16795,
+    "timestamp": "2022-12-01T19:00:00.000Z",
+    "direction": "LONG",
+    "entry": 16945.4,
+    "stopLoss": 16842.177965936186,
+    "takeProfit": 17348.5,
+    "size": 0.9687854042691703,
+    "riskRewardRatio": 3.905173964609011
+  },
+  {
+    "index": 16989,
+    "timestamp": "2022-12-09T21:00:00.000Z",
+    "direction": "LONG",
+    "entry": 17105.2,
+    "stopLoss": 17018.826463971407,
+    "takeProfit": 17365.4,
+    "size": 1.1577620252445766,
+    "riskRewardRatio": 3.012496789686397
+  },
+  {
+    "index": 17181,
+    "timestamp": "2022-12-17T21:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 16704.3,
+    "stopLoss": 16768.166311127883,
+    "takeProfit": 16571.8,
+    "size": 1.5657707206505673,
+    "riskRewardRatio": 2.074646204862002
+  },
+  {
+    "index": 17623,
+    "timestamp": "2023-01-05T07:00:00.000Z",
+    "direction": "LONG",
+    "entry": 16816.1,
+    "stopLoss": 16758.830382323664,
+    "takeProfit": 16984.6,
+    "size": 1.74612655116995,
+    "riskRewardRatio": 2.942223238721366
+  },
+  {
+    "index": 17928,
+    "timestamp": "2023-01-18T00:00:00.000Z",
+    "direction": "LONG",
+    "entry": 21201,
+    "stopLoss": 21017.52725251991,
+    "takeProfit": 21640,
+    "size": 0.5450400747438097,
+    "riskRewardRatio": 2.3927259281253246
+  },
+  {
+    "index": 18645,
+    "timestamp": "2023-02-16T21:00:00.000Z",
+    "direction": "LONG",
+    "entry": 24554,
+    "stopLoss": 24242.609007404197,
+    "takeProfit": 25290,
+    "size": 0.3211396680629218,
+    "riskRewardRatio": 2.3635879569431046
+  },
+  {
+    "index": 18864,
+    "timestamp": "2023-02-26T00:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 23088.1,
+    "stopLoss": 23242.342669804784,
+    "takeProfit": 22700,
+    "size": 0.6483290267638852,
+    "riskRewardRatio": 2.516164952870629
+  },
+  {
+    "index": 18867,
+    "timestamp": "2023-02-26T03:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 23201.8,
+    "stopLoss": 23306.91945902373,
+    "takeProfit": 22700,
+    "size": 0.9512986551559771,
+    "riskRewardRatio": 4.773616651572686
+  },
+  {
+    "index": 18868,
+    "timestamp": "2023-02-26T04:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 23180.3,
+    "stopLoss": 23305.146640522034,
+    "takeProfit": 22700,
+    "size": 0.8009827063175978,
+    "riskRewardRatio": 3.8471199384434165
+  },
+  {
+    "index": 18869,
+    "timestamp": "2023-02-26T05:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 23114,
+    "stopLoss": 23303.439737627603,
+    "takeProfit": 22700,
+    "size": 0.5278723527192491,
+    "riskRewardRatio": 2.1853915402576916
+  },
+  {
+    "index": 18871,
+    "timestamp": "2023-02-26T07:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 23142.7,
+    "stopLoss": 23256.35033499523,
+    "takeProfit": 22700,
+    "size": 0.8798918190975672,
+    "riskRewardRatio": 3.8952810831449365
+  },
+  {
+    "index": 19948,
+    "timestamp": "2023-04-12T04:00:00.000Z",
+    "direction": "LONG",
+    "entry": 29962.1,
+    "stopLoss": 29707.60108605637,
+    "takeProfit": 30564,
+    "size": 0.39292898523782965,
+    "riskRewardRatio": 2.3650395621465026
+  },
+  {
+    "index": 19950,
+    "timestamp": "2023-04-12T06:00:00.000Z",
+    "direction": "LONG",
+    "entry": 29921,
+    "stopLoss": 29732.17593644656,
+    "takeProfit": 30564,
+    "size": 0.5295935174687062,
+    "riskRewardRatio": 3.405286317323781
+  },
+  {
+    "index": 19953,
+    "timestamp": "2023-04-12T09:00:00.000Z",
+    "direction": "LONG",
+    "entry": 29996.3,
+    "stopLoss": 29789.871859465416,
+    "takeProfit": 30564,
+    "size": 0.484430076931527,
+    "riskRewardRatio": 2.750109546740282
+  },
+  {
+    "index": 20096,
+    "timestamp": "2023-04-18T08:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 29689.2,
+    "stopLoss": 29891.113072521915,
+    "takeProfit": 29078.1,
+    "size": 0.4952626333252715,
+    "riskRewardRatio": 3.0265499522507446
+  },
+  {
+    "index": 20686,
+    "timestamp": "2023-05-12T22:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 26675.7,
+    "stopLoss": 27000.72989590726,
+    "takeProfit": 25751,
+    "size": 0.30766400647813813,
+    "riskRewardRatio": 2.8449690679033455
+  },
+  {
+    "index": 20989,
+    "timestamp": "2023-05-25T13:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 26327,
+    "stopLoss": 26565.150456046988,
+    "takeProfit": 25850,
+    "size": 0.419902618117472,
+    "riskRewardRatio": 2.0029354884203414
+  },
+  {
+    "index": 22234,
+    "timestamp": "2023-07-16T10:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 30273.4,
+    "stopLoss": 30379.513032899275,
+    "takeProfit": 30050,
+    "size": 0.9423913092270594,
+    "riskRewardRatio": 2.1053021848132643
+  },
+  {
+    "index": 22236,
+    "timestamp": "2023-07-16T12:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 30280.8,
+    "stopLoss": 30377.46327836723,
+    "takeProfit": 30050,
+    "size": 1.0345190199332097,
+    "riskRewardRatio": 2.38766989800584
+  },
+  {
+    "index": 22297,
+    "timestamp": "2023-07-19T01:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 29990.3,
+    "stopLoss": 30145.101583242795,
+    "takeProfit": 29400,
+    "size": 0.6459882250891258,
+    "riskRewardRatio": 3.813268492701105
+  },
+  {
+    "index": 22357,
+    "timestamp": "2023-07-21T13:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 29799.4,
+    "stopLoss": 29963.27619798117,
+    "takeProfit": 29468.8,
+    "size": 0.610216744297983,
+    "riskRewardRatio": 2.0173765566491455
+  },
+  {
+    "index": 22628,
+    "timestamp": "2023-08-01T20:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 29221.3,
+    "stopLoss": 29401.295141198196,
+    "takeProfit": 28550,
+    "size": 0.5555705522622294,
+    "riskRewardRatio": 3.7295451173363423
+  },
+  {
+    "index": 23136,
+    "timestamp": "2023-08-23T00:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 26027.3,
+    "stopLoss": 26263.82874107746,
+    "takeProfit": 25280,
+    "size": 0.42278160169655915,
+    "riskRewardRatio": 3.1594469094783832
+  },
+  {
+    "index": 23142,
+    "timestamp": "2023-08-23T06:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 26049.6,
+    "stopLoss": 26242.25861794689,
+    "takeProfit": 25280,
+    "size": 0.5190528254882772,
+    "riskRewardRatio": 3.994630544957774
+  },
+  {
+    "index": 23316,
+    "timestamp": "2023-08-30T12:00:00.000Z",
+    "direction": "LONG",
+    "entry": 27342.7,
+    "stopLoss": 27200.41152929823,
+    "takeProfit": 28168,
+    "size": 0.7027976301017098,
+    "riskRewardRatio": 5.800188841229406
+  },
+  {
+    "index": 23897,
+    "timestamp": "2023-09-23T17:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 26584.7,
+    "stopLoss": 26624.909019141513,
+    "takeProfit": 26468.5,
+    "size": 2.4870042128622813,
+    "riskRewardRatio": 2.889898895345989
+  },
+  {
+    "index": 24496,
+    "timestamp": "2023-10-18T16:00:00.000Z",
+    "direction": "LONG",
+    "entry": 28332.1,
+    "stopLoss": 28035.02183998712,
+    "takeProfit": 29100,
+    "size": 0.33661175225962303,
+    "riskRewardRatio": 2.58484164560165
+  },
+  {
+    "index": 25213,
+    "timestamp": "2023-11-17T13:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 36352.5,
+    "stopLoss": 36776.89302029731,
+    "takeProfit": 35486.1,
+    "size": 0.23563064239356216,
+    "riskRewardRatio": 2.041503885697826
+  },
+  {
+    "index": 25403,
+    "timestamp": "2023-11-25T11:00:00.000Z",
+    "direction": "LONG",
+    "entry": 37645,
+    "stopLoss": 37489.212718196315,
+    "takeProfit": 38425,
+    "size": 0.6419009231190955,
+    "riskRewardRatio": 5.006827200328945
+  },
+  {
+    "index": 25404,
+    "timestamp": "2023-11-25T12:00:00.000Z",
+    "direction": "LONG",
+    "entry": 37717.8,
+    "stopLoss": 37491.70466689658,
+    "takeProfit": 38351.2,
+    "size": 0.4422913052975575,
+    "riskRewardRatio": 2.8014731277547034
+  },
+  {
+    "index": 25813,
+    "timestamp": "2023-12-12T13:00:00.000Z",
+    "direction": "SHORT",
+    "entry": 41833.6,
+    "stopLoss": 42255.3504460278,
+    "takeProfit": 40228.3,
+    "size": 0.23710704029322713,
+    "riskRewardRatio": 3.8062793178271646
+  }
+]

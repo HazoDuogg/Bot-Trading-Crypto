@@ -1,0 +1,15 @@
+{
+  "period": "2021-2024",
+  "total_trades": 108,
+  "wins": 29,
+  "losses": 79,
+  "win_rate": 0.26851851851851855,
+  "avg_mfe_r": 1.6744620370370369,
+  "avg_mae_r": -1.1862305555555552,
+  "avg_time_to_mfe": 7.138888888888889,
+  "avg_time_to_mae": 7.62037037037037,
+  "profit_factor": 1.0173699935431861,
+  "mfe_mae_ratio": 1.41158228406351,
+  "max_drawdown_r": 17.5274,
+  "sharpe_ratio_per_trade": 0.006939904619709714
+}

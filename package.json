@@ -7,16 +7,16 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "dev": "tsx research/smc-legacy/src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "fetch-ohlcv": "tsx scripts/fetchOhlcv.ts",
-    "fetch-cvd": "tsx scripts/fetchOrderflowCvd.ts",
-    "fetch-cvd-6m": "tsx scripts/fetchOrderflowCvd.ts --days 180 --suffix 6m",
-    "backtest": "tsx scripts/runBacktest.ts"
+    "fetch-ohlcv": "tsx research/smc-legacy/scripts/fetchOhlcv.ts",
+    "fetch-cvd": "tsx research/smc-legacy/scripts/fetchOrderflowCvd.ts",
+    "fetch-cvd-6m": "tsx research/smc-legacy/scripts/fetchOrderflowCvd.ts --days 180 --suffix 6m",
+    "backtest": "tsx research/smc-legacy/scripts/runBacktest.ts"
   },
   "dependencies": {
     "adm-zip": "^0.6.0",

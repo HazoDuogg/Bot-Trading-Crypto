@@ -1,0 +1,1788 @@
+{
+  "generatedAt": "2026-09-13T04:33:26.844Z",
+  "params": {
+    "baseMaxLen": 6,
+    "baseRangeAtrMult": 1.5,
+    "displacementMaxCandles": 3,
+    "displacementAtrMult": 2,
+    "equalAtrMult": 0.1,
+    "segmentCount": 15,
+    "segmentLen": 200,
+    "randomSeed": 435651
+  },
+  "segments": [
+    {
+      "segmentIndex": 0,
+      "segmentStartTime": 1701326700000,
+      "segmentEndTime": 1701506699999,
+      "zoneCandidates": [
+        {
+          "type": "demand",
+          "openTime": 1701341100000,
+          "closeTime": 1701342899999,
+          "high": 37747.9,
+          "low": 37638.4
+        },
+        {
+          "type": "demand",
+          "openTime": 1701345600000,
+          "closeTime": 1701349199999,
+          "high": 37913.6,
+          "low": 37812
+        },
+        {
+          "type": "supply",
+          "openTime": 1701351000000,
+          "closeTime": 1701351899999,
+          "high": 37928.8,
+          "low": 37839.4
+        },
+        {
+          "type": "demand",
+          "openTime": 1701389700000,
+          "closeTime": 1701393299999,
+          "high": 37682.5,
+          "low": 37600
+        },
+        {
+          "type": "demand",
+          "openTime": 1701399600000,
+          "closeTime": 1701402299999,
+          "high": 38056.8,
+          "low": 37933.4
+        },
+        {
+          "type": "demand",
+          "openTime": 1701400500000,
+          "closeTime": 1701403199999,
+          "high": 38056.8,
+          "low": 37938.2
+        },
+        {
+          "type": "demand",
+          "openTime": 1701408600000,
+          "closeTime": 1701412199999,
+          "high": 38169.9,
+          "low": 38060.7
+        },
+        {
+          "type": "demand",
+          "openTime": 1701408600000,
+          "closeTime": 1701413099999,
+          "high": 38169.9,
+          "low": 38060.7
+        },
+        {
+          "type": "demand",
+          "openTime": 1701419400000,
+          "closeTime": 1701421199999,
+          "high": 38330,
+          "low": 38205.2
+        },
+        {
+          "type": "demand",
+          "openTime": 1701441000000,
+          "closeTime": 1701445499999,
+          "high": 38414,
+          "low": 38243.2
+        }
+      ],
+      "equalPoints": [
+        {
+          "type": "equal-high",
+          "openTime": 1701357300000,
+          "closeTime": 1701363599999,
+          "priceA": 37720,
+          "priceB": 37719.5
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1701375300000,
+          "closeTime": 1701378899999,
+          "priceA": 37683.6,
+          "priceB": 37684.2
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1701416700000,
+          "closeTime": 1701420299999,
+          "priceA": 38210,
+          "priceB": 38205.2
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1701491400000,
+          "closeTime": 1701499499999,
+          "priceA": 38700,
+          "priceB": 38700.5
+        }
+      ]
+    },
+    {
+      "segmentIndex": 1,
+      "segmentStartTime": 1635320700000,
+      "segmentEndTime": 1635500699999,
+      "zoneCandidates": [
+        {
+          "type": "supply",
+          "openTime": 1635320700000,
+          "closeTime": 1635321599999,
+          "high": 60197,
+          "low": 59942.71
+        },
+        {
+          "type": "demand",
+          "openTime": 1635362100000,
+          "closeTime": 1635363899999,
+          "high": 58649.97,
+          "low": 58233
+        },
+        {
+          "type": "demand",
+          "openTime": 1635380100000,
+          "closeTime": 1635381899999,
+          "high": 58926.04,
+          "low": 58456.09
+        },
+        {
+          "type": "demand",
+          "openTime": 1635402600000,
+          "closeTime": 1635407999999,
+          "high": 59248,
+          "low": 58888
+        },
+        {
+          "type": "demand",
+          "openTime": 1635408000000,
+          "closeTime": 1635408899999,
+          "high": 59355.93,
+          "low": 59026.8
+        },
+        {
+          "type": "supply",
+          "openTime": 1635443100000,
+          "closeTime": 1635445799999,
+          "high": 61297.9,
+          "low": 60955.85
+        },
+        {
+          "type": "demand",
+          "openTime": 1635447600000,
+          "closeTime": 1635450299999,
+          "high": 60413.49,
+          "low": 59600
+        },
+        {
+          "type": "demand",
+          "openTime": 1635461100000,
+          "closeTime": 1635466499999,
+          "high": 60835.37,
+          "low": 60364.07
+        },
+        {
+          "type": "demand",
+          "openTime": 1635462900000,
+          "closeTime": 1635468299999,
+          "high": 60835.37,
+          "low": 60222
+        },
+        {
+          "type": "supply",
+          "openTime": 1635478200000,
+          "closeTime": 1635483599999,
+          "high": 61889,
+          "low": 61430.6
+        },
+        {
+          "type": "supply",
+          "openTime": 1635488100000,
+          "closeTime": 1635489899999,
+          "high": 61449.83,
+          "low": 61053
+        },
+        {
+          "type": "supply",
+          "openTime": 1635488100000,
+          "closeTime": 1635490799999,
+          "high": 61468,
+          "low": 61053
+        }
+      ],
+      "equalPoints": [
+        {
+          "type": "equal-high",
+          "openTime": 1635375600000,
+          "closeTime": 1635380999999,
+          "priceA": 58934,
+          "priceB": 58926.04
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1635462900000,
+          "closeTime": 1635466499999,
+          "priceA": 60835.37,
+          "priceB": 60826.65
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1635390900000,
+          "closeTime": 1635397199999,
+          "priceA": 58714.26,
+          "priceB": 58707.7
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1635399000000,
+          "closeTime": 1635402599999,
+          "priceA": 58737.48,
+          "priceB": 58742.84
+        }
+      ]
+    },
+    {
+      "segmentIndex": 2,
+      "segmentStartTime": 1657183500000,
+      "segmentEndTime": 1657363499999,
+      "zoneCandidates": [
+        {
+          "type": "demand",
+          "openTime": 1657197000000,
+          "closeTime": 1657200599999,
+          "high": 20453.9,
+          "low": 20370
+        },
+        {
+          "type": "demand",
+          "openTime": 1657201500000,
+          "closeTime": 1657202399999,
+          "high": 20548.8,
+          "low": 20477.9
+        },
+        {
+          "type": "supply",
+          "openTime": 1657205100000,
+          "closeTime": 1657205999999,
+          "high": 20967.2,
+          "low": 20821.7
+        },
+        {
+          "type": "demand",
+          "openTime": 1657206900000,
+          "closeTime": 1657211399999,
+          "high": 20966.9,
+          "low": 20822
+        },
+        {
+          "type": "supply",
+          "openTime": 1657212300000,
+          "closeTime": 1657213199999,
+          "high": 21199.1,
+          "low": 21035
+        },
+        {
+          "type": "demand",
+          "openTime": 1657214100000,
+          "closeTime": 1657217699999,
+          "high": 20959.4,
+          "low": 20816.2
+        },
+        {
+          "type": "demand",
+          "openTime": 1657220400000,
+          "closeTime": 1657222199999,
+          "high": 21486.6,
+          "low": 21306.6
+        },
+        {
+          "type": "demand",
+          "openTime": 1657235700000,
+          "closeTime": 1657241099999,
+          "high": 21715.2,
+          "low": 21560
+        },
+        {
+          "type": "supply",
+          "openTime": 1657254600000,
+          "closeTime": 1657259099999,
+          "high": 22099.2,
+          "low": 21939.7
+        },
+        {
+          "type": "supply",
+          "openTime": 1657262700000,
+          "closeTime": 1657268099999,
+          "high": 21850,
+          "low": 21707
+        },
+        {
+          "type": "supply",
+          "openTime": 1657279800000,
+          "closeTime": 1657283399999,
+          "high": 21712,
+          "low": 21520.5
+        },
+        {
+          "type": "demand",
+          "openTime": 1657288800000,
+          "closeTime": 1657289699999,
+          "high": 21369.4,
+          "low": 21187.2
+        },
+        {
+          "type": "demand",
+          "openTime": 1657289700000,
+          "closeTime": 1657290599999,
+          "high": 21460,
+          "low": 21308.9
+        },
+        {
+          "type": "supply",
+          "openTime": 1657316700000,
+          "closeTime": 1657322099999,
+          "high": 21858.5,
+          "low": 21675.5
+        },
+        {
+          "type": "demand",
+          "openTime": 1657343700000,
+          "closeTime": 1657349099999,
+          "high": 21558.9,
+          "low": 21477.4
+        }
+      ],
+      "equalPoints": [
+        {
+          "type": "equal-high",
+          "openTime": 1657305000000,
+          "closeTime": 1657309499999,
+          "priceA": 21880,
+          "priceB": 21873.8
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1657333800000,
+          "closeTime": 1657340099999,
+          "priceA": 21630,
+          "priceB": 21629.5
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1657207800000,
+          "closeTime": 1657215899999,
+          "priceA": 20822,
+          "priceB": 20816.2
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1657284300000,
+          "closeTime": 1657289699999,
+          "priceA": 21175.2,
+          "priceB": 21187.2
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1657303200000,
+          "closeTime": 1657306799999,
+          "priceA": 21665,
+          "priceB": 21650
+        }
+      ]
+    },
+    {
+      "segmentIndex": 3,
+      "segmentStartTime": 1658180700000,
+      "segmentEndTime": 1658360699999,
+      "zoneCandidates": [
+        {
+          "type": "demand",
+          "openTime": 1658180700000,
+          "closeTime": 1658184299999,
+          "high": 21788.5,
+          "low": 21552
+        },
+        {
+          "type": "demand",
+          "openTime": 1658186100000,
+          "closeTime": 1658187899999,
+          "high": 22319.1,
+          "low": 22088
+        },
+        {
+          "type": "demand",
+          "openTime": 1658232900000,
+          "closeTime": 1658236499999,
+          "high": 22204.5,
+          "low": 21973
+        },
+        {
+          "type": "demand",
+          "openTime": 1658239200000,
+          "closeTime": 1658240099999,
+          "high": 22320,
+          "low": 22099.2
+        },
+        {
+          "type": "demand",
+          "openTime": 1658239200000,
+          "closeTime": 1658241899999,
+          "high": 22337.2,
+          "low": 22090
+        },
+        {
+          "type": "demand",
+          "openTime": 1658242800000,
+          "closeTime": 1658243699999,
+          "high": 22860.7,
+          "low": 22605
+        },
+        {
+          "type": "supply",
+          "openTime": 1658301300000,
+          "closeTime": 1658302199999,
+          "high": 23719.6,
+          "low": 23620
+        },
+        {
+          "type": "demand",
+          "openTime": 1658308500000,
+          "closeTime": 1658311199999,
+          "high": 23578,
+          "low": 23441.3
+        },
+        {
+          "type": "supply",
+          "openTime": 1658329200000,
+          "closeTime": 1658333699999,
+          "high": 24277,
+          "low": 24031.6
+        },
+        {
+          "type": "supply",
+          "openTime": 1658342700000,
+          "closeTime": 1658345399999,
+          "high": 23939.1,
+          "low": 23668.5
+        },
+        {
+          "type": "demand",
+          "openTime": 1658349900000,
+          "closeTime": 1658352599999,
+          "high": 23410,
+          "low": 23110
+        }
+      ],
+      "equalPoints": [
+        {
+          "type": "equal-high",
+          "openTime": 1658207700000,
+          "closeTime": 1658212199999,
+          "priceA": 22118.3,
+          "priceB": 22124.6
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1658287800000,
+          "closeTime": 1658291399999,
+          "priceA": 23517,
+          "priceB": 23522
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1658222100000,
+          "closeTime": 1658226599999,
+          "priceA": 21801,
+          "priceB": 21801.1
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1658291400000,
+          "closeTime": 1658294999999,
+          "priceA": 23300,
+          "priceB": 23305.5
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1658294100000,
+          "closeTime": 1658304899999,
+          "priceA": 23305.5,
+          "priceB": 23298.5
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1658304000000,
+          "closeTime": 1658307599999,
+          "priceA": 23298.5,
+          "priceB": 23301.6
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1658313900000,
+          "closeTime": 1658321099999,
+          "priceA": 23544,
+          "priceB": 23556.9
+        }
+      ]
+    },
+    {
+      "segmentIndex": 4,
+      "segmentStartTime": 1680733800000,
+      "segmentEndTime": 1680913799999,
+      "zoneCandidates": [
+        {
+          "type": "supply",
+          "openTime": 1680733800000,
+          "closeTime": 1680737399999,
+          "high": 28226.5,
+          "low": 28112.7
+        },
+        {
+          "type": "supply",
+          "openTime": 1680740100000,
+          "closeTime": 1680740999999,
+          "high": 28114.1,
+          "low": 28024.5
+        },
+        {
+          "type": "supply",
+          "openTime": 1680760800000,
+          "closeTime": 1680765299999,
+          "high": 28079.9,
+          "low": 27994.6
+        },
+        {
+          "type": "supply",
+          "openTime": 1680772500000,
+          "closeTime": 1680773399999,
+          "high": 28024.6,
+          "low": 27952.4
+        },
+        {
+          "type": "supply",
+          "openTime": 1680774300000,
+          "closeTime": 1680775199999,
+          "high": 27963.5,
+          "low": 27885
+        },
+        {
+          "type": "demand",
+          "openTime": 1680779700000,
+          "closeTime": 1680783299999,
+          "high": 27949.5,
+          "low": 27870
+        },
+        {
+          "type": "supply",
+          "openTime": 1680785100000,
+          "closeTime": 1680786899999,
+          "high": 27931.5,
+          "low": 27831
+        },
+        {
+          "type": "demand",
+          "openTime": 1680789600000,
+          "closeTime": 1680793199999,
+          "high": 27976.3,
+          "low": 27872
+        },
+        {
+          "type": "supply",
+          "openTime": 1680800400000,
+          "closeTime": 1680805799999,
+          "high": 28084.5,
+          "low": 28002
+        },
+        {
+          "type": "supply",
+          "openTime": 1680839100000,
+          "closeTime": 1680843599999,
+          "high": 28052.2,
+          "low": 27982.1
+        },
+        {
+          "type": "supply",
+          "openTime": 1680849000000,
+          "closeTime": 1680852599999,
+          "high": 27953,
+          "low": 27885
+        },
+        {
+          "type": "demand",
+          "openTime": 1680867900000,
+          "closeTime": 1680868799999,
+          "high": 27860.1,
+          "low": 27786.1
+        },
+        {
+          "type": "demand",
+          "openTime": 1680903000000,
+          "closeTime": 1680905699999,
+          "high": 27886.7,
+          "low": 27842.2
+        }
+      ],
+      "equalPoints": [
+        {
+          "type": "equal-high",
+          "openTime": 1680786900000,
+          "closeTime": 1680790499999,
+          "priceA": 27969.9,
+          "priceB": 27976.3
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1680870600000,
+          "closeTime": 1680878699999,
+          "priceA": 27981.1,
+          "priceB": 27978.6
+        }
+      ]
+    },
+    {
+      "segmentIndex": 5,
+      "segmentStartTime": 1675182600000,
+      "segmentEndTime": 1675362599999,
+      "zoneCandidates": [
+        {
+          "type": "supply",
+          "openTime": 1675197900000,
+          "closeTime": 1675199699999,
+          "high": 23137.2,
+          "low": 23058
+        },
+        {
+          "type": "demand",
+          "openTime": 1675201500000,
+          "closeTime": 1675204199999,
+          "high": 22972.4,
+          "low": 22862.1
+        },
+        {
+          "type": "supply",
+          "openTime": 1675235700000,
+          "closeTime": 1675239299999,
+          "high": 23110.6,
+          "low": 23045
+        },
+        {
+          "type": "demand",
+          "openTime": 1675244700000,
+          "closeTime": 1675248299999,
+          "high": 23009.4,
+          "low": 22940
+        },
+        {
+          "type": "demand",
+          "openTime": 1675258200000,
+          "closeTime": 1675260899999,
+          "high": 23123.1,
+          "low": 23061.5
+        },
+        {
+          "type": "demand",
+          "openTime": 1675270800000,
+          "closeTime": 1675273499999,
+          "high": 23041.1,
+          "low": 22966.8
+        },
+        {
+          "type": "demand",
+          "openTime": 1675276200000,
+          "closeTime": 1675277099999,
+          "high": 23125,
+          "low": 23036.7
+        },
+        {
+          "type": "demand",
+          "openTime": 1675278900000,
+          "closeTime": 1675279799999,
+          "high": 23082.9,
+          "low": 22997.8
+        },
+        {
+          "type": "demand",
+          "openTime": 1675290600000,
+          "closeTime": 1675295999999,
+          "high": 23789.7,
+          "low": 23655.1
+        },
+        {
+          "type": "demand",
+          "openTime": 1675345500000,
+          "closeTime": 1675346399999,
+          "high": 23778.8,
+          "low": 23716
+        }
+      ],
+      "equalPoints": [
+        {
+          "type": "equal-high",
+          "openTime": 1675257300000,
+          "closeTime": 1675263599999,
+          "priceA": 23143.6,
+          "priceB": 23142.5
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1675305000000,
+          "closeTime": 1675311299999,
+          "priceA": 23836.8,
+          "priceB": 23843.4
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1675323900000,
+          "closeTime": 1675329299999,
+          "priceA": 23744,
+          "priceB": 23750.4
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1675354500000,
+          "closeTime": 1675358099999,
+          "priceA": 23772.2,
+          "priceB": 23781.7
+        }
+      ]
+    },
+    {
+      "segmentIndex": 6,
+      "segmentStartTime": 1699722900000,
+      "segmentEndTime": 1699902899999,
+      "zoneCandidates": [
+        {
+          "type": "supply",
+          "openTime": 1699735500000,
+          "closeTime": 1699737299999,
+          "high": 37089.4,
+          "low": 37001.7
+        },
+        {
+          "type": "demand",
+          "openTime": 1699743600000,
+          "closeTime": 1699745399999,
+          "high": 36918.4,
+          "low": 36805
+        },
+        {
+          "type": "supply",
+          "openTime": 1699785000000,
+          "closeTime": 1699789499999,
+          "high": 37164.8,
+          "low": 37096.6
+        },
+        {
+          "type": "demand",
+          "openTime": 1699792200000,
+          "closeTime": 1699793999999,
+          "high": 37068.2,
+          "low": 37001.2
+        },
+        {
+          "type": "supply",
+          "openTime": 1699799400000,
+          "closeTime": 1699801199999,
+          "high": 37172.5,
+          "low": 37123.7
+        },
+        {
+          "type": "supply",
+          "openTime": 1699822800000,
+          "closeTime": 1699828199999,
+          "high": 37235,
+          "low": 37164.5
+        },
+        {
+          "type": "demand",
+          "openTime": 1699831800000,
+          "closeTime": 1699832699999,
+          "high": 37055.6,
+          "low": 36977
+        },
+        {
+          "type": "demand",
+          "openTime": 1699836300000,
+          "closeTime": 1699837199999,
+          "high": 37166.8,
+          "low": 37087.1
+        },
+        {
+          "type": "demand",
+          "openTime": 1699849800000,
+          "closeTime": 1699855199999,
+          "high": 36967.6,
+          "low": 36840
+        },
+        {
+          "type": "supply",
+          "openTime": 1699869600000,
+          "closeTime": 1699873199999,
+          "high": 37026,
+          "low": 36940.9
+        },
+        {
+          "type": "demand",
+          "openTime": 1699874100000,
+          "closeTime": 1699874999999,
+          "high": 36930,
+          "low": 36850
+        },
+        {
+          "type": "demand",
+          "openTime": 1699876800000,
+          "closeTime": 1699877699999,
+          "high": 36863.2,
+          "low": 36750
+        },
+        {
+          "type": "supply",
+          "openTime": 1699882200000,
+          "closeTime": 1699885799999,
+          "high": 36959.1,
+          "low": 36834
+        },
+        {
+          "type": "demand",
+          "openTime": 1699888500000,
+          "closeTime": 1699890299999,
+          "high": 36830,
+          "low": 36706.4
+        },
+        {
+          "type": "supply",
+          "openTime": 1699892100000,
+          "closeTime": 1699892999999,
+          "high": 37074.3,
+          "low": 36891
+        }
+      ],
+      "equalPoints": [
+        {
+          "type": "equal-high",
+          "openTime": 1699777800000,
+          "closeTime": 1699785899999,
+          "priceA": 37167,
+          "priceB": 37164.8
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1699785000000,
+          "closeTime": 1699795799999,
+          "priceA": 37164.8,
+          "priceB": 37166.1
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1699803900000,
+          "closeTime": 1699815599999,
+          "priceA": 37248,
+          "priceB": 37247.7
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1699859700000,
+          "closeTime": 1699865999999,
+          "priceA": 37069.9,
+          "priceB": 37065.9
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1699848900000,
+          "closeTime": 1699853399999,
+          "priceA": 36832.2,
+          "priceB": 36840
+        }
+      ]
+    },
+    {
+      "segmentIndex": 7,
+      "segmentStartTime": 1636167600000,
+      "segmentEndTime": 1636347599999,
+      "zoneCandidates": [
+        {
+          "type": "supply",
+          "openTime": 1636179300000,
+          "closeTime": 1636181099999,
+          "high": 61480,
+          "low": 61273.79
+        },
+        {
+          "type": "demand",
+          "openTime": 1636183800000,
+          "closeTime": 1636184699999,
+          "high": 60825.11,
+          "low": 60529.58
+        },
+        {
+          "type": "supply",
+          "openTime": 1636190100000,
+          "closeTime": 1636193699999,
+          "high": 61238.81,
+          "low": 60947
+        },
+        {
+          "type": "supply",
+          "openTime": 1636191900000,
+          "closeTime": 1636194599999,
+          "high": 61139.48,
+          "low": 60845
+        },
+        {
+          "type": "demand",
+          "openTime": 1636197300000,
+          "closeTime": 1636199099999,
+          "high": 60682,
+          "low": 60360
+        },
+        {
+          "type": "demand",
+          "openTime": 1636221600000,
+          "closeTime": 1636226099999,
+          "high": 60983.81,
+          "low": 60720
+        },
+        {
+          "type": "demand",
+          "openTime": 1636240500000,
+          "closeTime": 1636244999999,
+          "high": 61583.77,
+          "low": 61350.19
+        },
+        {
+          "type": "demand",
+          "openTime": 1636276500000,
+          "closeTime": 1636278299999,
+          "high": 61758.38,
+          "low": 61560
+        },
+        {
+          "type": "supply",
+          "openTime": 1636280100000,
+          "closeTime": 1636280999999,
+          "high": 62350,
+          "low": 62147.12
+        },
+        {
+          "type": "demand",
+          "openTime": 1636296300000,
+          "closeTime": 1636298999999,
+          "high": 62022.66,
+          "low": 61750.01
+        },
+        {
+          "type": "supply",
+          "openTime": 1636301700000,
+          "closeTime": 1636307099999,
+          "high": 62320.57,
+          "low": 62066.85
+        },
+        {
+          "type": "demand",
+          "openTime": 1636313400000,
+          "closeTime": 1636316099999,
+          "high": 62378.43,
+          "low": 62180
+        },
+        {
+          "type": "demand",
+          "openTime": 1636323300000,
+          "closeTime": 1636328699999,
+          "high": 63079,
+          "low": 62776.73
+        },
+        {
+          "type": "demand",
+          "openTime": 1636332300000,
+          "closeTime": 1636333199999,
+          "high": 65099,
+          "low": 64716
+        }
+      ],
+      "equalPoints": [
+        {
+          "type": "equal-high",
+          "openTime": 1636198200000,
+          "closeTime": 1636201799999,
+          "priceA": 60682,
+          "priceB": 60663.86
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1636209000000,
+          "closeTime": 1636212599999,
+          "priceA": 60795,
+          "priceB": 60800
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1636218900000,
+          "closeTime": 1636223399999,
+          "priceA": 60928.45,
+          "priceB": 60920.69
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1636308000000,
+          "closeTime": 1636312499999,
+          "priceA": 62560.9,
+          "priceB": 62550.48
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1636337700000,
+          "closeTime": 1636346699999,
+          "priceA": 65400,
+          "priceB": 65412.3
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1636254900000,
+          "closeTime": 1636264799999,
+          "priceA": 61950,
+          "priceB": 61956.1
+        }
+      ]
+    },
+    {
+      "segmentIndex": 8,
+      "segmentStartTime": 1613349900000,
+      "segmentEndTime": 1613529899999,
+      "zoneCandidates": [
+        {
+          "type": "supply",
+          "openTime": 1613349900000,
+          "closeTime": 1613350799999,
+          "high": 49034,
+          "low": 48833.67
+        },
+        {
+          "type": "supply",
+          "openTime": 1613353500000,
+          "closeTime": 1613354399999,
+          "high": 48280,
+          "low": 48011.64
+        },
+        {
+          "type": "demand",
+          "openTime": 1613390400000,
+          "closeTime": 1613393099999,
+          "high": 47932.28,
+          "low": 47500
+        },
+        {
+          "type": "supply",
+          "openTime": 1613424600000,
+          "closeTime": 1613425499999,
+          "high": 48678.05,
+          "low": 48432.72
+        },
+        {
+          "type": "supply",
+          "openTime": 1613429100000,
+          "closeTime": 1613431799999,
+          "high": 48503.83,
+          "low": 48152.86
+        },
+        {
+          "type": "supply",
+          "openTime": 1613432700000,
+          "closeTime": 1613433599999,
+          "high": 48131.8,
+          "low": 47889.88
+        },
+        {
+          "type": "demand",
+          "openTime": 1613436300000,
+          "closeTime": 1613438099999,
+          "high": 47878.79,
+          "low": 47621.2
+        },
+        {
+          "type": "demand",
+          "openTime": 1613441700000,
+          "closeTime": 1613445299999,
+          "high": 48748.29,
+          "low": 48363.25
+        },
+        {
+          "type": "supply",
+          "openTime": 1613447100000,
+          "closeTime": 1613448899999,
+          "high": 49755.5,
+          "low": 49256.49
+        },
+        {
+          "type": "demand",
+          "openTime": 1613472300000,
+          "closeTime": 1613476799999,
+          "high": 49200,
+          "low": 48754.3
+        },
+        {
+          "type": "supply",
+          "openTime": 1613486700000,
+          "closeTime": 1613492099999,
+          "high": 49594.7,
+          "low": 49000
+        },
+        {
+          "type": "demand",
+          "openTime": 1613524500000,
+          "closeTime": 1613525399999,
+          "high": 49420,
+          "low": 49160.8
+        },
+        {
+          "type": "demand",
+          "openTime": 1613524500000,
+          "closeTime": 1613527199999,
+          "high": 49494.7,
+          "low": 49160.8
+        }
+      ],
+      "equalPoints": [
+        {
+          "type": "equal-high",
+          "openTime": 1613409300000,
+          "closeTime": 1613420999999,
+          "priceA": 48872.9,
+          "priceB": 48862.12
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1613504700000,
+          "closeTime": 1613510099999,
+          "priceA": 48872,
+          "priceB": 48878.94
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1613463300000,
+          "closeTime": 1613467799999,
+          "priceA": 48959.33,
+          "priceB": 48969.11
+        }
+      ]
+    },
+    {
+      "segmentIndex": 9,
+      "segmentStartTime": 1621055700000,
+      "segmentEndTime": 1621235699999,
+      "zoneCandidates": [
+        {
+          "type": "supply",
+          "openTime": 1621089900000,
+          "closeTime": 1621092599999,
+          "high": 49594.42,
+          "low": 49166
+        },
+        {
+          "type": "demand",
+          "openTime": 1621106100000,
+          "closeTime": 1621106999999,
+          "high": 47707.99,
+          "low": 47050
+        },
+        {
+          "type": "supply",
+          "openTime": 1621118700000,
+          "closeTime": 1621119599999,
+          "high": 48358.81,
+          "low": 47932.19
+        },
+        {
+          "type": "demand",
+          "openTime": 1621122300000,
+          "closeTime": 1621123199999,
+          "high": 47138.28,
+          "low": 46584.32
+        },
+        {
+          "type": "demand",
+          "openTime": 1621138500000,
+          "closeTime": 1621143899999,
+          "high": 48499.5,
+          "low": 48083.49
+        },
+        {
+          "type": "supply",
+          "openTime": 1621172700000,
+          "closeTime": 1621174499999,
+          "high": 49069.11,
+          "low": 48773.58
+        },
+        {
+          "type": "supply",
+          "openTime": 1621181700000,
+          "closeTime": 1621182599999,
+          "high": 48162.92,
+          "low": 47689.36
+        },
+        {
+          "type": "demand",
+          "openTime": 1621186200000,
+          "closeTime": 1621187999999,
+          "high": 47332.5,
+          "low": 46642.81
+        },
+        {
+          "type": "supply",
+          "openTime": 1621195200000,
+          "closeTime": 1621196099999,
+          "high": 45869.18,
+          "low": 45376.61
+        },
+        {
+          "type": "supply",
+          "openTime": 1621218600000,
+          "closeTime": 1621220399999,
+          "high": 44868.28,
+          "low": 44288
+        },
+        {
+          "type": "supply",
+          "openTime": 1621218600000,
+          "closeTime": 1621221299999,
+          "high": 44868.28,
+          "low": 44100
+        },
+        {
+          "type": "demand",
+          "openTime": 1621225800000,
+          "closeTime": 1621229399999,
+          "high": 43840.86,
+          "low": 42919.69
+        }
+      ],
+      "equalPoints": [
+        {
+          "type": "equal-high",
+          "openTime": 1621087200000,
+          "closeTime": 1621091699999,
+          "priceA": 49560,
+          "priceB": 49594.42
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1621193400000,
+          "closeTime": 1621204199999,
+          "priceA": 46230.99,
+          "priceB": 46277.7
+        }
+      ]
+    },
+    {
+      "segmentIndex": 10,
+      "segmentStartTime": 1681511400000,
+      "segmentEndTime": 1681691399999,
+      "zoneCandidates": [
+        {
+          "type": "demand",
+          "openTime": 1681515000000,
+          "closeTime": 1681517699999,
+          "high": 30470.8,
+          "low": 30368.1
+        },
+        {
+          "type": "supply",
+          "openTime": 1681560900000,
+          "closeTime": 1681564499999,
+          "high": 30432.1,
+          "low": 30375.2
+        },
+        {
+          "type": "supply",
+          "openTime": 1681571700000,
+          "closeTime": 1681573499999,
+          "high": 30414,
+          "low": 30383.2
+        },
+        {
+          "type": "demand",
+          "openTime": 1681582500000,
+          "closeTime": 1681587899999,
+          "high": 30304.6,
+          "low": 30241
+        },
+        {
+          "type": "demand",
+          "openTime": 1681592400000,
+          "closeTime": 1681595999999,
+          "high": 30296,
+          "low": 30228.3
+        },
+        {
+          "type": "supply",
+          "openTime": 1681601400000,
+          "closeTime": 1681606799999,
+          "high": 30320.4,
+          "low": 30258
+        },
+        {
+          "type": "demand",
+          "openTime": 1681623900000,
+          "closeTime": 1681628399999,
+          "high": 30340,
+          "low": 30289.1
+        },
+        {
+          "type": "demand",
+          "openTime": 1681649100000,
+          "closeTime": 1681650899999,
+          "high": 30273,
+          "low": 30229.2
+        },
+        {
+          "type": "demand",
+          "openTime": 1681665300000,
+          "closeTime": 1681668899999,
+          "high": 30334.8,
+          "low": 30287.9
+        },
+        {
+          "type": "supply",
+          "openTime": 1681672500000,
+          "closeTime": 1681673399999,
+          "high": 30521.7,
+          "low": 30463.7
+        },
+        {
+          "type": "supply",
+          "openTime": 1681686900000,
+          "closeTime": 1681690499999,
+          "high": 30307.4,
+          "low": 30230.4
+        }
+      ],
+      "equalPoints": [
+        {
+          "type": "equal-high",
+          "openTime": 1681557300000,
+          "closeTime": 1681562699999,
+          "priceA": 30429,
+          "priceB": 30432.1
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1681561800000,
+          "closeTime": 1681565399999,
+          "priceA": 30432.1,
+          "priceB": 30430
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1681576200000,
+          "closeTime": 1681589699999,
+          "priceA": 30333,
+          "priceB": 30333
+        }
+      ]
+    },
+    {
+      "segmentIndex": 11,
+      "segmentStartTime": 1630725300000,
+      "segmentEndTime": 1630905299999,
+      "zoneCandidates": [
+        {
+          "type": "supply",
+          "openTime": 1630748700000,
+          "closeTime": 1630750499999,
+          "high": 50582.08,
+          "low": 50351
+        },
+        {
+          "type": "supply",
+          "openTime": 1630772100000,
+          "closeTime": 1630773899999,
+          "high": 50080,
+          "low": 49853.69
+        },
+        {
+          "type": "supply",
+          "openTime": 1630787400000,
+          "closeTime": 1630792799999,
+          "high": 50265.55,
+          "low": 50074.51
+        },
+        {
+          "type": "demand",
+          "openTime": 1630796400000,
+          "closeTime": 1630799099999,
+          "high": 49988.95,
+          "low": 49746.63
+        },
+        {
+          "type": "supply",
+          "openTime": 1630808100000,
+          "closeTime": 1630809899999,
+          "high": 50341.16,
+          "low": 50104.41
+        },
+        {
+          "type": "supply",
+          "openTime": 1630838700000,
+          "closeTime": 1630840499999,
+          "high": 50173.2,
+          "low": 49951.03
+        },
+        {
+          "type": "demand",
+          "openTime": 1630861200000,
+          "closeTime": 1630866599999,
+          "high": 50472.07,
+          "low": 50267.45
+        },
+        {
+          "type": "demand",
+          "openTime": 1630870200000,
+          "closeTime": 1630872899999,
+          "high": 50881,
+          "low": 50665.12
+        },
+        {
+          "type": "supply",
+          "openTime": 1630881000000,
+          "closeTime": 1630886399999,
+          "high": 51923.49,
+          "low": 51637.8
+        }
+      ],
+      "equalPoints": [
+        {
+          "type": "equal-high",
+          "openTime": 1630733400000,
+          "closeTime": 1630736999999,
+          "priceA": 50392.94,
+          "priceB": 50383.2
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1630772100000,
+          "closeTime": 1630779299999,
+          "priceA": 50080,
+          "priceB": 50065.59
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1630881900000,
+          "closeTime": 1630887299999,
+          "priceA": 51923.49,
+          "priceB": 51910
+        }
+      ]
+    },
+    {
+      "segmentIndex": 12,
+      "segmentStartTime": 1679671800000,
+      "segmentEndTime": 1679851799999,
+      "zoneCandidates": [
+        {
+          "type": "supply",
+          "openTime": 1679684400000,
+          "closeTime": 1679689799999,
+          "high": 27871,
+          "low": 27666
+        },
+        {
+          "type": "demand",
+          "openTime": 1679755500000,
+          "closeTime": 1679758199999,
+          "high": 27579.5,
+          "low": 27465.8
+        },
+        {
+          "type": "supply",
+          "openTime": 1679760000000,
+          "closeTime": 1679764499999,
+          "high": 27721,
+          "low": 27606.3
+        },
+        {
+          "type": "supply",
+          "openTime": 1679766300000,
+          "closeTime": 1679770799999,
+          "high": 27524.9,
+          "low": 27412
+        },
+        {
+          "type": "demand",
+          "openTime": 1679783400000,
+          "closeTime": 1679788799999,
+          "high": 27491.1,
+          "low": 27392.4
+        },
+        {
+          "type": "demand",
+          "openTime": 1679812200000,
+          "closeTime": 1679817599999,
+          "high": 27523.2,
+          "low": 27460
+        },
+        {
+          "type": "demand",
+          "openTime": 1679827500000,
+          "closeTime": 1679830199999,
+          "high": 27735,
+          "low": 27642.9
+        },
+        {
+          "type": "demand",
+          "openTime": 1679833800000,
+          "closeTime": 1679837399999,
+          "high": 27950,
+          "low": 27837.8
+        },
+        {
+          "type": "supply",
+          "openTime": 1679839200000,
+          "closeTime": 1679840099999,
+          "high": 28144.9,
+          "low": 28006.4
+        }
+      ],
+      "equalPoints": [
+        {
+          "type": "equal-high",
+          "openTime": 1679741100000,
+          "closeTime": 1679744699999,
+          "priceA": 27524.7,
+          "priceB": 27519
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1679733000000,
+          "closeTime": 1679736599999,
+          "priceA": 27310,
+          "priceB": 27302
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1679785200000,
+          "closeTime": 1679790599999,
+          "priceA": 27392.4,
+          "priceB": 27400
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1679808600000,
+          "closeTime": 1679812199999,
+          "priceA": 27456,
+          "priceB": 27458.4
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1679816700000,
+          "closeTime": 1679820299999,
+          "priceA": 27466,
+          "priceB": 27460.9
+        }
+      ]
+    },
+    {
+      "segmentIndex": 13,
+      "segmentStartTime": 1699581600000,
+      "segmentEndTime": 1699761599999,
+      "zoneCandidates": [
+        {
+          "type": "demand",
+          "openTime": 1699607700000,
+          "closeTime": 1699611299999,
+          "high": 36626.6,
+          "low": 36488.3
+        },
+        {
+          "type": "supply",
+          "openTime": 1699614900000,
+          "closeTime": 1699615799999,
+          "high": 36976.2,
+          "low": 36810.6
+        },
+        {
+          "type": "supply",
+          "openTime": 1699621200000,
+          "closeTime": 1699623899999,
+          "high": 37276,
+          "low": 37068
+        },
+        {
+          "type": "demand",
+          "openTime": 1699626600000,
+          "closeTime": 1699631999999,
+          "high": 37186.8,
+          "low": 36937.5
+        },
+        {
+          "type": "demand",
+          "openTime": 1699627500000,
+          "closeTime": 1699630199999,
+          "high": 37186.8,
+          "low": 37025
+        },
+        {
+          "type": "demand",
+          "openTime": 1699650900000,
+          "closeTime": 1699655399999,
+          "high": 37394.7,
+          "low": 37282.5
+        },
+        {
+          "type": "supply",
+          "openTime": 1699735500000,
+          "closeTime": 1699737299999,
+          "high": 37089.4,
+          "low": 37001.7
+        },
+        {
+          "type": "demand",
+          "openTime": 1699743600000,
+          "closeTime": 1699745399999,
+          "high": 36918.4,
+          "low": 36805
+        }
+      ],
+      "equalPoints": [
+        {
+          "type": "equal-high",
+          "openTime": 1699679700000,
+          "closeTime": 1699685099999,
+          "priceA": 37159.7,
+          "priceB": 37159.5
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1699617600000,
+          "closeTime": 1699625699999,
+          "priceA": 36821.2,
+          "priceB": 36826.8
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1699689600000,
+          "closeTime": 1699694099999,
+          "priceA": 36951.6,
+          "priceB": 36956
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1699717500000,
+          "closeTime": 1699723799999,
+          "priceA": 37044.9,
+          "priceB": 37051
+        }
+      ]
+    },
+    {
+      "segmentIndex": 14,
+      "segmentStartTime": 1657820700000,
+      "segmentEndTime": 1658000699999,
+      "zoneCandidates": [
+        {
+          "type": "demand",
+          "openTime": 1657845000000,
+          "closeTime": 1657849499999,
+          "high": 20479.2,
+          "low": 20364.3
+        },
+        {
+          "type": "demand",
+          "openTime": 1657863900000,
+          "closeTime": 1657868399999,
+          "high": 20684.4,
+          "low": 20570.7
+        },
+        {
+          "type": "demand",
+          "openTime": 1657906200000,
+          "closeTime": 1657908899999,
+          "high": 20892.9,
+          "low": 20750.6
+        },
+        {
+          "type": "demand",
+          "openTime": 1657910700000,
+          "closeTime": 1657913399999,
+          "high": 21045,
+          "low": 20932
+        },
+        {
+          "type": "supply",
+          "openTime": 1657914300000,
+          "closeTime": 1657916999999,
+          "high": 21200,
+          "low": 21047
+        },
+        {
+          "type": "supply",
+          "openTime": 1657944900000,
+          "closeTime": 1657949399999,
+          "high": 20750.8,
+          "low": 20673.3
+        },
+        {
+          "type": "demand",
+          "openTime": 1657971900000,
+          "closeTime": 1657975499999,
+          "high": 20649.8,
+          "low": 20583.6
+        },
+        {
+          "type": "demand",
+          "openTime": 1657981800000,
+          "closeTime": 1657982699999,
+          "high": 20809,
+          "low": 20723.3
+        },
+        {
+          "type": "demand",
+          "openTime": 1657984500000,
+          "closeTime": 1657987199999,
+          "high": 20950,
+          "low": 20859.4
+        },
+        {
+          "type": "supply",
+          "openTime": 1657990800000,
+          "closeTime": 1657991699999,
+          "high": 21501.9,
+          "low": 21354.8
+        }
+      ],
+      "equalPoints": [
+        {
+          "type": "equal-high",
+          "openTime": 1657859400000,
+          "closeTime": 1657866599999,
+          "priceA": 20693.6,
+          "priceB": 20684.4
+        },
+        {
+          "type": "equal-high",
+          "openTime": 1657913400000,
+          "closeTime": 1657916999999,
+          "priceA": 21197,
+          "priceB": 21200
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1657845000000,
+          "closeTime": 1657848599999,
+          "priceA": 20364.3,
+          "priceB": 20372.1
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1657919700000,
+          "closeTime": 1657925099999,
+          "priceA": 20812.4,
+          "priceB": 20804.1
+        },
+        {
+          "type": "equal-low",
+          "openTime": 1657967400000,
+          "closeTime": 1657973699999,
+          "priceA": 20579.5,
+          "priceB": 20583.6
+        }
+      ]
+    }
+  ]
+}

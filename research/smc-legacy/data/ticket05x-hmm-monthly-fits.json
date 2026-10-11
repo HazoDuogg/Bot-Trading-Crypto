@@ -1,0 +1,1025 @@
+[
+  {
+    "trainStart": "2023-01-01T00:00:00.000Z",
+    "trainEnd": "2023-07-01T00:00:00.000Z",
+    "testStart": "2023-07-01T00:00:00.000Z",
+    "testEnd": "2023-08-01T00:00:00.000Z",
+    "trainCandleCount": 17375,
+    "testCandleCount": 2976,
+    "logLikelihood": 85570.66485174853,
+    "emIterations": 190,
+    "states": {
+      "DOWNTREND": {
+        "mean": -0.0000030733133405978816,
+        "std": 0.0006243528891251614,
+        "selfLoop": 0.9627288685122126
+      },
+      "UPTREND": {
+        "mean": 0.00022563352838914956,
+        "std": 0.007760546588015364,
+        "selfLoop": 0.6553380924409782
+      },
+      "SIDEWAY": {
+        "mean": 0.000003003824997823033,
+        "std": 0.0011869231747094987,
+        "selfLoop": 0.927786014534276
+      },
+      "DANGER_ZONE": {
+        "mean": 0.00005924376834514995,
+        "std": 0.0023675724256460797,
+        "selfLoop": 0.8626819964384808
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2023-02-01T00:00:00.000Z",
+    "trainEnd": "2023-08-01T00:00:00.000Z",
+    "testStart": "2023-08-01T00:00:00.000Z",
+    "testEnd": "2023-09-01T00:00:00.000Z",
+    "trainCandleCount": 17376,
+    "testCandleCount": 2976,
+    "logLikelihood": 86605.66006745855,
+    "emIterations": 200,
+    "states": {
+      "DANGER_ZONE": {
+        "mean": 0.000026909009021622604,
+        "std": 0.0023647623354496293,
+        "selfLoop": 0.8618407396929696
+      },
+      "UPTREND": {
+        "mean": 0.0001559460622319904,
+        "std": 0.007611614044531061,
+        "selfLoop": 0.6568834375711627
+      },
+      "DOWNTREND": {
+        "mean": -0.000009883772853495011,
+        "std": 0.0006690729672824405,
+        "selfLoop": 0.9638632988599575
+      },
+      "SIDEWAY": {
+        "mean": -0.0000035148161346498887,
+        "std": 0.0011948527217793276,
+        "selfLoop": 0.929577696605489
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2023-03-01T00:00:00.000Z",
+    "trainEnd": "2023-09-01T00:00:00.000Z",
+    "testStart": "2023-09-01T00:00:00.000Z",
+    "testEnd": "2023-10-01T00:00:00.000Z",
+    "trainCandleCount": 17664,
+    "testCandleCount": 2880,
+    "logLikelihood": 89473.30156749874,
+    "emIterations": 187,
+    "states": {
+      "DOWNTREND": {
+        "mean": -0.000009826598384115865,
+        "std": 0.0006027926507160992,
+        "selfLoop": 0.9698751500835179
+      },
+      "UPTREND": {
+        "mean": 0.00014501673505374035,
+        "std": 0.010243121777096563,
+        "selfLoop": 0.5913702560551098
+      },
+      "SIDEWAY": {
+        "mean": -0.000005710891552700745,
+        "std": 0.0011296082250929957,
+        "selfLoop": 0.9322571190030696
+      },
+      "DANGER_ZONE": {
+        "mean": 0.000021820035357528728,
+        "std": 0.0025236405493751783,
+        "selfLoop": 0.8699081142474628
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2023-04-01T00:00:00.000Z",
+    "trainEnd": "2023-10-01T00:00:00.000Z",
+    "testStart": "2023-10-01T00:00:00.000Z",
+    "testEnd": "2023-11-01T00:00:00.000Z",
+    "trainCandleCount": 17568,
+    "testCandleCount": 2976,
+    "logLikelihood": 91166.20004820936,
+    "emIterations": 137,
+    "states": {
+      "SIDEWAY": {
+        "mean": -0.000009192681323087804,
+        "std": 0.0005685320321638272,
+        "selfLoop": 0.9714009541722388
+      },
+      "DOWNTREND": {
+        "mean": -0.0004106694493128452,
+        "std": 0.011267764514927892,
+        "selfLoop": 0.4235987863469492
+      },
+      "DANGER_ZONE": {
+        "mean": 0.0000019588428595091646,
+        "std": 0.0010612342055008183,
+        "selfLoop": 0.9342534510873318
+      },
+      "UPTREND": {
+        "mean": 0.0000207783223131311,
+        "std": 0.00239465067620462,
+        "selfLoop": 0.8595859768917188
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2023-05-01T00:00:00.000Z",
+    "trainEnd": "2023-11-01T00:00:00.000Z",
+    "testStart": "2023-11-01T00:00:00.000Z",
+    "testEnd": "2023-12-01T00:00:00.000Z",
+    "trainCandleCount": 17664,
+    "testCandleCount": 2880,
+    "logLikelihood": 91769.29182159377,
+    "emIterations": 107,
+    "states": {
+      "UPTREND": {
+        "mean": 0.00005478025926064509,
+        "std": 0.00254329201104429,
+        "selfLoop": 0.8648706143260921
+      },
+      "SIDEWAY": {
+        "mean": -0.000008467189569050116,
+        "std": 0.0005645685203391435,
+        "selfLoop": 0.9707867590610657
+      },
+      "DOWNTREND": {
+        "mean": -0.0004668361309563833,
+        "std": 0.013385664667478668,
+        "selfLoop": 0.43487019987415965
+      },
+      "DANGER_ZONE": {
+        "mean": 0.000009120585196354578,
+        "std": 0.001079593160967203,
+        "selfLoop": 0.9382051520718978
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2023-06-01T00:00:00.000Z",
+    "trainEnd": "2023-12-01T00:00:00.000Z",
+    "testStart": "2023-12-01T00:00:00.000Z",
+    "testEnd": "2024-01-01T00:00:00.000Z",
+    "trainCandleCount": 17568,
+    "testCandleCount": 2976,
+    "logLikelihood": 90959.47094488965,
+    "emIterations": 119,
+    "states": {
+      "DOWNTREND": {
+        "mean": -0.000008275332715851573,
+        "std": 0.0005853773814116178,
+        "selfLoop": 0.9723243644906697
+      },
+      "SIDEWAY": {
+        "mean": 0.00001557908397909955,
+        "std": 0.0011213945424362777,
+        "selfLoop": 0.9424661053652948
+      },
+      "DANGER_ZONE": {
+        "mean": 0.00004487913428112534,
+        "std": 0.002477763706654958,
+        "selfLoop": 0.891610589795931
+      },
+      "UPTREND": {
+        "mean": 0.00008793312218256444,
+        "std": 0.013017993211747039,
+        "selfLoop": 0.44727105509988546
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2023-07-01T00:00:00.000Z",
+    "trainEnd": "2024-01-01T00:00:00.000Z",
+    "testStart": "2024-01-01T00:00:00.000Z",
+    "testEnd": "2024-02-01T00:00:00.000Z",
+    "trainCandleCount": 17664,
+    "testCandleCount": 2976,
+    "logLikelihood": 91001.918803145,
+    "emIterations": 136,
+    "states": {
+      "DANGER_ZONE": {
+        "mean": 0.00001283901393157116,
+        "std": 0.0025236713031914107,
+        "selfLoop": 0.9080742496887977
+      },
+      "DOWNTREND": {
+        "mean": -0.000007792810633354067,
+        "std": 0.0005914430987656612,
+        "selfLoop": 0.9715275032721271
+      },
+      "SIDEWAY": {
+        "mean": 0.0000223992453196976,
+        "std": 0.0011609424136392293,
+        "selfLoop": 0.942326721663799
+      },
+      "UPTREND": {
+        "mean": 0.0005313381918899043,
+        "std": 0.013736766038741865,
+        "selfLoop": 0.41029450672536816
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2023-08-01T00:00:00.000Z",
+    "trainEnd": "2024-02-01T00:00:00.000Z",
+    "testStart": "2024-02-01T00:00:00.000Z",
+    "testEnd": "2024-03-01T00:00:00.000Z",
+    "trainCandleCount": 17664,
+    "testCandleCount": 2784,
+    "logLikelihood": 88842.5960122857,
+    "emIterations": 200,
+    "states": {
+      "DOWNTREND": {
+        "mean": -0.000005053982213950284,
+        "std": 0.0005893837640277097,
+        "selfLoop": 0.9719135915158965
+      },
+      "DANGER_ZONE": {
+        "mean": 0.00002986011406278711,
+        "std": 0.002614021508738173,
+        "selfLoop": 0.9247043457146557
+      },
+      "SIDEWAY": {
+        "mean": 0.00001964560488279667,
+        "std": 0.0012204795435987437,
+        "selfLoop": 0.9484754773963576
+      },
+      "UPTREND": {
+        "mean": 0.00016779536938057703,
+        "std": 0.012349424558264512,
+        "selfLoop": 0.6133049295103458
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2023-09-01T00:00:00.000Z",
+    "trainEnd": "2024-03-01T00:00:00.000Z",
+    "testStart": "2024-03-01T00:00:00.000Z",
+    "testEnd": "2024-04-01T00:00:00.000Z",
+    "trainCandleCount": 17472,
+    "testCandleCount": 2976,
+    "logLikelihood": 86208.9833061347,
+    "emIterations": 142,
+    "states": {
+      "DOWNTREND": {
+        "mean": -3.6119435087490427e-7,
+        "std": 0.0006900619147707816,
+        "selfLoop": 0.969878729266112
+      },
+      "SIDEWAY": {
+        "mean": 0.00003079445501050828,
+        "std": 0.001356223114430387,
+        "selfLoop": 0.9508613471925152
+      },
+      "DANGER_ZONE": {
+        "mean": 0.00006246345409254867,
+        "std": 0.0026387146013625846,
+        "selfLoop": 0.9192645081625463
+      },
+      "UPTREND": {
+        "mean": 0.00043960558629900997,
+        "std": 0.00881547918585444,
+        "selfLoop": 0.7187949229697904
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2023-10-01T00:00:00.000Z",
+    "trainEnd": "2024-04-01T00:00:00.000Z",
+    "testStart": "2024-04-01T00:00:00.000Z",
+    "testEnd": "2024-05-01T00:00:00.000Z",
+    "trainCandleCount": 17568,
+    "testCandleCount": 2880,
+    "logLikelihood": 84000.11093348704,
+    "emIterations": 166,
+    "states": {
+      "SIDEWAY": {
+        "mean": 0.00002658286883743731,
+        "std": 0.0008972162929408533,
+        "selfLoop": 0.9641907582138338
+      },
+      "DOWNTREND": {
+        "mean": 0.000005324442683367618,
+        "std": 0.010074983653983767,
+        "selfLoop": 0.7765719130096471
+      },
+      "DANGER_ZONE": {
+        "mean": 0.000030512789046956315,
+        "std": 0.001747541952105415,
+        "selfLoop": 0.9533044554444934
+      },
+      "UPTREND": {
+        "mean": 0.0001411406833167414,
+        "std": 0.0034808834625292464,
+        "selfLoop": 0.9147319298522666
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2023-11-01T00:00:00.000Z",
+    "trainEnd": "2024-05-01T00:00:00.000Z",
+    "testStart": "2024-05-01T00:00:00.000Z",
+    "testEnd": "2024-06-01T00:00:00.000Z",
+    "trainCandleCount": 17472,
+    "testCandleCount": 2976,
+    "logLikelihood": 82205.07163508759,
+    "emIterations": 152,
+    "states": {
+      "SIDEWAY": {
+        "mean": 0.000009195118103926579,
+        "std": 0.000989455981467424,
+        "selfLoop": 0.9641062635797181
+      },
+      "UPTREND": {
+        "mean": 0.00010577940183789857,
+        "std": 0.0034857789463906756,
+        "selfLoop": 0.9115430889833073
+      },
+      "DANGER_ZONE": {
+        "mean": 0.00003587485040275029,
+        "std": 0.001819790967015535,
+        "selfLoop": 0.9523813210205812
+      },
+      "DOWNTREND": {
+        "mean": -0.0003742635689222334,
+        "std": 0.009013433391790442,
+        "selfLoop": 0.7882194736416768
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2023-12-01T00:00:00.000Z",
+    "trainEnd": "2024-06-01T00:00:00.000Z",
+    "testStart": "2024-06-01T00:00:00.000Z",
+    "testEnd": "2024-07-01T00:00:00.000Z",
+    "trainCandleCount": 17568,
+    "testCandleCount": 2880,
+    "logLikelihood": 82167.53089372636,
+    "emIterations": 133,
+    "states": {
+      "SIDEWAY": {
+        "mean": 0.000009515821852622574,
+        "std": 0.0010327538457519968,
+        "selfLoop": 0.9605035987468145
+      },
+      "UPTREND": {
+        "mean": 0.00008771654956037381,
+        "std": 0.003621246172583843,
+        "selfLoop": 0.9024620991431153
+      },
+      "DANGER_ZONE": {
+        "mean": 0.000051008904100373055,
+        "std": 0.0018679762066177554,
+        "selfLoop": 0.9467341103310049
+      },
+      "DOWNTREND": {
+        "mean": -0.00047021771820139944,
+        "std": 0.00938142165306795,
+        "selfLoop": 0.7724242996433442
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2024-01-01T00:00:00.000Z",
+    "trainEnd": "2024-07-01T00:00:00.000Z",
+    "testStart": "2024-07-01T00:00:00.000Z",
+    "testEnd": "2024-08-01T00:00:00.000Z",
+    "trainCandleCount": 17472,
+    "testCandleCount": 2976,
+    "logLikelihood": 82365.90442455016,
+    "emIterations": 200,
+    "states": {
+      "DANGER_ZONE": {
+        "mean": 0.00002873668708386085,
+        "std": 0.0015852082161112444,
+        "selfLoop": 0.9486083385837741
+      },
+      "UPTREND": {
+        "mean": 0.00006677123085899441,
+        "std": 0.003008438763953228,
+        "selfLoop": 0.9165258362305028
+      },
+      "SIDEWAY": {
+        "mean": 0.00001264658311944372,
+        "std": 0.0008258964144173988,
+        "selfLoop": 0.9648437929091619
+      },
+      "DOWNTREND": {
+        "mean": -0.00023988549623741703,
+        "std": 0.00790394243732785,
+        "selfLoop": 0.807201925966843
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2024-02-01T00:00:00.000Z",
+    "trainEnd": "2024-08-01T00:00:00.000Z",
+    "testStart": "2024-08-01T00:00:00.000Z",
+    "testEnd": "2024-09-01T00:00:00.000Z",
+    "trainCandleCount": 17472,
+    "testCandleCount": 2976,
+    "logLikelihood": 82291.34850488904,
+    "emIterations": 200,
+    "states": {
+      "SIDEWAY": {
+        "mean": 0.000007282326091372697,
+        "std": 0.0008188005424398659,
+        "selfLoop": 0.9631979833819345
+      },
+      "UPTREND": {
+        "mean": 0.0000634209802155277,
+        "std": 0.0029762134405467767,
+        "selfLoop": 0.9012099310746767
+      },
+      "DANGER_ZONE": {
+        "mean": 0.00003529233295221322,
+        "std": 0.0015774243706500157,
+        "selfLoop": 0.9439532929012991
+      },
+      "DOWNTREND": {
+        "mean": -0.0002193894227545881,
+        "std": 0.007283918945426016,
+        "selfLoop": 0.7984790494362575
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2024-03-01T00:00:00.000Z",
+    "trainEnd": "2024-09-01T00:00:00.000Z",
+    "testStart": "2024-09-01T00:00:00.000Z",
+    "testEnd": "2024-10-01T00:00:00.000Z",
+    "trainCandleCount": 17664,
+    "testCandleCount": 2880,
+    "logLikelihood": 82361.51807794251,
+    "emIterations": 200,
+    "states": {
+      "DOWNTREND": {
+        "mean": -0.00040353109997961866,
+        "std": 0.00891657689534498,
+        "selfLoop": 0.7886636595947109
+      },
+      "UPTREND": {
+        "mean": 0.000049008892162014285,
+        "std": 0.0017283591412798477,
+        "selfLoop": 0.9449479580877029
+      },
+      "DANGER_ZONE": {
+        "mean": -0.000032760290378340525,
+        "std": 0.003442123580168817,
+        "selfLoop": 0.8974179491238637
+      },
+      "SIDEWAY": {
+        "mean": 0.000016689166138611775,
+        "std": 0.0009148304636780174,
+        "selfLoop": 0.9691175538822311
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2024-04-01T00:00:00.000Z",
+    "trainEnd": "2024-10-01T00:00:00.000Z",
+    "testStart": "2024-10-01T00:00:00.000Z",
+    "testEnd": "2024-11-01T00:00:00.000Z",
+    "trainCandleCount": 17568,
+    "testCandleCount": 2976,
+    "logLikelihood": 83092.08867509544,
+    "emIterations": 200,
+    "states": {
+      "DOWNTREND": {
+        "mean": -0.0004033720661782238,
+        "std": 0.008628249790086482,
+        "selfLoop": 0.7174145957270588
+      },
+      "SIDEWAY": {
+        "mean": 0.00000377066480456546,
+        "std": 0.0008396928932487841,
+        "selfLoop": 0.9683473808168562
+      },
+      "UPTREND": {
+        "mean": 0.00003484708247541474,
+        "std": 0.0015894080392616682,
+        "selfLoop": 0.9434247364291678
+      },
+      "DANGER_ZONE": {
+        "mean": -0.0000254693521394467,
+        "std": 0.0031323272627502593,
+        "selfLoop": 0.8860426282422075
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2024-05-01T00:00:00.000Z",
+    "trainEnd": "2024-11-01T00:00:00.000Z",
+    "testStart": "2024-11-01T00:00:00.000Z",
+    "testEnd": "2024-12-01T00:00:00.000Z",
+    "trainCandleCount": 17664,
+    "testCandleCount": 2880,
+    "logLikelihood": 84606.0845090831,
+    "emIterations": 200,
+    "states": {
+      "SIDEWAY": {
+        "mean": 0.000009082548936254813,
+        "std": 0.000822421126267398,
+        "selfLoop": 0.9746703413406057
+      },
+      "DANGER_ZONE": {
+        "mean": -1.463897054528202e-7,
+        "std": 0.002996724008031742,
+        "selfLoop": 0.8798847866413433
+      },
+      "UPTREND": {
+        "mean": 0.00003656254999245951,
+        "std": 0.0015470834115501354,
+        "selfLoop": 0.9425470575312734
+      },
+      "DOWNTREND": {
+        "mean": -0.00027144448223739165,
+        "std": 0.0079821667026729,
+        "selfLoop": 0.7263896859494232
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2024-06-01T00:00:00.000Z",
+    "trainEnd": "2024-12-01T00:00:00.000Z",
+    "testStart": "2024-12-01T00:00:00.000Z",
+    "testEnd": "2025-01-01T00:00:00.000Z",
+    "trainCandleCount": 17568,
+    "testCandleCount": 2976,
+    "logLikelihood": 83621.31937423725,
+    "emIterations": 140,
+    "states": {
+      "SIDEWAY": {
+        "mean": 0.000006259871714454686,
+        "std": 0.0008177555555894847,
+        "selfLoop": 0.9770625972901497
+      },
+      "DOWNTREND": {
+        "mean": -0.00007653730052963846,
+        "std": 0.007441563282974261,
+        "selfLoop": 0.7806398319415034
+      },
+      "DANGER_ZONE": {
+        "mean": 0.00002368055968602431,
+        "std": 0.0029587847188867443,
+        "selfLoop": 0.8910649307575481
+      },
+      "UPTREND": {
+        "mean": 0.000033447824632216956,
+        "std": 0.0015626242980763833,
+        "selfLoop": 0.9483151819096534
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2024-07-01T00:00:00.000Z",
+    "trainEnd": "2025-01-01T00:00:00.000Z",
+    "testStart": "2025-01-01T00:00:00.000Z",
+    "testEnd": "2025-02-01T00:00:00.000Z",
+    "trainCandleCount": 17664,
+    "testCandleCount": 2976,
+    "logLikelihood": 82784.13563139239,
+    "emIterations": 130,
+    "states": {
+      "DANGER_ZONE": {
+        "mean": 0.000009312108138880346,
+        "std": 0.003891198915559323,
+        "selfLoop": 0.8842475963560925
+      },
+      "DOWNTREND": {
+        "mean": -0.00028307703049006014,
+        "std": 0.010040021984357939,
+        "selfLoop": 0.7600350583683761
+      },
+      "UPTREND": {
+        "mean": 0.00004510530889767399,
+        "std": 0.0017781106270779417,
+        "selfLoop": 0.9510161712932722
+      },
+      "SIDEWAY": {
+        "mean": 0.000007618497963248254,
+        "std": 0.0010148054456875512,
+        "selfLoop": 0.9764306348825997
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2024-08-01T00:00:00.000Z",
+    "trainEnd": "2025-02-01T00:00:00.000Z",
+    "testStart": "2025-02-01T00:00:00.000Z",
+    "testEnd": "2025-03-01T00:00:00.000Z",
+    "trainCandleCount": 17664,
+    "testCandleCount": 2688,
+    "logLikelihood": 82950.95374231138,
+    "emIterations": 200,
+    "states": {
+      "UPTREND": {
+        "mean": 0.00004361739417809798,
+        "std": 0.001704466837978096,
+        "selfLoop": 0.9543966676057214
+      },
+      "DANGER_ZONE": {
+        "mean": 0.00004017032052943558,
+        "std": 0.009427772166732207,
+        "selfLoop": 0.7723078706100486
+      },
+      "SIDEWAY": {
+        "mean": 0.000006098326450864749,
+        "std": 0.003570484360255547,
+        "selfLoop": 0.898331566515245
+      },
+      "DOWNTREND": {
+        "mean": -0.0000015536782532509177,
+        "std": 0.0009722118180465831,
+        "selfLoop": 0.9831066828480997
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": true
+  },
+  {
+    "trainStart": "2024-09-01T00:00:00.000Z",
+    "trainEnd": "2025-03-01T00:00:00.000Z",
+    "testStart": "2025-03-01T00:00:00.000Z",
+    "testEnd": "2025-04-01T00:00:00.000Z",
+    "trainCandleCount": 17376,
+    "testCandleCount": 2976,
+    "logLikelihood": 82339.605460842,
+    "emIterations": 200,
+    "states": {
+      "DANGER_ZONE": {
+        "mean": 0.000017905291867638875,
+        "std": 0.0030779407658870724,
+        "selfLoop": 0.9091016661728837
+      },
+      "DOWNTREND": {
+        "mean": -0.000029033125837427854,
+        "std": 0.007098470167098934,
+        "selfLoop": 0.8043305419939089
+      },
+      "SIDEWAY": {
+        "mean": -0.000003811248148346453,
+        "std": 0.0009226982860208194,
+        "selfLoop": 0.9826267795524563
+      },
+      "UPTREND": {
+        "mean": 0.00003694527532376184,
+        "std": 0.0016090976231882385,
+        "selfLoop": 0.9551046929642523
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2024-10-01T00:00:00.000Z",
+    "trainEnd": "2025-04-01T00:00:00.000Z",
+    "testStart": "2025-04-01T00:00:00.000Z",
+    "testEnd": "2025-05-01T00:00:00.000Z",
+    "trainCandleCount": 17472,
+    "testCandleCount": 2880,
+    "logLikelihood": 82277.22720393223,
+    "emIterations": 200,
+    "states": {
+      "SIDEWAY": {
+        "mean": -0.0000033009311567449006,
+        "std": 0.0009050452413764776,
+        "selfLoop": 0.9820322491897577
+      },
+      "UPTREND": {
+        "mean": 0.000042152482871735366,
+        "std": 0.0016293022707597638,
+        "selfLoop": 0.9591310428640762
+      },
+      "DOWNTREND": {
+        "mean": -0.000021189041891884665,
+        "std": 0.007617009406192967,
+        "selfLoop": 0.822165182892116
+      },
+      "DANGER_ZONE": {
+        "mean": -0.000009172102905045404,
+        "std": 0.0031328200111533106,
+        "selfLoop": 0.91865211360902
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2024-11-01T00:00:00.000Z",
+    "trainEnd": "2025-05-01T00:00:00.000Z",
+    "testStart": "2025-05-01T00:00:00.000Z",
+    "testEnd": "2025-06-01T00:00:00.000Z",
+    "trainCandleCount": 17376,
+    "testCandleCount": 2976,
+    "logLikelihood": 81316.96012846899,
+    "emIterations": 199,
+    "states": {
+      "SIDEWAY": {
+        "mean": -0.00000666882168043436,
+        "std": 0.0009559482024734301,
+        "selfLoop": 0.9822104874625315
+      },
+      "DOWNTREND": {
+        "mean": -0.000010478059705936726,
+        "std": 0.003269875386692509,
+        "selfLoop": 0.9164896708681286
+      },
+      "UPTREND": {
+        "mean": 0.00004502966496085691,
+        "std": 0.0016987730068778331,
+        "selfLoop": 0.9633819577274968
+      },
+      "DANGER_ZONE": {
+        "mean": -0.000004634686627119685,
+        "std": 0.008022226398626521,
+        "selfLoop": 0.7946848832138546
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": true
+  },
+  {
+    "trainStart": "2024-12-01T00:00:00.000Z",
+    "trainEnd": "2025-06-01T00:00:00.000Z",
+    "testStart": "2025-06-01T00:00:00.000Z",
+    "testEnd": "2025-07-01T00:00:00.000Z",
+    "trainCandleCount": 17472,
+    "testCandleCount": 2880,
+    "logLikelihood": 82842.60252065668,
+    "emIterations": 200,
+    "states": {
+      "DOWNTREND": {
+        "mean": -0.00026214348946481606,
+        "std": 0.008425767177827597,
+        "selfLoop": 0.7783042914642753
+      },
+      "DANGER_ZONE": {
+        "mean": 0.000013294095130877466,
+        "std": 0.003281970406874703,
+        "selfLoop": 0.9103864589978065
+      },
+      "SIDEWAY": {
+        "mean": -0.0000021867595786268498,
+        "std": 0.0009627272508589115,
+        "selfLoop": 0.9788552563801682
+      },
+      "UPTREND": {
+        "mean": 0.000028820279619189848,
+        "std": 0.0016931599374998916,
+        "selfLoop": 0.9598412198309818
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2025-01-01T00:00:00.000Z",
+    "trainEnd": "2025-07-01T00:00:00.000Z",
+    "testStart": "2025-07-01T00:00:00.000Z",
+    "testEnd": "2025-08-01T00:00:00.000Z",
+    "trainCandleCount": 17376,
+    "testCandleCount": 2976,
+    "logLikelihood": 83762.69598761118,
+    "emIterations": 200,
+    "states": {
+      "SIDEWAY": {
+        "mean": -0.000006562423627377405,
+        "std": 0.0009189930666527776,
+        "selfLoop": 0.9749410619917397
+      },
+      "DOWNTREND": {
+        "mean": -0.00014893738990297227,
+        "std": 0.007409021240648194,
+        "selfLoop": 0.8313828456637352
+      },
+      "UPTREND": {
+        "mean": 0.000028932371788567015,
+        "std": 0.0028638045751489933,
+        "selfLoop": 0.9217064613493168
+      },
+      "DANGER_ZONE": {
+        "mean": 0.00002482502684486076,
+        "std": 0.0016172682055828774,
+        "selfLoop": 0.9600661793552713
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2025-02-01T00:00:00.000Z",
+    "trainEnd": "2025-08-01T00:00:00.000Z",
+    "testStart": "2025-08-01T00:00:00.000Z",
+    "testEnd": "2025-09-01T00:00:00.000Z",
+    "trainCandleCount": 17376,
+    "testCandleCount": 2976,
+    "logLikelihood": 84961.84015809391,
+    "emIterations": 183,
+    "states": {
+      "DOWNTREND": {
+        "mean": -0.00009069096046399671,
+        "std": 0.006265457622029662,
+        "selfLoop": 0.8822344856839757
+      },
+      "DANGER_ZONE": {
+        "mean": 0.000014521220888636492,
+        "std": 0.0023628050689104316,
+        "selfLoop": 0.9368132878374028
+      },
+      "SIDEWAY": {
+        "mean": -0.000004347928084255632,
+        "std": 0.0007199755158274657,
+        "selfLoop": 0.964156205172089
+      },
+      "UPTREND": {
+        "mean": 0.000022387356019990104,
+        "std": 0.001299944780629238,
+        "selfLoop": 0.9541389228964232
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2025-03-01T00:00:00.000Z",
+    "trainEnd": "2025-09-01T00:00:00.000Z",
+    "testStart": "2025-09-01T00:00:00.000Z",
+    "testEnd": "2025-10-01T00:00:00.000Z",
+    "trainCandleCount": 17664,
+    "testCandleCount": 2880,
+    "logLikelihood": 87244.07027096073,
+    "emIterations": 200,
+    "states": {
+      "UPTREND": {
+        "mean": 0.00005450726230470958,
+        "std": 0.002476893248312023,
+        "selfLoop": 0.9187591759409048
+      },
+      "DANGER_ZONE": {
+        "mean": 0.000006754344496436538,
+        "std": 0.001447192971953749,
+        "selfLoop": 0.9489153151367061
+      },
+      "DOWNTREND": {
+        "mean": -0.000054574861156966174,
+        "std": 0.006641023778971128,
+        "selfLoop": 0.852944128901685
+      },
+      "SIDEWAY": {
+        "mean": -0.000004319586013173451,
+        "std": 0.000849674766063476,
+        "selfLoop": 0.9716206149229908
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2025-04-01T00:00:00.000Z",
+    "trainEnd": "2025-10-01T00:00:00.000Z",
+    "testStart": "2025-10-01T00:00:00.000Z",
+    "testEnd": "2025-11-01T00:00:00.000Z",
+    "trainCandleCount": 17568,
+    "testCandleCount": 2976,
+    "logLikelihood": 88683.26387674685,
+    "emIterations": 188,
+    "states": {
+      "DANGER_ZONE": {
+        "mean": 0.000026861796604612565,
+        "std": 0.0020239225191245403,
+        "selfLoop": 0.9372177864534251
+      },
+      "SIDEWAY": {
+        "mean": 0.000007649044174445193,
+        "std": 0.0011116931129410102,
+        "selfLoop": 0.9512107939667778
+      },
+      "UPTREND": {
+        "mean": 0.00009438334260436645,
+        "std": 0.005451326908873559,
+        "selfLoop": 0.8286532845294086
+      },
+      "DOWNTREND": {
+        "mean": -0.0000039288982026537415,
+        "std": 0.0006377152453570432,
+        "selfLoop": 0.9642944904249187
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2025-05-01T00:00:00.000Z",
+    "trainEnd": "2025-11-01T00:00:00.000Z",
+    "testStart": "2025-11-01T00:00:00.000Z",
+    "testEnd": "2025-12-01T00:00:00.000Z",
+    "trainCandleCount": 17664,
+    "testCandleCount": 2880,
+    "logLikelihood": 89420.13889386506,
+    "emIterations": 200,
+    "states": {
+      "SIDEWAY": {
+        "mean": 0.000003820170517548047,
+        "std": 0.0006341191794788233,
+        "selfLoop": 0.965370887245344
+      },
+      "UPTREND": {
+        "mean": 0.00003250573255699872,
+        "std": 0.00199033594847711,
+        "selfLoop": 0.9310670899509118
+      },
+      "DOWNTREND": {
+        "mean": -0.0000861922182658579,
+        "std": 0.005128587262132546,
+        "selfLoop": 0.7544620946951934
+      },
+      "DANGER_ZONE": {
+        "mean": -0.0000010665926025004022,
+        "std": 0.001096124490136046,
+        "selfLoop": 0.9520809465976103
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2025-06-01T00:00:00.000Z",
+    "trainEnd": "2025-12-01T00:00:00.000Z",
+    "testStart": "2025-12-01T00:00:00.000Z",
+    "testEnd": "2026-01-01T00:00:00.000Z",
+    "trainCandleCount": 17568,
+    "testCandleCount": 2976,
+    "logLikelihood": 87992.79153584041,
+    "emIterations": 200,
+    "states": {
+      "DANGER_ZONE": {
+        "mean": 0.000004387712573922527,
+        "std": 0.0011845056683095054,
+        "selfLoop": 0.9504457145721734
+      },
+      "SIDEWAY": {
+        "mean": 0.0000012467596060138616,
+        "std": 0.0006494255342995286,
+        "selfLoop": 0.959219100820603
+      },
+      "DOWNTREND": {
+        "mean": -0.0003018789576579165,
+        "std": 0.005080493214420866,
+        "selfLoop": 0.8411266267110096
+      },
+      "UPTREND": {
+        "mean": 0.00002914818161615861,
+        "std": 0.002120044228625028,
+        "selfLoop": 0.9311570020939587
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  },
+  {
+    "trainStart": "2025-07-01T00:00:00.000Z",
+    "trainEnd": "2026-01-01T00:00:00.000Z",
+    "testStart": "2026-01-01T00:00:00.000Z",
+    "testEnd": "2026-02-01T00:00:00.000Z",
+    "trainCandleCount": 17664,
+    "testCandleCount": 1,
+    "logLikelihood": 87969.64574964318,
+    "emIterations": 200,
+    "states": {
+      "DANGER_ZONE": {
+        "mean": 0.000003474900354192151,
+        "std": 0.0012768517227324124,
+        "selfLoop": 0.9456573600714775
+      },
+      "UPTREND": {
+        "mean": 0.00002272510569384819,
+        "std": 0.0022559895933921205,
+        "selfLoop": 0.924704446092305
+      },
+      "SIDEWAY": {
+        "mean": 0.000007288285659323525,
+        "std": 0.0006663175804509752,
+        "selfLoop": 0.9590523965977201
+      },
+      "DOWNTREND": {
+        "mean": -0.00030922833499354217,
+        "std": 0.005470107760179125,
+        "selfLoop": 0.8297140910215668
+      }
+    },
+    "dangerZoneHasLowestSelfLoop": false
+  }
+]

@@ -1,0 +1,447 @@
+{
+  "generatedAt": "2026-09-10T09:27:54.046Z",
+  "adxDiComparison": {
+    "uptrend": {
+      "total": 27716,
+      "bothMatch": {
+        "count": 6616,
+        "pct": 23.870688411026123
+      },
+      "adxOver25": {
+        "count": 13690,
+        "pct": 49.393851926684945
+      },
+      "diCorrectGivenAdxOver25": {
+        "count": 6616,
+        "pct": 48.327246165084006
+      },
+      "diCorrectPure": {
+        "count": 13711,
+        "pct": 49.46962043584933
+      }
+    },
+    "downtrend": {
+      "total": 7159,
+      "bothMatch": {
+        "count": 1657,
+        "pct": 23.145690738930018
+      },
+      "adxOver25": {
+        "count": 2808,
+        "pct": 39.223355217209104
+      },
+      "diCorrectGivenAdxOver25": {
+        "count": 1657,
+        "pct": 59.009971509971514
+      },
+      "diCorrectPure": {
+        "count": 3886,
+        "pct": 54.281324207291526
+      }
+    },
+    "overall": {
+      "total": 34875,
+      "bothMatch": {
+        "count": 8273,
+        "pct": 23.721863799283156
+      },
+      "diCorrectPure": {
+        "count": 17597,
+        "pct": 50.4573476702509
+      }
+    }
+  },
+  "trendAxisDecision": {
+    "diPureDecisionThresholdPct": 65,
+    "overallDiPurePct": 50.4573476702509,
+    "verdict": "FALL_BACK_TO_FIXED_ADX_DI"
+  },
+  "confidenceStratified": {
+    "buckets": [
+      {
+        "range": [
+          50,
+          60
+        ],
+        "result": {
+          "uptrend": {
+            "total": 3511,
+            "bothMatch": {
+              "count": 782,
+              "pct": 22.272856735972656
+            },
+            "adxOver25": {
+              "count": 1624,
+              "pct": 46.2546283110225
+            },
+            "diCorrectGivenAdxOver25": {
+              "count": 782,
+              "pct": 48.15270935960591
+            },
+            "diCorrectPure": {
+              "count": 1751,
+              "pct": 49.87183138706921
+            }
+          },
+          "downtrend": {
+            "total": 904,
+            "bothMatch": {
+              "count": 244,
+              "pct": 26.991150442477874
+            },
+            "adxOver25": {
+              "count": 415,
+              "pct": 45.9070796460177
+            },
+            "diCorrectGivenAdxOver25": {
+              "count": 244,
+              "pct": 58.79518072289157
+            },
+            "diCorrectPure": {
+              "count": 543,
+              "pct": 60.06637168141593
+            }
+          },
+          "overall": {
+            "total": 4415,
+            "bothMatch": {
+              "count": 1026,
+              "pct": 23.238958097395244
+            },
+            "diCorrectPure": {
+              "count": 2294,
+              "pct": 51.959229898074746
+            }
+          }
+        }
+      },
+      {
+        "range": [
+          60,
+          70
+        ],
+        "result": {
+          "uptrend": {
+            "total": 4188,
+            "bothMatch": {
+              "count": 894,
+              "pct": 21.346704871060172
+            },
+            "adxOver25": {
+              "count": 1774,
+              "pct": 42.35912129894938
+            },
+            "diCorrectGivenAdxOver25": {
+              "count": 894,
+              "pct": 50.3945885005637
+            },
+            "diCorrectPure": {
+              "count": 2103,
+              "pct": 50.214899713467055
+            }
+          },
+          "downtrend": {
+            "total": 841,
+            "bothMatch": {
+              "count": 193,
+              "pct": 22.94887039239001
+            },
+            "adxOver25": {
+              "count": 322,
+              "pct": 38.28775267538644
+            },
+            "diCorrectGivenAdxOver25": {
+              "count": 193,
+              "pct": 59.93788819875776
+            },
+            "diCorrectPure": {
+              "count": 464,
+              "pct": 55.172413793103445
+            }
+          },
+          "overall": {
+            "total": 5029,
+            "bothMatch": {
+              "count": 1087,
+              "pct": 21.614635116325314
+            },
+            "diCorrectPure": {
+              "count": 2567,
+              "pct": 51.043945118313786
+            }
+          }
+        }
+      },
+      {
+        "range": [
+          70,
+          80
+        ],
+        "result": {
+          "uptrend": {
+            "total": 6081,
+            "bothMatch": {
+              "count": 1260,
+              "pct": 20.720276270350272
+            },
+            "adxOver25": {
+              "count": 2589,
+              "pct": 42.57523433645782
+            },
+            "diCorrectGivenAdxOver25": {
+              "count": 1260,
+              "pct": 48.66743916570104
+            },
+            "diCorrectPure": {
+              "count": 3045,
+              "pct": 50.07400098667982
+            }
+          },
+          "downtrend": {
+            "total": 894,
+            "bothMatch": {
+              "count": 218,
+              "pct": 24.384787472035793
+            },
+            "adxOver25": {
+              "count": 360,
+              "pct": 40.26845637583892
+            },
+            "diCorrectGivenAdxOver25": {
+              "count": 218,
+              "pct": 60.55555555555555
+            },
+            "diCorrectPure": {
+              "count": 481,
+              "pct": 53.80313199105146
+            }
+          },
+          "overall": {
+            "total": 6975,
+            "bothMatch": {
+              "count": 1478,
+              "pct": 21.189964157706093
+            },
+            "diCorrectPure": {
+              "count": 3526,
+              "pct": 50.55197132616488
+            }
+          }
+        }
+      },
+      {
+        "range": [
+          80,
+          90
+        ],
+        "result": {
+          "uptrend": {
+            "total": 11170,
+            "bothMatch": {
+              "count": 2492,
+              "pct": 22.309758281110117
+            },
+            "adxOver25": {
+              "count": 4816,
+              "pct": 43.11548791405551
+            },
+            "diCorrectGivenAdxOver25": {
+              "count": 2492,
+              "pct": 51.74418604651163
+            },
+            "diCorrectPure": {
+              "count": 5727,
+              "pct": 51.27126230975828
+            }
+          },
+          "downtrend": {
+            "total": 1181,
+            "bothMatch": {
+              "count": 290,
+              "pct": 24.55546147332769
+            },
+            "adxOver25": {
+              "count": 401,
+              "pct": 33.95427603725656
+            },
+            "diCorrectGivenAdxOver25": {
+              "count": 290,
+              "pct": 72.31920199501248
+            },
+            "diCorrectPure": {
+              "count": 704,
+              "pct": 59.61049957662997
+            }
+          },
+          "overall": {
+            "total": 12351,
+            "bothMatch": {
+              "count": 2782,
+              "pct": 22.524491943972148
+            },
+            "diCorrectPure": {
+              "count": 6431,
+              "pct": 52.06865840822606
+            }
+          }
+        }
+      },
+      {
+        "range": [
+          90,
+          100
+        ],
+        "result": {
+          "uptrend": {
+            "total": 2407,
+            "bothMatch": {
+              "count": 798,
+              "pct": 33.15330286663897
+            },
+            "adxOver25": {
+              "count": 1406,
+              "pct": 58.41296219360199
+            },
+            "diCorrectGivenAdxOver25": {
+              "count": 798,
+              "pct": 56.75675675675676
+            },
+            "diCorrectPure": {
+              "count": 1320,
+              "pct": 54.84004985459078
+            }
+          },
+          "downtrend": {
+            "total": 3226,
+            "bothMatch": {
+              "count": 790,
+              "pct": 24.48853068815871
+            },
+            "adxOver25": {
+              "count": 1283,
+              "pct": 39.77061376317421
+            },
+            "diCorrectGivenAdxOver25": {
+              "count": 790,
+              "pct": 61.574434918160556
+            },
+            "diCorrectPure": {
+              "count": 1912,
+              "pct": 59.268443893366396
+            }
+          },
+          "overall": {
+            "total": 5633,
+            "bothMatch": {
+              "count": 1588,
+              "pct": 28.191017219953846
+            },
+            "diCorrectPure": {
+              "count": 3232,
+              "pct": 57.37617610509498
+            }
+          }
+        }
+      }
+    ],
+    "gate": {
+      "diPureThresholdPct": 65,
+      "minSharePct": 10,
+      "highBucketsBothPass": false,
+      "highBucketsN": 17984,
+      "highBucketsSharePct": 51.567025089605735,
+      "verdict": "CONFIRMED_FALLBACK_ADX_DI"
+    }
+  },
+  "dangerZoneSelfLoopCheck": {
+    "totalMonthlyFits": 31,
+    "passCount": 2,
+    "pct": 6.451612903225806,
+    "lowestStateCounts": {
+      "UPTREND": 8,
+      "DOWNTREND": 21,
+      "SIDEWAY": 0,
+      "DANGER_ZONE": 2
+    }
+  },
+  "longestDangerZonePeriods": [
+    {
+      "start": "2024-03-06T15:00:00.000Z",
+      "end": "2024-03-07T12:45:00.000Z",
+      "bars": 88,
+      "durationHours": 22
+    },
+    {
+      "start": "2023-10-11T16:30:00.000Z",
+      "end": "2023-10-12T13:15:00.000Z",
+      "bars": 84,
+      "durationHours": 21
+    },
+    {
+      "start": "2024-03-17T23:00:00.000Z",
+      "end": "2024-03-18T16:30:00.000Z",
+      "bars": 71,
+      "durationHours": 17.75
+    },
+    {
+      "start": "2023-11-11T05:00:00.000Z",
+      "end": "2023-11-11T21:45:00.000Z",
+      "bars": 68,
+      "durationHours": 17
+    },
+    {
+      "start": "2024-07-28T07:45:00.000Z",
+      "end": "2024-07-28T23:45:00.000Z",
+      "bars": 65,
+      "durationHours": 16.25
+    },
+    {
+      "start": "2025-07-29T12:15:00.000Z",
+      "end": "2025-07-30T03:30:00.000Z",
+      "bars": 62,
+      "durationHours": 15.5
+    },
+    {
+      "start": "2025-07-21T03:30:00.000Z",
+      "end": "2025-07-21T18:15:00.000Z",
+      "bars": 60,
+      "durationHours": 15
+    },
+    {
+      "start": "2024-04-05T16:45:00.000Z",
+      "end": "2024-04-06T07:15:00.000Z",
+      "bars": 59,
+      "durationHours": 14.75
+    },
+    {
+      "start": "2023-11-06T23:15:00.000Z",
+      "end": "2023-11-07T13:30:00.000Z",
+      "bars": 58,
+      "durationHours": 14.5
+    },
+    {
+      "start": "2024-04-23T18:45:00.000Z",
+      "end": "2024-04-24T09:00:00.000Z",
+      "bars": 58,
+      "durationHours": 14.5
+    }
+  ],
+  "dangerZonePrecisionRecall": {
+    "atrAnomalyMultiple": 3,
+    "thresholdPct": 50,
+    "precisionPct": 0.7529244490402637,
+    "recallPct": 28.76543209876543,
+    "dzTotal": 30946,
+    "dzTruePositive": 233,
+    "anomalyTotal": 810,
+    "anomalyRecalled": 233,
+    "verdict": "FALLBACK_FIXED_ATR_RULE"
+  },
+  "sidewayAdxCheck": {
+    "thresholdPct": 65,
+    "pct": 68.92370572207085,
+    "sidewayTotal": 22020,
+    "sidewayAdxUnder25": 15177,
+    "verdict": "KEEP_HMM_FOR_SIDEWAY"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "totalCandles": 105012,
+  "regimeTrend": 33899,
+  "regimeSideway": 44131,
+  "regimeTransition": 26982,
+  "directionUp": 14879,
+  "directionDown": 16989,
+  "directionNeutral": 2031,
+  "entryLong": 844,
+  "entryShort": 1154,
+  "entryWait": 29870,
+  "rejectedByRR": 1864,
+  "accepted": 134
+}
