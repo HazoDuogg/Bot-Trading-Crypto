@@ -370,7 +370,7 @@ def ms(dt_str):
 
 import os
 
-CACHE_DIR = "backtest_cache"
+CACHE_DIR = "runtime/cache"
 
 
 def cached_fetch(interval, start_ms, end_ms, name):
