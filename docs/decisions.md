@@ -174,3 +174,51 @@ independent of whatever caused the original `0x80070520` reading. The
 Operational log was still disabled at this point (the elevated
 `wevtutil sl` command from the earlier note had not yet been run/had not
 persisted) - revisit if it recurs once that log is confirmed active.
+
+### 2026-10-11: real ~2h gap diagnosed as a full reboot, not a task fault
+
+A genuine gap (missing `tjl_forward_scanner_run_log.txt` entries for the
+12:10:59 PM and 12:40:59 PM ticks, plus a third `0x80070520` reading at
+11:55:57 AM that - unlike the earlier two transient reads - had no
+corresponding successful run anywhere) was diagnosed using the System
+event log (`Microsoft-Windows-Kernel-Power`, `Winlogon`):
+
+- 12:04:08 PM: Winlogon User Logoff Notification
+- 12:04:14 PM: Kernel-Power - shutdown transition initiated, **Reason:
+  Kernel API** (i.e. programmatically triggered, not a manual shutdown -
+  most likely a pending Windows Update restart)
+- 12:04:15 PM: "system has prepared for a system-initiated reboot from Active"
+- (machine fully off/rebooting)
+- 1:11:56 PM-1:12:03 PM: early boot hardware enumeration (ACPI thermal
+  zone, battery count)
+- 1:12:19 PM: Winlogon User Logon Notification (back in)
+- 1:40:59 PM: next scheduled tick fired cleanly, `exit_code=0`, matching
+  the task's normal 30-min cadence, ~28 minutes after logon
+
+**Conclusion: this was a full system reboot (~68 minutes, 12:04-1:12 PM),
+not a task or code fault.** The 11:55:57 AM `0x80070520` reading coincides
+with the session teardown that begins the logoff/shutdown sequence -
+consistent with the error's literal meaning ("logon session does not
+exist, may already have been terminated"). The task's `Principal`/
+`LogonType` were independently confirmed unchanged by the G2 move (raw
+XML diff: the only difference anywhere in the task definition, pre- vs
+post-G2, is the `Arguments` path) - this gap predates and is unrelated to
+any restructure work.
+
+**Fix applied same day**: `StartWhenAvailable` changed `false -> true`
+via `Set-ScheduledTask -Settings` (XML diff confirmed exactly one line
+added, `Principal`/`LogonType`/everything else unchanged - no account
+switch, no password stored). This lets Task Scheduler attempt a missed
+trigger once the machine becomes available again, shrinking (not
+eliminating) a future reboot's gap - it cannot make anything run while
+the machine is fully off, and `LogonType=Interactive` still requires the
+user's session to exist again.
+
+**Structural constraint this surfaces**: this is a personal machine that
+sleeps nightly and occasionally reboots (e.g. for Windows Update) - it
+cannot host the live trading phase. **The live phase needs a VPS or
+another always-on machine**, and because no machine can guarantee 100%
+uptime, **SL/TP must be placed as reduce-only orders on the exchange
+itself**, not simulated/managed only by the bot's own process - an
+exchange-side stop/TP survives the bot (or its host) being briefly
+unreachable; a bot-managed-only stop does not.
