@@ -239,3 +239,30 @@ uptime, **SL/TP must be placed as reduce-only orders on the exchange
 itself**, not simulated/managed only by the bot's own process - an
 exchange-side stop/TP survives the bot (or its host) being briefly
 unreachable; a bot-managed-only stop does not.
+
+### 2026-10-15: two known limitations found while implementing the read-compare patch
+
+1. **The write path's `open_conn()` (`db_writer.py`) auto-creates an
+   empty, schemaless `bot.db` if the file is missing** - a plain
+   `sqlite3.connect()` on a nonexistent path does this silently; the
+   subsequent `insert_run_start()`/etc. then fail with `"no such table"`,
+   caught and logged non-fatally same as any other DB error, but the
+   empty file is left behind. Confirmed this is pre-existing behavior,
+   unchanged by the read-compare patch (verified the original dual-write
+   code did the same thing before this patch existed). The new read-side
+   `open_conn_readonly()` does NOT have this problem (raises instead of
+   creating), but it only covers reads - the write path was explicitly
+   left as-is per instruction, not hardened in this patch.
+2. **`tjl_forward_scanner.py` (~line 438) sets `last_processed_bar_time`
+   to the last *fetched* bar's time unconditionally, with no comparison
+   against the previous value**: `"last_processed_bar_time":
+   bars_15m[-1]["open_time"] if bars_15m else last_processed`. If the
+   Binance API ever returned a batch of bars older than what was already
+   recorded, this would regress the stored value. Observed exactly this
+   during scratch testing - but only because stale test-fixture cache
+   (6 days old) was deliberately used against newer live state; re-tested
+   with a freshly refreshed real cache and the value correctly moved
+   forward, not backward. Not reachable in production under normal
+   operation (Binance can't return bars older than what a live fetch
+   already returned previously). Not changed - flagging as a known,
+   theoretical-only gap for awareness.

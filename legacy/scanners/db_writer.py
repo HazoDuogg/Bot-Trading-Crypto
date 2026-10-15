@@ -37,7 +37,60 @@ def open_conn(db_path=None):
     return conn
 
 
+def open_conn_readonly(db_path=None):
+    """Read-only connection via a URI with mode=ro - sqlite3.connect() on a
+    plain path silently CREATES an empty (schemaless) file if none exists,
+    which is wrong for a pure read path (a missing bot.db should fail
+    loudly enough to log, not leave a confusing empty file behind). mode=ro
+    raises sqlite3.OperationalError ("unable to open database file") if the
+    file doesn't exist, instead of creating it. Used by
+    load_state_checked()'s DB cross-check only - the write path keeps using
+    open_conn() above, unchanged, since it legitimately needs to create the
+    file on first-ever use."""
+    path = db_path or DB_PATH
+    uri = f"file:{path}?mode=ro"
+    conn = sqlite3.connect(uri, uri=True)
+    conn.execute("PRAGMA busy_timeout = 5000")
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
 _config_id_cache = {}
+
+
+def load_state_from_db(conn, config_id):
+    """Pure DB reader for scanner_state, read-only. Returns a dict in the
+    SAME shape as tjl_forward_scanner.py's load_state()'s JSON-sourced
+    dict, or None if there is no row for this config_id. Never raises on
+    a missing row (that's a normal, expected case - e.g. before the
+    first dual-write tick for a brand-new config); callers wrap the
+    connection/query itself in try/except for real DB problems."""
+    row = conn.execute(
+        """SELECT position, entry_price, entry_time_ms, initial_stop, tp_price,
+                  highest_since_entry, lowest_since_entry, last_processed_bar_time_ms,
+                  last_scan_at, last_result, should_notify, notify_reason
+           FROM scanner_state WHERE config_id = ?""",
+        (config_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    (position, entry_price, entry_time_ms, initial_stop, tp_price,
+     highest_since_entry, lowest_since_entry, last_processed_bar_time_ms,
+     last_scan_at, last_result, should_notify, notify_reason) = row
+    return {
+        "position": position,
+        "entry_price": entry_price,
+        "entry_time": entry_time_ms,
+        "initial_stop": initial_stop,
+        "tp_price": tp_price,
+        "highest_since_entry": highest_since_entry,
+        "lowest_since_entry": lowest_since_entry,
+        "last_processed_bar_time": last_processed_bar_time_ms,
+        "last_scan_at": last_scan_at,
+        "last_result": last_result,
+        "should_notify": bool(should_notify),
+        "notify_reason": notify_reason,
+    }
 
 
 def get_config_id(conn, symbol, variant):

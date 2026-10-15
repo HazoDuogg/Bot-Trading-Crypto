@@ -94,6 +94,38 @@ SYMBOLS = {
     },
 }
 
+# For load_state_checked()'s DB cross-check only - derives symbol from a
+# config's state_prefix so that function's signature can stay identical to
+# the original load_state(prefix, variant), with zero ripple to its other
+# callers (tools/compare_state.py, tools/import_history.py).
+_PREFIX_TO_SYMBOL = {cfg["state_prefix"]: symbol for symbol, cfg in SYMBOLS.items()}
+
+# Fields compared between the JSON and DB versions of a config's state.
+# Deliberately excludes last_scan_at/should_notify/notify_reason - those are
+# bookkeeping/notification metadata, not trading-relevant, and can
+# legitimately differ run-to-run without indicating a real problem.
+STATE_TRADING_FIELDS = [
+    "position", "entry_price", "entry_time", "initial_stop", "tp_price",
+    "highest_since_entry", "lowest_since_entry", "last_processed_bar_time",
+]
+
+# Float-valued fields get a tolerance-based comparison (same 1e-9 absolute
+# tolerance tools/compare_state.py already uses) - exact `!=` on floats
+# that round-tripped through JSON text <-> SQLite REAL storage can produce
+# false-positive mismatches from representation noise alone, not a real
+# disagreement. position/entry_time/last_processed_bar_time are integers
+# (epoch ms or a small enum) and use exact equality.
+STATE_FLOAT_FIELDS = {"entry_price", "initial_stop", "tp_price", "highest_since_entry", "lowest_since_entry"}
+STATE_FLOAT_TOLERANCE = 1e-9
+
+
+def _state_field_differs(field, json_val, db_val):
+    if json_val is None or db_val is None:
+        return json_val != db_val
+    if field in STATE_FLOAT_FIELDS:
+        return abs(json_val - db_val) > STATE_FLOAT_TOLERANCE
+    return json_val != db_val
+
 
 def fetch_json(url, timeout=20):
     req = urllib.request.Request(url, headers={"User-Agent": UA})
@@ -251,6 +283,74 @@ def load_state(prefix, variant):
     }
 
 
+def load_state_checked(prefix, variant):
+    """JSON-authoritative state read, cross-checked against bot.db's
+    scanner_state - read-only, additive, never raises. Returns
+    (state_dict, warning_str_or_None).
+
+    Rules (JSON stays authoritative, DB is validated, never silently
+    picked over JSON when both exist and disagree):
+      - Both present, agree on every STATE_TRADING_FIELDS field: return
+        JSON state, no warning.
+      - Both present, disagree on >=1 field: return JSON state, warning
+        naming every mismatching field with both values.
+      - JSON missing/corrupt, a real DB row exists: return DB state,
+        warning noting the fallback. Never the first_run default while a
+        DB row exists.
+      - JSON present, DB read failed/locked or confirmed no row: return
+        JSON state, no warning (DB failures are already logged to stderr
+        separately; "DB confirmed no row yet" is an expected transient
+        state, not worth a warning on every tick).
+      - JSON missing/corrupt AND no usable DB row either: delegates to
+        load_state()'s own first_run default - this is the only case
+        load_state_checked() doesn't handle itself, since load_state()
+        already does exactly this correctly.
+    """
+    json_path = state_path(prefix, variant)
+    json_state = None
+    json_ok = False
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, encoding="utf-8") as f:
+                json_state = json.load(f)
+            json_ok = True
+        except (json.JSONDecodeError, OSError):
+            json_state = None
+
+    symbol = _PREFIX_TO_SYMBOL.get(prefix)
+    db_state = None
+    db_row_exists = False
+    try:
+        import db_writer as db
+        conn = db.open_conn_readonly()
+        try:
+            config_id = db.get_config_id(conn, symbol, variant)
+            db_state = db.load_state_from_db(conn, config_id)
+            db_row_exists = db_state is not None
+        finally:
+            conn.close()
+    except Exception as e:  # noqa: BLE001 - any DB problem here degrades to JSON-only
+        print(f"load_state_checked: DB read failed for {symbol}/{variant}: {e}", file=sys.stderr)
+
+    if json_ok and db_row_exists:
+        mismatches = [
+            f"{field} json={json_state.get(field)!r} db={db_state.get(field)!r}"
+            for field in STATE_TRADING_FIELDS
+            if _state_field_differs(field, json_state.get(field), db_state.get(field))
+        ]
+        if mismatches:
+            return json_state, f"STATE MISMATCH {symbol}/{variant}: " + "; ".join(mismatches)
+        return json_state, None
+
+    if not json_ok and db_row_exists:
+        return db_state, f"JSON missing/corrupt for {symbol}/{variant}, using DB state (position={db_state.get('position')})"
+
+    if json_ok:
+        return json_state, None
+
+    return load_state(prefix, variant), None
+
+
 def save_state(prefix, variant, state):
     with open(state_path(prefix, variant), "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
@@ -263,7 +363,7 @@ def append_trade(prefix, variant, trade):
 
 def process_variant(prefix, variant_name, cfg, bars_15m, atr, daily_by_date, sma200_by_date, gate_by_date,
                      scanned_at):
-    state = load_state(prefix, variant_name)
+    state, state_check_warning = load_state_checked(prefix, variant_name)
     buffer_mult = cfg["buffer_mult"]
     exit_style = cfg["exit_style"]
     rr_mult = cfg.get("rr_mult")
@@ -455,6 +555,7 @@ def process_variant(prefix, variant_name, cfg, bars_15m, atr, daily_by_date, sma
         # written above by save_state()/append_trade().
         "closed_trades": closed_trades,
         "new_state": new_state,
+        "state_check_warning": state_check_warning,
     }
 
 
@@ -568,7 +669,7 @@ def main():
     # feature_snapshot keys are for db_write_results() below only.
     printable_results = {
         symbol: {
-            v: {k: val for k, val in r.items() if k not in ("closed_trades", "new_state", "feature_snapshot")}
+            v: {k: val for k, val in r.items() if k not in ("closed_trades", "new_state", "feature_snapshot", "state_check_warning")}
             for v, r in results.items()
         }
         for symbol, results in all_results.items()
@@ -603,6 +704,7 @@ def db_write_results(all_results, symbols_cfg, scanned_at):
     run_id = None
     error_text = None
     bars_processed = 0
+    state_warnings = []
     try:
         conn = db.open_conn()
     except Exception as e:  # noqa: BLE001
@@ -626,6 +728,9 @@ def db_write_results(all_results, symbols_cfg, scanned_at):
                 r = all_results[symbol][variant_name]
                 config_id = db.get_config_id(conn, symbol, variant_name)
                 bars_processed += 1
+
+                if r.get("state_check_warning"):
+                    state_warnings.append(r["state_check_warning"])
 
                 db.upsert_scanner_state(conn, config_id, r["new_state"])
 
@@ -653,10 +758,15 @@ def db_write_results(all_results, symbols_cfg, scanned_at):
             pass
         print(f"DB dual-write: scan-data transaction failed and was rolled back: {e}", file=sys.stderr)
     finally:
+        combined_error = error_text
+        if state_warnings:
+            warn_text = " | ".join(state_warnings)
+            combined_error = (error_text + " | " + warn_text) if error_text else warn_text
+            print(f"DB dual-write: state check warning(s) this tick: {warn_text}", file=sys.stderr)
         try:
             db.update_run_finish(
                 conn, run_id, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                exit_code=0 if error_text is None else 1, bars_processed=bars_processed, error=error_text,
+                exit_code=0 if error_text is None else 1, bars_processed=bars_processed, error=combined_error,
             )
         except Exception as e:  # noqa: BLE001
             print(f"DB dual-write: failed to update runs row at finish: {e}", file=sys.stderr)

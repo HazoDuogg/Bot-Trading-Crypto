@@ -104,3 +104,49 @@ simulation itself. Keys, as of feature_version=1:
 If this key list ever changes, bump `FEATURE_VERSION` in
 `legacy/scanners/db_writer.py` and add a new row to this table rather
 than silently changing what an existing version number means.
+
+## Read-compare policy (state reads)
+
+`load_state_checked()` in `tjl_forward_scanner.py` is the scanner's
+state-read path (replacing a bare JSON read at `process_variant()`'s
+single call site). **JSON stays authoritative; `bot.db`'s `scanner_state`
+is validated against it, never silently preferred:**
+
+- Both present, agree on every trading-relevant field (`position`,
+  `entry_price`, `entry_time`, `initial_stop`, `tp_price`,
+  `highest_since_entry`, `lowest_since_entry`, `last_processed_bar_time`
+  - float fields compared at `1e-9` tolerance, matching
+  `tools/compare_state.py`'s convention): return JSON, no warning.
+- Both present, disagree on >=1 field: return JSON anyway, write a
+  `STATE MISMATCH` warning (naming every differing field and both
+  values) to `runs.error` for that tick. `exit_code` is unaffected - a
+  mismatch is advisory, not a write failure.
+- JSON missing/corrupt, a real DB row exists: use the DB state (never
+  the `first_run` default while a DB row exists), write a warning
+  noting the fallback.
+- DB read fails (including a genuinely missing `bot.db` - see
+  `open_conn_readonly()` below) or confirms no row: use JSON, no
+  warning (an absent DB row is an expected transient, not worth
+  flagging every tick).
+- JSON missing/corrupt AND no usable DB row either: falls through to
+  the original `load_state()`'s `first_run` default - the only case
+  `load_state_checked()` doesn't special-case itself.
+
+The DB read uses `open_conn_readonly()` (`db_writer.py`), a
+`sqlite3.connect("file:<path>?mode=ro", uri=True)` connection - unlike a
+plain path, this raises instead of silently creating an empty file when
+`bot.db` doesn't exist. **This only covers the read path.** The write
+path's own `open_conn()` is unchanged and still auto-creates an empty
+file on a missing `bot.db` before failing on `"no such table"` - see
+`docs/decisions.md`'s open notes.
+
+**Self-healing, verified empirically**: `upsert_scanner_state()`'s
+`ON CONFLICT (config_id) DO UPDATE SET ...` unconditionally overwrites
+every field every tick, so a one-off `scanner_state` mismatch (DB
+tampered, DB row deleted, etc.) heals itself on the very next successful
+write - confirmed by re-running the same tampered scratch fixture twice
+and seeing the warning disappear after the first tick. **`trades` does
+NOT self-heal**: `insert_trade()`'s `ON CONFLICT (config_id, side,
+entry_time_ms) DO NOTHING` silently skips an insert when that key
+already exists - it never corrects an existing row's other fields, even
+if they're wrong.
